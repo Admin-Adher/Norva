@@ -122,6 +122,8 @@ public class PlayerActivity extends Activity {
     public static final String EXTRA_PLAYBACK_AUTH_TOKEN = "playbackAuthToken";
     public static final String EXTRA_PLAYBACK_SESSION_ID = "playbackSessionId";
     public static final String EXTRA_PLAYBACK_CLOSE_REASON = "playbackCloseReason";
+    public static final String EXTRA_MOVIE_VERSION_RECOVERY = "movieVersionRecovery";
+    public static final String EXTRA_OPEN_MOVIE_VERSION_RECOVERY = "openMovieVersionRecovery";
     public static final String ACTION_REQUEST_PLAYBACK_AUTH =
             "tv.norva.tv.action.REQUEST_PLAYBACK_AUTH";
     public static final String ACTION_APPLY_PLAYBACK_AUTH =
@@ -149,6 +151,11 @@ public class PlayerActivity extends Activity {
     private LinearLayout errorActions;
     private TextView errorTitleView;
     private TextView errorMessageView;
+    private TextView movieVersionRecoveryButton;
+    private boolean movieVersionRecoveryCapability;
+    private boolean movieVersionRecoveryBlocked = true;
+    private boolean openMovieVersionRecovery;
+    private long movieVersionRecoveryPositionSeconds;
     private LinearLayout resumePanel;
     private LinearLayout resumeActions;
     private FrameLayout choicePanel;
@@ -427,6 +434,7 @@ public class PlayerActivity extends Activity {
         }
         playbackSessionId = NativePlaybackTelemetry.boundedSessionId(
                 getIntent().getStringExtra(EXTRA_PLAYBACK_SESSION_ID));
+        movieVersionRecoveryCapability = getIntent().getBooleanExtra(EXTRA_MOVIE_VERSION_RECOVERY, false);
         getIntent().removeExtra(EXTRA_PLAYBACK_AUTH_TOKEN);
         getIntent().removeExtra(EXTRA_PLAYBACK_AUTH_CHANNEL_ID);
         getIntent().removeExtra(EXTRA_PLAYBACK_SESSION_ID);
@@ -843,6 +851,8 @@ public class PlayerActivity extends Activity {
                 handler.removeCallbacks(bufferWatchdog);
                 final int code = error.errorCode;
                 final int httpStatus = ProviderPlaybackPolicy.httpStatus(error);
+                movieVersionRecoveryBlocked = code == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
+                        || code == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT;
                 if (ProviderPlaybackPolicy.isProviderBusyHttpStatus(httpStatus)) {
                     android.util.Log.w(TAG, "Provider account busy (HTTP 458)");
                     showProviderAccountConflict(true);
@@ -1110,6 +1120,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void stopForPlaybackVerificationFailure(String title, String message) {
+        movieVersionRecoveryBlocked = true;
         recoveryGeneration++;
         clearFreshStreamRequest(true);
         handler.removeCallbacks(bufferWatchdog);
@@ -1134,6 +1145,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void showProviderAccountConflict(boolean reportProviderBusy) {
+        movieVersionRecoveryBlocked = true;
         recoveryGeneration++;
         clearFreshStreamRequest(true);
         handler.removeCallbacks(bufferWatchdog);
@@ -1237,13 +1249,20 @@ public class PlayerActivity extends Activity {
                     @Override public void run() { retryPlayback(); }
                 });
         TextView changeVersion = null;
-        if (hasAlternativeVariants()) {
+        if (hasAlternativeVariants() || movieVersionRecoveryCapability) {
             changeVersion = errorAction(
                     R.id.norva_tv_player_error_change_version_button,
-                    getString(R.string.player_change_version),
+                    getString(movieVersionRecoveryCapability ? R.string.player_other_versions : R.string.player_change_version),
                     new Runnable() {
-                        @Override public void run() { showVariantDialog(); }
+                        @Override public void run() {
+                            if (movieVersionRecoveryCapability) finishForMovieVersionRecovery();
+                            else showVariantDialog();
+                        }
                     });
+            if (movieVersionRecoveryCapability) {
+                movieVersionRecoveryButton = changeVersion;
+                changeVersion.setVisibility(View.GONE);
+            }
         }
         TextView back = errorAction(
                 R.id.norva_tv_player_error_back_button,
@@ -1254,8 +1273,11 @@ public class PlayerActivity extends Activity {
         LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(dp(190), dp(56));
         actionLp.leftMargin = dp(8);
         actionLp.rightMargin = dp(8);
+        if (movieVersionRecoveryButton != null) {
+            errorActions.addView(changeVersion, new LinearLayout.LayoutParams(actionLp));
+        }
         errorActions.addView(retry, new LinearLayout.LayoutParams(actionLp));
-        if (changeVersion != null) {
+        if (changeVersion != null && movieVersionRecoveryButton == null) {
             errorActions.addView(changeVersion, new LinearLayout.LayoutParams(actionLp));
         }
         errorActions.addView(back, new LinearLayout.LayoutParams(actionLp));
@@ -1303,6 +1325,9 @@ public class PlayerActivity extends Activity {
         errorTitleView.setText(title);
         errorMessageView.setText(message);
         errorMessageView.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE);
+        if (movieVersionRecoveryButton != null) {
+            movieVersionRecoveryButton.setVisibility(canOfferMovieVersionRecovery() ? View.VISIBLE : View.GONE);
+        }
         errorPanel.setVisibility(View.VISIBLE);
         errorPanel.bringToFront();
         if (android.os.Build.VERSION.SDK_INT >= 28) {
@@ -1311,7 +1336,10 @@ public class PlayerActivity extends Activity {
         if (errorPanel.getChildCount() > 2) {
             View actions = errorPanel.getChildAt(2);
             if (actions instanceof ViewGroup && ((ViewGroup) actions).getChildCount() > 0) {
-                ((ViewGroup) actions).getChildAt(0).requestFocus();
+                for (int index = 0; index < ((ViewGroup) actions).getChildCount(); index++) {
+                    View action = ((ViewGroup) actions).getChildAt(index);
+                    if (action.getVisibility() == View.VISIBLE) { action.requestFocus(); break; }
+                }
             }
         }
     }
@@ -1350,6 +1378,26 @@ public class PlayerActivity extends Activity {
         return variants != null && variants.length() > 1;
     }
 
+    private boolean canOfferMovieVersionRecovery() {
+        return MovieVersionRecoveryPolicy.canOffer(movieVersionRecoveryCapability, itemType,
+                sourceId, itemId, playbackSessionId, true, movieVersionRecoveryBlocked);
+    }
+
+    private void finishForMovieVersionRecovery() {
+        if (openMovieVersionRecovery || !canOfferMovieVersionRecovery()
+                || errorPanel == null || errorPanel.getVisibility() != View.VISIBLE) return;
+        movieVersionRecoveryPositionSeconds = Math.max(recoverPositionMs(), pendingRecoveryPositionMs) / 1000L;
+        if (!firstFrameRendered) movieVersionRecoveryPositionSeconds = Math.max(movieVersionRecoveryPositionSeconds, resumeSeconds);
+        openMovieVersionRecovery = true;
+        recoveryGeneration++;
+        clearFreshStreamRequest(true);
+        handler.removeCallbacks(bufferWatchdog);
+        handler.removeCallbacks(healthyRecoveryReset);
+        stopPlaybackHeartbeat();
+        if (player != null) player.stop();
+        finish();
+    }
+
     private boolean dispatchModalKey(int code, ViewGroup actions, Runnable backAction) {
         if (code == KeyEvent.KEYCODE_BACK) {
             if (backAction != null) backAction.run();
@@ -1369,8 +1417,13 @@ public class PlayerActivity extends Activity {
                 }
             }
             int delta = code == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1;
-            int target = (focused + delta + actions.getChildCount()) % actions.getChildCount();
-            actions.getChildAt(target).requestFocus();
+            for (int step = 1; step <= actions.getChildCount(); step++) {
+                int target = (focused + delta * step + actions.getChildCount()) % actions.getChildCount();
+                View candidate = actions.getChildAt(target);
+                if (candidate.getVisibility() == View.VISIBLE && candidate.isEnabled()) {
+                    candidate.requestFocus(); break;
+                }
+            }
             return true;
         }
         if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER) {
@@ -3987,6 +4040,15 @@ public class PlayerActivity extends Activity {
                 if (data == null) data = new android.content.Intent();
                 data.putExtra(EXTRA_PLAYBACK_AUTH_CHANNEL_ID, playbackAuthChannelId);
             }
+            if (openMovieVersionRecovery) {
+                if (data == null) data = new android.content.Intent();
+                data.putExtra("sourceId", sourceId);
+                data.putExtra("itemType", itemType);
+                data.putExtra("itemId", itemId);
+                data.putExtra("positionSeconds", movieVersionRecoveryPositionSeconds);
+                data.putExtra("retryPlayback", false);
+                data.putExtra(EXTRA_OPEN_MOVIE_VERSION_RECOVERY, true);
+            }
             // Return the exact server-owned session even when playback never
             // reached a first frame. MainActivity durably delivers it to the
             // trusted WebView and gates any replacement resolver until expiry
@@ -4003,6 +4065,7 @@ public class PlayerActivity extends Activity {
 
     private String playbackCloseReason() {
         if (endedNaturally) return "ended";
+        if (openMovieVersionRecovery) return "variant_change";
         if (pendingVariantStreamId != null && !pendingVariantStreamId.isEmpty()) {
             return "variant_change";
         }

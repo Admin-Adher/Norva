@@ -20,6 +20,7 @@ public class ProviderVersionCardsInstrumentedTest {
         + "<script src='/js/i18n.js'></script><script src='/js/utils/mediaUtils.js'></script>"
         + "<script src='/js/pages/MoviesPage.js'></script><script src='/js/pages/SeriesPage.js'></script>"
         + "<script src='/js/pages/WatchPage.js'></script>"
+        + "<script src='/js/utils/playbackRefusals.js'></script><script src='/js/components/NorvaModal.js'></script>"
         + "<script src='/js/icons.js'></script><script src='/js/pages/HomePage.js'></script><script src='/js/utils/GenreRails.js'></script>"
         + "<script src='/provider-version-cards.js'></script><script src='/catalog-language-surfaces.js'></script></body></html>";
 
@@ -36,6 +37,8 @@ public class ProviderVersionCardsInstrumentedTest {
     @Test public void portraitCatalogueSurfacesAtBothTextZooms() throws Exception { verify(360, 800, true); }
     @Test public void landscapeCatalogueSurfacesAtBothTextZooms() throws Exception { verify(844, 390, true); }
     @Test public void restoredFicheUsesFreshEvidence() throws Exception { verify(360, 800, false, true); }
+    @Test public void refusedPlaybackRecoveryAtBothTextZooms() throws Exception { verify(360, 800, false, false, true); }
+    @Test public void landscapeRefusedPlaybackRecoveryAtBothTextZooms() throws Exception { verify(844, 390, false, false, true); }
 
     private void verify(int width, int height) throws Exception { verify(width, height, false); }
 
@@ -44,6 +47,10 @@ public class ProviderVersionCardsInstrumentedTest {
     }
 
     private void verify(int width, int height, boolean catalogue, boolean restoration) throws Exception {
+        verify(width, height, catalogue, restoration, false);
+    }
+
+    private void verify(int width, int height, boolean catalogue, boolean restoration, boolean recovery) throws Exception {
         android.app.Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         android.content.Context context = instrumentation.getTargetContext();
         AtomicReference<WebView> holder = new AtomicReference<>();
@@ -75,12 +82,13 @@ public class ProviderVersionCardsInstrumentedTest {
             assertTrue("Version renderer assets loaded", loaded.await(45, TimeUnit.SECONDS));
             for (int zoom : new int[] {100, 130}) {
                 instrumentation.runOnMainSync(() -> holder.get().getSettings().setTextZoom(zoom));
-                for (String locale : restoration ? new String[] {"fr"} : new String[] {"fr", "en", "hi", "ar", "bn", "fil"}) {
-                    for (String kind : catalogue ? new String[] {"movies", "series", "home", "genres", "movie-detail", "series-detail"} : new String[] {"movie", "series"}) {
+                for (String locale : restoration ? new String[] {"fr"} : recovery ? new String[] {"fr", "en"} : new String[] {"fr", "en", "hi", "ar", "bn", "fil"}) {
+                    for (String kind : recovery ? new String[] {"movie"} : catalogue ? new String[] {"movies", "series", "home", "genres", "movie-detail", "series-detail"} : new String[] {"movie", "series"}) {
                         String fixture = catalogue ? "CatalogLanguageQA" : "ProviderVersionCardsQA";
                         evaluate(instrumentation, holder.get(), "window.versionResult='pending';(async()=>{try{"
                             + "await NorvaI18n.setPreference('"+locale+"');"
-                            + (restoration ? "await ProviderVersionCardsQA.verifyRestoration('"+kind+"');"
+                            + (recovery ? "await ProviderVersionCardsQA.verifyPlaybackRecovery();await ProviderVersionCardsQA.verifyNativePlaybackRecovery();"
+                                : restoration ? "await ProviderVersionCardsQA.verifyRestoration('"+kind+"');"
                                 : "await "+fixture+".mount('"+kind+"'"+(catalogue ? ",9" : "")+");"
                                     + "await new Promise(r=>setTimeout(r,150));"+fixture+".verify();")
                             + "const audioPage=Object.create(WatchPage.prototype);audioPage.content={rawTitle:'ES | Example'};"

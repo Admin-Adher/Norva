@@ -2013,6 +2013,7 @@ class WatchPage {
         // cooldown can yield. A later click/Back can now stale this invocation
         // instead of letting it resume and declare itself newest after the wait.
         const playbackAttemptId = this.beginPlaybackAttempt();
+        this._fileRefusalScope = window.NorvaPlaybackRefusals?.capture(this.app);
         const playbackResolveSignal = this.playbackResolveSignalForAttempt(playbackAttemptId);
         this.canonicalizeVodPlaybackContent(content);
         this._subtitleSwitchRequestId += 1;
@@ -2121,7 +2122,13 @@ class WatchPage {
         // Precedence: explicit seek target (session restore) > server answer (even an answered 0
         // — finished/removed elsewhere restarts honestly) > transmitted card offset > durable
         // local store (offline / older backend only).
-        const explicitSeekTarget = Number(
+        const explicitRecoveryResume = content.explicitRecoveryResume === true
+            && Number.isFinite(Number(content.resumeTime)) && Number(content.resumeTime) >= 0
+            && Number(content.resumeTime) <= 86400;
+        // One user choice, including "start from the beginning", outranks stale
+        // history for this invocation. Do not persist the override in snapshots.
+        delete content.explicitRecoveryResume;
+        const explicitSeekTarget = explicitRecoveryResume || Number(
             playbackMetadata.resumeTarget ?? playbackMetadata.resume_target ??
             playbackMetadata.seekOffset ?? playbackMetadata.startOffset ?? 0
         ) > 0;
@@ -2137,7 +2144,7 @@ class WatchPage {
                 requestedResumeTime = server.position;
             }
         }
-        if (!serverAnswered && !(requestedResumeTime > 0) && content?.id && content?.sourceId) {
+        if (!explicitRecoveryResume && !serverAnswered && !(requestedResumeTime > 0) && content?.id && content?.sourceId) {
             const stored = this._loadResumePosition(content);
             if (stored > 0) {
                 requestedResumeTime = stored;
@@ -3704,8 +3711,10 @@ class WatchPage {
     /**
      * Stop and cleanup current transcode session
      */
-    async stopTranscodeSession() {
+    async stopTranscodeSession({ strict = false } = {}) {
         const sessionIds = new Set(this.activeSessionIds);
+        this._unclosedTranscodeSessionIds ||= new Set();
+        if (strict) this._unclosedTranscodeSessionIds.forEach(id => sessionIds.add(id));
         if (this.currentSessionId) {
             sessionIds.add(this.currentSessionId);
         }
@@ -3722,11 +3731,15 @@ class WatchPage {
                 throw new Error(`Failed to stop session ${sessionId}: ${res.status}`);
             }
         })).then(results => {
-            results.forEach(result => {
+            results.forEach((result, index) => {
+                const id = [...sessionIds][index];
                 if (result.status === 'rejected') {
+                    this._unclosedTranscodeSessionIds.add(id);
+                    if (strict) this.activeSessionIds.add(id);
                     console.error(result.reason?.message || 'Failed to stop transcode session');
-                }
+                } else this._unclosedTranscodeSessionIds.delete(id);
             });
+            if (strict && results.some(result => result.status === 'rejected')) throw new Error('Playback could not be closed');
         });
     }
 
@@ -4035,8 +4048,11 @@ class WatchPage {
     }
 
     async stopCloudPlaybackSessions(options = {}) {
+        const { strict = false, ...expireOptions } = options;
         this.stopCloudPlaybackHeartbeat();
         const sessionIds = new Set(this.activeCloudPlaybackSessionIds);
+        this._unclosedCloudPlaybackSessionIds ||= new Set();
+        if (strict) this._unclosedCloudPlaybackSessionIds.forEach(id => sessionIds.add(id));
         if (this.currentCloudPlaybackSessionId) {
             sessionIds.add(this.currentCloudPlaybackSessionId);
         }
@@ -4047,24 +4063,41 @@ class WatchPage {
         const playbackApi = cloud?.token
             ? cloud.playback
             : (cloud?.deviceToken ? cloud.device?.playback : null);
-        if (typeof playbackApi?.expireSession !== 'function') return;
+        if (typeof playbackApi?.expireSession !== 'function') {
+            if (strict) throw new Error('Playback could not be closed');
+            return;
+        }
 
         this.currentCloudPlaybackSessionId = null;
         this.activeCloudPlaybackSessionIds.clear();
 
         await Promise.allSettled(Array.from(sessionIds).map(async (sessionId) => {
             console.log('[WatchPage] Expiring cloud playback session:', sessionId);
-            await playbackApi.expireSession(sessionId, options);
-        })).then(results => {
-            results.forEach(result => {
-                if (result.status === 'rejected') {
-                    console.error(result.reason?.message || 'Failed to expire cloud playback session');
+            try {
+                const result = await playbackApi.expireSession(sessionId, expireOptions);
+                if (strict && (String(result?.session?.id || '') !== String(sessionId)
+                    || result?.session?.status !== 'expired'
+                    || !Number.isInteger(result?.gatewayErrors) || result.gatewayErrors !== 0)) {
+                    throw new Error('Playback close was not confirmed');
                 }
+            } catch (error) {
+                // A repeated exact close may find the owned session already gone.
+                if (!strict || Number(error?.status) !== 404) throw error;
+            }
+        })).then(results => {
+            results.forEach((result, index) => {
+                const id = [...sessionIds][index];
+                if (result.status === 'rejected') {
+                    this._unclosedCloudPlaybackSessionIds.add(id);
+                    if (strict) this.activeCloudPlaybackSessionIds.add(id);
+                    console.error(result.reason?.message || 'Failed to expire cloud playback session');
+                } else this._unclosedCloudPlaybackSessionIds.delete(id);
             });
+            if (strict && results.some(result => result.status === 'rejected')) throw new Error('Playback could not be closed');
         });
     }
 
-    async releasePlaybackPipelineForRetry() {
+    async releasePlaybackPipelineForRetry({ strict = false } = {}) {
         try {
             this.cancelPendingHlsAudioSwitch(false);
             clearTimeout(this._pendingLocalSeekTimer);
@@ -4090,12 +4123,14 @@ class WatchPage {
                 }
             }
 
-            await Promise.allSettled([
-                this.stopTranscodeSession(),
-                this.stopCloudPlaybackSessions()
+            const results = await Promise.allSettled([
+                this.stopTranscodeSession({ strict }),
+                this.stopCloudPlaybackSessions({ strict })
             ]);
+            if (strict && results.some(result => result.status === 'rejected')) throw new Error('Playback could not be closed');
         } catch (error) {
             console.warn('[WatchPage] Playback retry cleanup failed:', error?.message || error);
+            if (strict) throw error;
         }
     }
 
@@ -8282,6 +8317,10 @@ class WatchPage {
         const playbackSuperseded = this.isPlaybackSupersededError(safeMessage);
         const providerBusy = !playbackSuperseded && this.isProviderBusyError(safeMessage);
         const providerFileRefused = /\bPROVIDER_FILE_REFUSED\b/i.test(safeMessage);
+        if (providerFileRefused && this.content?.type === 'movie') {
+            this.showRefusedVersionRecovery(errorEl, videoSection);
+            return;
+        }
         const providerBlocked = !providerBusy && this.isConnectionLimitError(safeMessage);
         const serverRecovery = !playbackSuperseded
             && !providerBusy
@@ -8340,6 +8379,70 @@ class WatchPage {
         [500, 1500, 4000].forEach(delay => {
             setTimeout(() => this.markPlaybackUsable(), delay);
         });
+    }
+
+    showRefusedVersionRecovery(errorEl, videoSection) {
+        this.clearPlaybackErrorRefreshTimer();
+        window.NorvaPlaybackRefusals?.markRefused(this.content, this.app, this._fileRefusalScope);
+        const t = (key, defaultValue) => globalThis.NorvaI18n?.t(key, { defaultValue }) ?? defaultValue;
+        errorEl.innerHTML = `<div class="watch-error-box watch-error-file-refused">
+            <p class="watch-error-title">${this.escapeHtml(t('ui_playback_version_unavailable_title', 'This version is unavailable'))}</p>
+            <p class="watch-error-msg">${this.escapeHtml(t('ui_playback_version_unavailable_message', 'Access to this copy was refused.'))}</p>
+            <p class="watch-error-refresh" id="watch-error-version-status" role="status" aria-live="polite"></p>
+            <div class="watch-error-actions">
+                <button type="button" class="watch-error-refresh-btn" id="watch-error-versions-btn">${this.escapeHtml(t('ui_playback_version_other_versions', 'Other versions'))}</button>
+                <button type="button" class="watch-error-refresh-btn" id="watch-error-refresh-btn">${this.escapeHtml(t('ui_playback_version_retry', 'Retry this version'))}</button>
+                <button type="button" class="watch-error-refresh-btn" id="watch-error-details-btn">${this.escapeHtml(t('ui_playback_version_details', 'Back to details'))}</button>
+            </div></div>`;
+        errorEl.setAttribute('role', 'alert');
+        errorEl.classList.remove('hidden');
+        videoSection?.classList.add('has-playback-error');
+        document.getElementById('watch-error-versions-btn')?.addEventListener('click', () => this.openRefusedVersionDetails(true));
+        document.getElementById('watch-error-details-btn')?.addEventListener('click', () => this.openRefusedVersionDetails(false));
+        document.getElementById('watch-error-refresh-btn')?.addEventListener('click', () => {
+            if (this._versionRecoveryBusy) return;
+            this._nextProductRetrySource = 'manual';
+            this.retryPlaybackInPlace();
+        });
+        document.getElementById('watch-error-versions-btn')?.focus?.();
+    }
+
+    async openRefusedVersionDetails(focusVersions = true) {
+        if (this._versionRecoveryBusy || this.app?.currentPage !== 'watch' || this.content?.type !== 'movie') return false;
+        const content = this.content;
+        const attempt = this._playbackAttemptId;
+        const owner = this.app.currentUser;
+        const ownerId = owner?.id;
+        const current = () => this.app.currentPage === 'watch' && this.content === content
+            && this._playbackAttemptId === attempt && this.app.currentUser === owner && this.app.currentUser?.id === ownerId;
+        const position = Math.max(0, Math.floor(Number(this.getResumeSnapshotPosition()) || 0));
+        const buttons = ['watch-error-versions-btn', 'watch-error-refresh-btn', 'watch-error-details-btn']
+            .map(id => document.getElementById(id)).filter(Boolean);
+        const status = document.getElementById('watch-error-version-status');
+        this._versionRecoveryBusy = true;
+        buttons.forEach(button => { button.disabled = true; });
+        if (status) status.textContent = globalThis.NorvaI18n?.t('ui_playback_version_lookup_loading', { defaultValue: 'Loading other versions…' }) ?? 'Loading other versions…';
+        try {
+            // Close the refused lane before opening even the catalogue picker.
+            // The eventual explicit selection uses MoviesPage's ordinary drain.
+            await this.releasePlaybackPipelineForRetry({ strict: true });
+            if (!current()) return false;
+            await this.waitForProviderSlotRelease(800);
+            if (!current()) return false;
+            const opened = await this.app.pages.movies.openPlaybackRecovery({
+                sourceId: content.sourceId, stream_id: content.id,
+            }, { focusVersions, position, isCurrent: current });
+            if (!opened && current() && status) {
+                status.textContent = globalThis.NorvaI18n?.t('ui_playback_version_lookup_failed', { defaultValue: 'The versions could not be loaded. Please try again.' }) ?? 'The versions could not be loaded. Please try again.';
+            }
+            return opened;
+        } catch (_) {
+            if (current() && status) status.textContent = globalThis.NorvaI18n?.t('ui_playback_version_lookup_failed', { defaultValue: 'The versions could not be loaded. Please try again.' }) ?? 'The versions could not be loaded. Please try again.';
+            return false;
+        } finally {
+            this._versionRecoveryBusy = false;
+            if (current()) buttons.forEach(button => { button.disabled = false; });
+        }
     }
 
     hidePlaybackError() {
@@ -8636,6 +8739,7 @@ class WatchPage {
         // presentation. Keep loading/error state until rVFC, the strict playing
         // fallback, or two advancing timeupdates confirm active presentation.
         if (!this._firstFrameReported) return;
+        window.NorvaPlaybackRefusals?.clear(this.content, this.app, this._fileRefusalScope);
         if (this._rebufferPresentationActive) {
             // Metadata/canplay and a final queued timeupdate also arrive while
             // starved. Only playing or real forward progress ends rebuffering.

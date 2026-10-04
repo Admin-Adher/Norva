@@ -45,6 +45,8 @@ public final class ProviderBusyInstrumentedTest {
                     .putExtra(PlayerActivity.EXTRA_URL, server.url())
                     .putExtra(PlayerActivity.EXTRA_TITLE, "Norva provider conflict gate")
                     .putExtra(PlayerActivity.EXTRA_ITEM_TYPE, "movie")
+                    .putExtra(PlayerActivity.EXTRA_SOURCE_ID, "fixture-source")
+                    .putExtra(PlayerActivity.EXTRA_MOVIE_VERSION_RECOVERY, true)
                     .putExtra(PlayerActivity.EXTRA_ITEM_ID, "provider-busy-fixture")
                     .putExtra(PlayerActivity.EXTRA_PLAYBACK_SESSION_ID,
                             UUID.randomUUID().toString());
@@ -62,6 +64,8 @@ public final class ProviderBusyInstrumentedTest {
                     target.getString(R.string.player_error_provider_in_use_title),
                     12_000L);
             assertNotNull(title);
+            assertEquals("A provider-account conflict must not offer another version",
+                    View.GONE, activity.findViewById(R.id.norva_player_change_version_button).getVisibility());
             assertEquals(View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE,
                     ((TextView) activity.findViewById(R.id.norva_player_error_message))
                             .getAccessibilityLiveRegion());

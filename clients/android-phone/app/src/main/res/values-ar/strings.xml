@@ -25,6 +25,7 @@
     <string name="player_state_format_message">يستخدم هذا الإصدار تنسيقًا لا يستطيع جهازك فك تشفيره. جرب إصدارًا آخر إذا كان متاحًا.</string>
     <string name="player_state_generic_terminal_message">توقف التشغيل بشكل غير متوقع. حاول مرة أخرى أو ارجع إلى العنوان.</string>
     <string name="player_change_version">تغيير الإصدار</string>
+    <string name="player_other_versions">إصدارات أخرى</string>
     <string name="player_state_accessibility">%1$s. %2$s</string>
     <string name="player_tracks_button">الصوت والترجمة</string>
     <string name="player_tracks_title">الصوت والترجمة</string>

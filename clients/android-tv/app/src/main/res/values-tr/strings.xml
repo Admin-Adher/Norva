@@ -108,4 +108,5 @@
     <string name="native_standalone_hint">Bağımsız: Norva\'yı tamamen bu TV\'de çalıştırın. Bu cihazda bir hesap istemiyorsanız bunu kullanın. Oynatma, TV\'nin yerel kod çözücüsünü kullanır.</string>
     <string name="native_connection_tip">Gelişmiş bağlantı seçenekleri: MENÜ\'ye basın veya Ana Sayfa\'da GERİ tuşuna basın ve \"Bağlantı ayarları\"nı seçin.</string>
     <string name="native_setup_failed">Norva bu TV\'de başlatılamadı. Tekrar deneyin.</string>
+    <string name="player_other_versions">Diğer sürümler</string>
 </resources>

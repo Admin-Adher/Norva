@@ -150,7 +150,7 @@ test('sequential 10-title contract: replacement always expires the previous sess
   // overlap two provider slots on the same mono-compte account.
   const play = section(watchSrc, 'async play(content, streamUrl, playback = {}) {', '\n    async ');
   const stopFn = section(watchSrc, 'stop({ enqueueStoryboard = true, preservePlaybackResolutionAttempt = false } = {}) {', '\n    // === Playback Controls ===');
-  const expire = section(watchSrc, 'async stopCloudPlaybackSessions(options = {}) {', 'async releasePlaybackPipelineForRetry() {');
+  const expire = section(watchSrc, 'async stopCloudPlaybackSessions(options = {}) {', 'async releasePlaybackPipelineForRetry(');
   const create = section(edgeSrc, 'async function createPlaybackSessionCore(', 'async function createPlaybackSession(');
   const loadVideo = section(watchSrc, 'async loadVideo(url, options = {}) {', '\n    setVolumeFromStorage() {');
 
@@ -158,7 +158,7 @@ test('sequential 10-title contract: replacement always expires the previous sess
   assert.ok(play.indexOf('await this.stop({ preservePlaybackResolutionAttempt: true })') < play.indexOf('await this.waitForProviderSlotRelease(2500)'));
   assert.ok(play.indexOf('await this.waitForProviderSlotRelease(2500)') < play.indexOf('resolved = await streamUrlResolver({'));
   assert.match(stopFn, /this\.stopCloudPlaybackSessions\(\)/);
-  assert.match(expire, /expireSession\(sessionId, options\)/);
+  assert.match(expire, /expireSession\(sessionId, expireOptions\)/);
   assert.match(create, /claim_cloud_playback_session/);
   assert.doesNotMatch(loadVideo, /waitForProviderSlotRelease\(2500\)/);
   assert.doesNotMatch(

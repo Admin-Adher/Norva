@@ -238,6 +238,11 @@
     // phone where the TV-only D-pad module that defines it stays disabled.
     window.__norvaHandleBack = function () {
         try {
+            const nativeRefusal = document.querySelector('[data-native-playback-refusal]');
+            if (typeof nativeRefusal?.__norvaCloseNativeRecovery === 'function') {
+                nativeRefusal.__norvaCloseNativeRecovery();
+                return 'handled';
+            }
             // Region suggestion popup.
             const region = document.getElementById('norva-region-prompt');
             if (region) { region.remove(); return 'handled'; }
@@ -746,11 +751,83 @@
         let activeNativeIntentRoute = '';
         let activeNativeIntentClaim = '';
         let activeNativeIntentClaimConsumed = true;
+        let nativeMovieVersionRecovery = null;
         let lastNativeIntentAt = 0;
         let nativePlaybackStartFailure = null;
         const dismissNativePlaybackStartFailure = () => {
             try { nativePlaybackStartFailure?.dismiss?.(); } catch (_) { /* best-effort */ }
             nativePlaybackStartFailure = null;
+        };
+        const showNativeFileRefusal = (owner, content, position, scope, isCurrent, retry) => {
+            const app = window.app;
+            if (typeof window.NorvaModal?.installHygiene !== 'function'
+                || typeof app?.pages?.movies?.openPlaybackRecovery !== 'function') return false;
+            const t = (key, fallback) => globalThis.NorvaI18n?.t(key, { defaultValue: fallback }) ?? fallback;
+            window.NorvaPlaybackRefusals?.markRefused(content, app, scope);
+            const overlay = document.createElement('div');
+            overlay.className = 'norva-modal-overlay active';
+            overlay.setAttribute('role', 'dialog');
+            overlay.setAttribute('aria-modal', 'true');
+            overlay.setAttribute('data-native-playback-refusal', 'true');
+            overlay.setAttribute('aria-label', t('ui_playback_version_unavailable_title', 'This version is unavailable'));
+            overlay.tabIndex = -1;
+            const card = document.createElement('div'); card.className = 'norva-modal'; overlay.appendChild(card);
+            const title = document.createElement('div'); title.className = 'norva-modal-title';
+            title.textContent = t('ui_playback_version_unavailable_title', 'This version is unavailable'); card.appendChild(title);
+            const message = document.createElement('p'); message.className = 'norva-modal-message';
+            message.textContent = t('ui_playback_version_unavailable_message', 'Access to this copy was refused.'); card.appendChild(message);
+            const status = document.createElement('p'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite'); card.appendChild(status);
+            const actions = document.createElement('div'); actions.className = 'watch-error-actions'; card.appendChild(actions);
+            let busy = false, dismissed = false;
+            const close = () => {
+                if (dismissed) return;
+                dismissed = true; overlay.classList.remove('active'); overlay.remove();
+            };
+            overlay.__norvaCloseNativeRecovery = close;
+            const current = () => !dismissed && isCurrent();
+            const addAction = (action, key, fallback, callback) => {
+                const button = document.createElement('button'); button.type = 'button';
+                button.className = 'norva-modal-btn'; button.dataset.nativeRecoveryAction = action;
+                button.textContent = t(key, fallback);
+                button.addEventListener('click', async () => {
+                    if (busy || !current()) return;
+                    busy = true; [...actions.children].forEach(child => { child.disabled = true; });
+                    status.textContent = t('ui_playback_version_lookup_loading', 'Loading other versions…');
+                    try {
+                        // Use the strict close primitive. The ordinary cleanup's
+                        // compatibility catch must not authorize a new resolution.
+                        await nativePlaybackCloseBarrier;
+                        const sessions = new Set(owner.activeCloudPlaybackSessionIds || []);
+                        for (const id of owner._unclosedCloudPlaybackSessionIds || []) sessions.add(id);
+                        if (owner.currentCloudPlaybackSessionId) sessions.add(owner.currentCloudPlaybackSessionId);
+                        for (const [id, entry] of nativeVodCloudSessions) if (entry.owner === owner) sessions.add(id);
+                        for (const id of sessions) {
+                            await publishNativePlaybackCloseTask(id, owner, nativeVodCleanupByOwner);
+                            owner._unclosedCloudPlaybackSessionIds?.delete?.(id);
+                        }
+                        if (!current()) return;
+                        const done = await callback();
+                        if (done !== false) close();
+                        else if (current()) status.textContent = t('ui_playback_version_lookup_failed', 'The versions could not be loaded. Please try again.');
+                    } catch (_) {
+                        if (current()) status.textContent = t('ui_playback_version_lookup_failed', 'The versions could not be loaded. Please try again.');
+                    } finally {
+                        busy = false;
+                        if (current()) [...actions.children].forEach(child => { child.disabled = false; });
+                    }
+                });
+                actions.appendChild(button); return button;
+            };
+            const openDetails = focusVersions => app.pages.movies.openPlaybackRecovery({
+                sourceId: content.sourceId, stream_id: content.id
+            }, { position, focusVersions, isCurrent: current });
+            const other = addAction('versions', 'ui_playback_version_other_versions', 'Other versions', () => openDetails(true));
+            addAction('retry', 'ui_playback_version_retry', 'Retry this version', () => { close(); return retry(); });
+            addAction('details', 'ui_playback_version_details', 'Back to details', () => openDetails(false));
+            document.body.appendChild(overlay);
+            window.NorvaModal.installHygiene(overlay, { onClose: close, initialFocus: other });
+            nativePlaybackStartFailure = { dismiss: close };
+            return true;
         };
         const currentNativeRoute = () => {
             try {
@@ -767,6 +844,7 @@
                 && route === activeNativeIntentRoute
                 && now - lastNativeIntentAt < 1500) return false;
             dismissNativePlaybackStartFailure();
+            nativeMovieVersionRecovery = null;
             abortNativeLivePreparation(activeNativeIntentClaim);
             retireNativeRecoveryToken(activeNativeIntentKey);
             activeNativeIntentKey = key;
@@ -791,6 +869,36 @@
         };
         window.__norvaNative.beginPlaybackIntent = beginNativePlaybackIntent;
         window.__norvaNative.consumePlaybackIntent = consumeNativePlaybackIntent;
+        // New native shells call this only after their exact-session close ACK.
+        // Verify that proof again here: a stale Activity, account switch or failed
+        // close cannot open a replacement. This hand-off performs catalogue I/O
+        // only; choosing another file and its resume point remains explicit.
+        window.__norvaNative.onMovieVersionRecovery = async (sourceId, itemType, itemId, positionSeconds) => {
+            const recovery = nativeMovieVersionRecovery;
+            const key = nativeProgressKey(sourceId, itemType, itemId);
+            if (itemType !== 'movie' || !recovery || recovery.key !== key
+                || recovery.route !== currentNativeRoute()
+                || !recovery.owner || recovery.owner !== window.app?.currentUser || window.app?._signOutInFlight
+                || recovery.accountId !== nativePreferenceScope(null).accountId
+                || !completedNativePlaybackCloses.has(recovery.sessionId)) return false;
+            nativeMovieVersionRecovery = null;
+            const app = window.app;
+            if (typeof app?.pages?.movies?.openPlaybackRecovery !== 'function') return false;
+            const position = Number(positionSeconds);
+            const generation = nativeIntentGeneration;
+            return app.pages.movies.openPlaybackRecovery({
+                sourceId: String(sourceId), stream_id: String(itemId)
+            }, {
+                focusVersions: true,
+                position: Number.isFinite(position) ? Math.max(0, position) : 0,
+                // Generic native HTTP/decode errors do not prove a file refusal.
+                // No refused-file memo is created by this callback.
+                isCurrent: () => recovery.accountId === nativePreferenceScope(null).accountId
+                    && recovery.owner === app.currentUser && !app._signOutInFlight
+                    && generation === nativeIntentGeneration
+                    && (currentNativeRoute() === recovery.route || app.currentPage === 'movies')
+            });
+        };
         // Leaving the current route while a delayed retry is pending must never
         // resurrect the previous channel/title over the page the viewer chose.
         // Only invalidate when the route actually differs from the launch route:
@@ -1071,6 +1179,16 @@
             const resume = Math.max(0, Math.floor(Number(resumeSeconds) || 0));
             const fb = fallbackUrl || '';
             if (meta && typeof bridge.playVideoJson === 'function') {
+                const movieVersionRecovery = meta.itemType === 'movie'
+                    && Boolean(sessionId)
+                    && Boolean(window.app?.currentUser?.id)
+                    && typeof window.app?.pages?.movies?.openPlaybackRecovery === 'function';
+                nativeMovieVersionRecovery = movieVersionRecovery ? {
+                    key: nativeProgressKey(meta.sourceId, meta.itemType, meta.itemId),
+                    accountId: nativePreferenceScope(null).accountId,
+                    owner: window.app.currentUser,
+                    route: currentNativeRoute(), sessionId
+                } : null;
                 // Newest APK: one JSON payload. Episode navigation carries labels
                 // only — never adjacent provider URLs — so native Previous/Next
                 // cannot open a second mono-session stream before hand-off.
@@ -1086,6 +1204,7 @@
                     itemType: meta.itemType || '',
                     itemId: String(meta.itemId || ''),
                     resumeSeconds: resume,
+                    movieVersionRecovery,
                     poster,
                     previousTitle: extras?.previousTitle || '',
                     nextTitle: extras?.nextTitle || '',
@@ -1347,6 +1466,8 @@
                 ) : activeNativeIntentClaim;
                 if (initialMeta && !launchClaim) return;
                 const launchRoute = currentNativeRoute();
+                const launchOwner = window.app?.currentUser;
+                const launchRefusalScope = window.NorvaPlaybackRefusals?.capture(window.app);
                 // A new viewer intent owns a single provider lane. Await expiry of
                 // any prior native VOD before its resolver is allowed to mint a
                 // replacement session.
@@ -1359,11 +1480,15 @@
                 // device). An ANSWERED 0 restarts honestly (finished/removed elsewhere); no
                 // answer (offline, older backend) keeps the transmitted offset.
                 let effectiveResume = Math.max(0, Math.floor(Number(content.resumeTime) || 0));
+                const explicitRecoveryResume = content.explicitRecoveryResume === true
+                    && Number.isFinite(Number(content.resumeTime)) && Number(content.resumeTime) >= 0
+                    && Number(content.resumeTime) <= 86400;
+                if (content.explicitRecoveryResume === true) delete content.explicitRecoveryResume;
                 try {
-                    if (typeof this._fetchServerResumeInfo === 'function') {
+                    if (!explicitRecoveryResume && typeof this._fetchServerResumeInfo === 'function') {
                         const server = await this._fetchServerResumeInfo(content);
                         if (server && server.answered) effectiveResume = Math.max(0, Math.floor(Number(server.position) || 0));
-                    } else if (effectiveResume <= 0 && typeof this._fetchServerResumePosition === 'function') {
+                    } else if (!explicitRecoveryResume && effectiveResume <= 0 && typeof this._fetchServerResumePosition === 'function') {
                         const serverPos = await this._fetchServerResumePosition(content);
                         if (Number(serverPos) > 0) effectiveResume = Math.floor(Number(serverPos));
                     }
@@ -1497,10 +1622,15 @@
                     // Keep its failure visible on the catalogue; recovery inside
                     // an open native player retains its separate retry handling.
                     const isCurrentLaunch = () => activeNativeIntentClaim === launchClaim
-                        && currentNativeRoute() === launchRoute;
+                        && currentNativeRoute() === launchRoute
+                        && window.app?.currentUser === launchOwner && !window.app?._signOutInFlight;
                     if (error?.name === 'AbortError' || !isCurrentLaunch()) return;
                     lastNativeIntentAt = 0;
                     dismissNativePlaybackStartFailure();
+                    const errorText = typeof this.getErrorText === 'function' ? this.getErrorText(error) : String(error?.code || '');
+                    if (content?.type === 'movie' && /\bPROVIDER_FILE_REFUSED\b/i.test(errorText)
+                        && showNativeFileRefusal(this, content, effectiveResume, launchRefusalScope,
+                            isCurrentLaunch, () => this.play(content, streamUrl, playback))) return;
                     nativePlaybackStartFailure = window.app?.showToast?.(
                         globalThis.NorvaI18n?.t('ui_web_05958c958fa0', {
                             defaultValue: 'This title could not be started. Please try again.'

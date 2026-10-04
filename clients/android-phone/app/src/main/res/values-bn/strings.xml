@@ -25,6 +25,7 @@
     <string name="player_state_format_message">এই সংস্করণটি এমন একটি বিন্যাস ব্যবহার করে যা আপনার ডিভাইসটি ডিকোড করতে পারে না। একটি উপলব্ধ হলে অন্য সংস্করণ চেষ্টা করুন.</string>
     <string name="player_state_generic_terminal_message">প্লেব্যাক অপ্রত্যাশিতভাবে বন্ধ হয়ে গেছে। আবার চেষ্টা করুন বা শিরোনামে ফিরে যান।</string>
     <string name="player_change_version">সংস্করণ পরিবর্তন করুন</string>
+    <string name="player_other_versions">অন্যান্য সংস্করণ</string>
     <string name="player_state_accessibility">%1$s. %2$s</string>
     <string name="player_tracks_button">অডিও এবং সাবটাইটেল</string>
     <string name="player_tracks_title">অডিও এবং সাবটাইটেল</string>

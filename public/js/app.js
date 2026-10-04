@@ -3361,6 +3361,7 @@ class App {
         if (!confirmed) return false;
 
         this._signOutInFlight = true;
+        window.NorvaPlaybackRefusals?.reset?.();
         this.stopImportWatcher();
         if (tv) {
             try { await window.NorvaCloud?.device?.unpairSelf?.(); } catch (_) { /* best-effort */ }

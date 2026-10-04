@@ -1031,6 +1031,8 @@ class MoviesPage {
     }
 
     hide() {
+        this.clearPlaybackRecovery();
+        this.beginFicheIntent();
         document.documentElement.classList.remove('tv-movies-active');
         if (this._isTvMode()) {
             clearTimeout(this._searchTimeout);
@@ -1936,7 +1938,7 @@ class MoviesPage {
         const prefs = this.getPreferences();
         if (!window.MediaUtils?.orderVersionsByPreference) return cards;
         return cards.map(card => {
-            const ordered = MediaUtils.orderVersionsByPreference(card.items || [], prefs);
+            const ordered = this.orderMovieVersions(card.items || []);
             const representative = ordered[0] || card.representative;
             const preferenceScore = window.MediaUtils?.scoreTitleForPreferences
                 ? MediaUtils.scoreTitleForPreferences({ ...representative, variants: ordered }, prefs)
@@ -2267,7 +2269,7 @@ class MoviesPage {
     openGroup(group, { focusVersions = false, selectedMovie = null, intentToken = null } = {}) {
         const token = intentToken ?? this.beginFicheIntent();
         if (!this.isFicheIntentCurrent(token)) return false;
-        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        const ordered = this.orderMovieVersions(group.items);
         const resumeVersion = this._selectInProgressVersion(ordered);
         this.showMovieDetails(group, selectedMovie || resumeVersion || ordered[0], {
             versions: ordered,
@@ -2281,8 +2283,8 @@ class MoviesPage {
     // sibling versions, group them exactly like the grid, and open the matching
     // group (so the version picker is complete). Falls back to a single-item group,
     // and returns false on any failure so the caller can fall back to its own path.
-    async openByItem(item, { intentToken = null } = {}) {
-        const token = intentToken ?? this.beginFicheIntent();
+    async openByItem(item, { intentToken = null, focusVersions = false, requireOwned = false, beforeOpen = null } = {}) {
+        let token = intentToken ?? this.beginFicheIntent();
         try {
             if (!item || item.stream_id == null) return false;
             const tapped = { ...item, sourceId: item.sourceId, id: `${item.sourceId}:${item.stream_id}` };
@@ -2305,6 +2307,7 @@ class MoviesPage {
                     if (!seen.has(k)) { seen.add(k); items.push({ ...m, sourceId: m.sourceId, id: k }); }
                 }
             } catch (_) {
+                if (requireOwned) return false;
                 // An unavailable lookup may keep the current card's own data;
                 // never borrow a homonym's metadata through a title search.
             }
@@ -2315,9 +2318,128 @@ class MoviesPage {
                 || { key: 'search', items: [tapped], representative: tapped };
             const selected = group.items.find(i => String(i.stream_id) === String(item.stream_id)
                 && String(i.sourceId) === String(item.sourceId)) || null;
-            return this.openGroup(group, { selectedMovie: selected, intentToken: token });
+            if (beforeOpen) {
+                const openIntent = beforeOpen(group, selected);
+                if (openIntent === false) return false;
+                if (Number.isInteger(openIntent)) token = openIntent;
+            }
+            return this.openGroup(group, { selectedMovie: selected, focusVersions, intentToken: token });
         } catch (_) {
             return false;
+        }
+    }
+
+    clearPlaybackRecovery() {
+        this._playbackRecovery = null;
+        this.detailsPanel?.querySelector('.movie-version-recovery')?.remove();
+    }
+
+    playbackRecoveryCurrent(context = this._playbackRecovery) {
+        return Boolean(context && context === this._playbackRecovery
+            && this.app?.currentUser === context.owner && !this.app?._signOutInFlight
+            && this.app.currentUser?.id === context.ownerId
+            && Date.now() < context.expiresAt
+            && (!window.NorvaPlaybackRefusals || window.NorvaPlaybackRefusals.capture(this.app) === context.scope));
+    }
+
+    async openPlaybackRecovery(item, { focusVersions = true, position = 0, isCurrent = () => true } = {}) {
+        if (item?.sourceId == null || item?.stream_id == null || !this.app?.currentUser?.id) return false;
+        const owner = this.app.currentUser;
+        const ownerId = owner.id;
+        const scope = window.NorvaPlaybackRefusals?.capture(this.app);
+        const token = this.beginFicheIntent();
+        const exact = { sourceId: item.sourceId, stream_id: item.stream_id };
+        return this.openByItem(exact, { intentToken: token, focusVersions, requireOwned: true,
+            beforeOpen: (group) => {
+                if (!isCurrent() || this.app.currentUser !== owner || this.app.currentUser?.id !== ownerId || this.app._signOutInFlight
+                    || (window.NorvaPlaybackRefusals && window.NorvaPlaybackRefusals.capture(this.app) !== scope)) return false;
+                if (this.app.currentPage !== 'movies') this.app.navigateTo('movies', true);
+                if (this.app.currentPage !== 'movies') return false;
+                this.clearPlaybackRecovery();
+                this._playbackRecovery = {
+                    owner, ownerId, scope, expiresAt: Date.now() + 10 * 60_000,
+                    failedKey: this._movieKey(exact),
+                    keys: new Set(group.items.map(movie => this._movieKey(movie))),
+                    position: Math.max(0, Math.floor(Number(position) || 0)),
+                    busy: false,
+                };
+                // Navigation can reserve a persisted-fiche restore. This explicit
+                // recovery becomes the newest intent after that route transition.
+                return this.beginFicheIntent();
+            },
+        });
+    }
+
+    renderPlaybackRecovery(selectedMovie = null) {
+        this.detailsPanel?.querySelector('.movie-version-recovery')?.remove();
+        const context = this._playbackRecovery;
+        if (!this.playbackRecoveryCurrent(context)) { this._playbackRecovery = null; return; }
+        const t = (key, defaultValue, args = {}) => globalThis.NorvaI18n?.t(key, { defaultValue, ...args })
+            ?? defaultValue.replace('{{position}}', args.position || '');
+        const section = document.createElement('section');
+        section.className = 'movie-version-recovery';
+        const hasAlternatives = context.keys.size > 1;
+        const chosen = selectedMovie && context.keys.has(this._movieKey(selectedMovie));
+        const duration = Number(MediaUtils.playbackHintFromItem?.(selectedMovie || {})?.durationSeconds);
+        const canResume = context.position > 0 && !(Number.isFinite(duration) && duration > 0 && context.position >= duration);
+        const position = [Math.floor(context.position / 3600), Math.floor(context.position / 60) % 60, context.position % 60]
+            .map((part, index) => index ? String(part).padStart(2, '0') : String(part)).join(':');
+        const hint = chosen
+            ? t('ui_playback_version_resume_choice', 'Choose where to start this version.')
+            : hasAlternatives
+                ? t('ui_playback_version_choose_hint', 'Choose a version and check its audio and subtitles.')
+                : t('ui_playback_version_no_alternatives', 'No other version is offered in your catalogue.');
+        section.innerHTML = `<p role="status" aria-live="polite">${MediaUtils.escapeHtml(hint)}</p>${chosen && context.position > 0 ? `<p>${MediaUtils.escapeHtml(t('ui_playback_version_resume_hint', 'Different versions may place the same scene at a different time.'))}</p>` : ''}${chosen ? `<div class="watch-error-actions">
+            ${canResume ? `<button type="button" class="btn btn-primary" data-recovery-action="resume">${MediaUtils.escapeHtml(t('ui_playback_version_resume_at', 'Resume at {{position}}', { position }))}</button>` : ''}
+            <button type="button" class="btn" data-recovery-action="start">${MediaUtils.escapeHtml(t('ui_playback_version_start_over', 'Start from the beginning'))}</button>
+            <button type="button" class="btn" data-recovery-action="cancel">${MediaUtils.escapeHtml(t('ui_playback_version_cancel', 'Cancel'))}</button>
+            </div>` : ''}`;
+        this.versionsList?.insertAdjacentElement('beforebegin', section);
+        if (!chosen) return;
+        section.querySelector('[data-recovery-action="resume"]')?.addEventListener('click', () => this.playRecoveredVersion(selectedMovie, context.position));
+        section.querySelector('[data-recovery-action="start"]')?.addEventListener('click', () => this.playRecoveredVersion(selectedMovie, 0));
+        section.querySelector('[data-recovery-action="cancel"]')?.addEventListener('click', () => {
+            if (!this.playbackRecoveryCurrent(context) || context.busy) return;
+            this.renderPlaybackRecovery();
+            this._focusVersionsList();
+        });
+        section.querySelector('button')?.focus();
+    }
+
+    async playRecoveredVersion(movie, position) {
+        const context = this._playbackRecovery;
+        if (!this.playbackRecoveryCurrent(context) || context.busy || this.app.currentPage !== 'movies'
+            || !context.keys.has(this._movieKey(movie))) return false;
+        // Select the exact current catalogue object, never a caller's invented
+        // coordinates or an old file's stream indices.
+        const selected = this.currentMovieVersions?.find(item => this._movieKey(item) === this._movieKey(movie));
+        if (!selected) return false;
+        const requestedPosition = Math.max(0, Math.floor(Number(position) || 0));
+        if (!Number.isFinite(requestedPosition) || requestedPosition > 86400) return false;
+        const duration = Number(MediaUtils.playbackHintFromItem?.(selected)?.durationSeconds);
+        if (requestedPosition > 0 && Number.isFinite(duration) && duration > 0 && requestedPosition >= duration) return false;
+        context.busy = true;
+        this.detailsPanel?.querySelectorAll('.movie-version-recovery button').forEach(button => { button.disabled = true; });
+        try {
+            await this.prepareForPlaybackSession({ strict: true });
+            if (!this.playbackRecoveryCurrent(context) || this.app.currentPage !== 'movies') return false;
+            const state = this.getMovieWatchState(selected);
+            const versions = [selected, ...this.currentMovieVersions.filter(item => this._movieKey(item) !== this._movieKey(selected))];
+            this.clearPlaybackRecovery();
+            await this.playMovie(selected, { versions, resumeTime: requestedPosition,
+                explicitRecoveryResume: true,
+                playbackPreferences: state.data?.playbackPreferences || state.data?.playback_preferences || null });
+            return true;
+        } catch (_) {
+            if (this.playbackRecoveryCurrent(context)) {
+                this.renderPlaybackRecovery(selected);
+                const status = this.detailsPanel?.querySelector('.movie-version-recovery [role="status"]');
+                if (status) status.textContent = globalThis.NorvaI18n?.t('ui_playback_version_lookup_failed', { defaultValue: 'The versions could not be loaded. Please try again.' }) ?? 'The versions could not be loaded. Please try again.';
+            }
+            return false;
+        } finally {
+            context.busy = false;
+            if (this.playbackRecoveryCurrent(context)) this.detailsPanel?.querySelectorAll('.movie-version-recovery button').forEach(button => { button.disabled = false; });
         }
     }
 
@@ -2710,15 +2832,21 @@ class MoviesPage {
     renderMovieVersions(selectedMovie = this.currentMovie) {
         if (!this.versionsList || !this.versionSummary) return;
         const versions = this.currentMovieVersions || [];
+        const recovering = this.playbackRecoveryCurrent();
         if (versions.length <= 1) {
             this.versionsList.innerHTML = '';
-            this.versionSummary.textContent = (globalThis.NorvaI18n?.t("ui_web_25b3741f18c5", { defaultValue: "Best version selected automatically." }) ?? 'Best version selected automatically.');
-            this.versionsList.closest('.movie-versions-section')?.classList.add('single-version');
+            this.versionSummary.textContent = recovering
+                ? (globalThis.NorvaI18n?.t('ui_playback_version_no_alternatives', { defaultValue: 'No other version is offered in your catalogue.' }) ?? 'No other version is offered in your catalogue.')
+                : (globalThis.NorvaI18n?.t("ui_web_25b3741f18c5", { defaultValue: "Best version selected automatically." }) ?? 'Best version selected automatically.');
+            this.versionsList.closest('.movie-versions-section')?.classList.toggle('single-version', !recovering);
+            this.renderPlaybackRecovery();
             return;
         }
 
         this.versionsList.closest('.movie-versions-section')?.classList.remove('single-version');
-        this.versionSummary.textContent = this._isTvMode()
+        this.versionSummary.textContent = recovering
+            ? (globalThis.NorvaI18n?.t('ui_playback_version_choose_hint', { defaultValue: 'Choose a version and check its audio and subtitles.' }) ?? 'Choose a version and check its audio and subtitles.')
+            : this._isTvMode()
             ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_bf46e4d55d9e", {defaultValue: "{{p0}} versions available. Press OK to play a version.", p0:(versions.length)}) : `${versions.length} versions available. Press OK to play a version.`)
             : (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_a0de6bad1870", {defaultValue: "{{p0}} versions available. Play uses the selected version.", p0:(versions.length)}) : `${versions.length} versions available. Play uses the selected version.`);
         this.versionsList.innerHTML = versions.map((item, index) => {
@@ -2726,12 +2854,16 @@ class MoviesPage {
                 siblings: versions,
                 index,
                 providerLanguageHints: true,
-                resolveSourceName: (id) => this.getSourceName(id)
+                resolveSourceName: (id) => {
+                    const name = this.getSourceName(id);
+                    return recovering && /(?:https?:\/\/|[\r\n])/i.test(String(name || '')) ? '' : name;
+                }
             });
             const state = this.getMovieWatchState(item);
+            const refused = window.NorvaPlaybackRefusals?.has(item, this.app) === true;
             const active = String(item.stream_id) === String(selectedMovie?.stream_id) &&
                 String(item.sourceId) === String(selectedMovie?.sourceId);
-            const dot = desc.tier
+            const dot = desc.tier && !refused
                 ? `<span class="version-tier-dot ${MediaUtils.escapeHtml(desc.tier.cls)}" title="${MediaUtils.escapeHtml(desc.tier.label)}"></span>`
                 : '';
             const badge = desc.badge
@@ -2743,6 +2875,7 @@ class MoviesPage {
                 <button class="movie-version-item ${active ? 'active' : ''}" type="button" data-index="${index}" aria-label="${MediaUtils.escapeHtml([desc.accessibleHeadline || headline, desc.meta].filter(Boolean).join(' · '))}">
                     <span class="version-head">${dot}<span class="version-headline" title="${MediaUtils.escapeHtml(desc.accessibleHeadline || headline)}">${MediaUtils.escapeHtml(headline)}</span>${badge}</span>
                     ${meta}
+                    ${refused ? `<span class="movie-version-refused">${MediaUtils.escapeHtml(globalThis.NorvaI18n?.t('ui_playback_version_refused_recently', { defaultValue: 'Refused during the last attempt' }) ?? 'Refused during the last attempt')}</span>` : ''}
                     ${state.status === 'inprogress' ? '<span class="movie-version-progress" data-i18n="ui_web_c1f88e9d6c41">In progress</span>' : ''}
                     ${state.status === 'watched' ? '<span class="movie-version-progress" data-i18n="ui_web_1ca8c1c0de6f">Watched</span>' : ''}
                 </button>`;
@@ -2753,6 +2886,12 @@ class MoviesPage {
                 const index = parseInt(btn.dataset.index);
                 const movie = versions[index];
                 if (!movie) return;
+                if (this.playbackRecoveryCurrent()) {
+                    if (this._playbackRecovery.busy) return;
+                    this.showMovieDetails(this.currentMovieGroup, movie, { versions, isVersionSwitch: true });
+                    this.renderPlaybackRecovery(movie);
+                    return;
+                }
 
                 // On TV, OK on a labelled version is the commit action. Re-rendering
                 // this list used to destroy focus, while Play returned to the same list.
@@ -2774,6 +2913,7 @@ class MoviesPage {
                 this.showMovieDetails(this.currentMovieGroup, movie, { versions, isVersionSwitch: true });
             });
         });
+        this.renderPlaybackRecovery();
     }
 
     _isTvMode() {
@@ -2929,7 +3069,7 @@ class MoviesPage {
             if (active !== card) active.classList.remove('tv-preview-active');
         });
         card.classList.add('tv-preview-active');
-        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        const ordered = this.orderMovieVersions(group.items);
         const selected = this._selectInProgressVersion(ordered) || ordered[0];
         this.showMovieDetails(group, selected, { versions: ordered, isTvPreview: true });
     }
@@ -2965,7 +3105,7 @@ class MoviesPage {
         // Committing loads heavy extras into the panel, so invalidate the light-preview
         // guard: backing out to the grid and re-focusing this same card must re-preview.
         this._lastPreviewCard = null;
-        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        const ordered = this.orderMovieVersions(group.items);
         const selected = this._selectInProgressVersion(ordered) || ordered[0];
         // Make sure the panel reflects THIS card even if the preview debounce hasn't fired.
         this.showMovieDetails(group, selected, { versions: ordered, isTvPreview: true });
@@ -3000,8 +3140,14 @@ class MoviesPage {
         if (!list) return;
         requestAnimationFrame(() => {
             const items = [...list.querySelectorAll('.movie-version-item')];
-            if (!items.length) return;
-            const target = items.find(b => b.querySelector('.movie-version-progress')) || items[0];
+            if (!items.length) { this.primaryActionBtn?.focus(); return; }
+            const recovering = this.playbackRecoveryCurrent();
+            const alternativeIndex = recovering ? (this.currentMovieVersions || []).findIndex(movie =>
+                this._movieKey(movie) !== this._playbackRecovery.failedKey
+                && !window.NorvaPlaybackRefusals?.has(movie, this.app)) : -1;
+            const target = recovering
+                ? items.find(button => Number(button.dataset.index) === alternativeIndex) || items[0]
+                : items.find(b => b.querySelector('.movie-version-progress')) || items[0];
             target.focus();
             target.scrollIntoView({ block: 'nearest' });
         });
@@ -3044,8 +3190,13 @@ class MoviesPage {
         const token = intentToken ?? this.beginFicheIntent();
         if (!this.isFicheIntentCurrent(token) || !group?.items?.length || !this.detailsPanel) return false;
         const isTv = this._isTvMode();
-        const ordered = versions || MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        const ordered = versions || this.orderMovieVersions(group.items);
         const movie = selectedMovie || ordered[0] || group.representative;
+        if (this._playbackRecovery && (!this.playbackRecoveryCurrent()
+            || !this._playbackRecovery.keys.has(this._movieKey(movie))
+            || !group.items.some(item => this._movieKey(item) === this._playbackRecovery.failedKey))) {
+            this.clearPlaybackRecovery();
+        }
         const displayMovie = group.representative || movie;
 
         this.currentMovieGroup = group;
@@ -3210,7 +3361,9 @@ class MoviesPage {
 
         if (focusVersions) {
             setTimeout(() => {
+                if (!this.isFicheIntentCurrent(token)) return;
                 this.detailsPanel?.querySelector('.movie-versions-section')?.scrollIntoView({ block: 'start' });
+                this._focusVersionsList();
             }, 50);
         }
 
@@ -3324,6 +3477,7 @@ class MoviesPage {
     }
 
     hideDetails() {
+        this.clearPlaybackRecovery();
         this.beginFicheIntent();
         // On TV the panel is persistent (split-view) — there is nothing to close.
         if (this._isTvMode()) return;
@@ -3340,6 +3494,10 @@ class MoviesPage {
 
     async playPrimaryMovie() {
         if (!this.currentMovie) return;
+        if (this.playbackRecoveryCurrent()) {
+            if (!this._playbackRecovery.busy) this.renderPlaybackRecovery(this.currentMovie);
+            return;
+        }
         // TV: never auto-play a guessed variant. Multiple versions → send the user to
         // the labelled version list to choose (pre-focused on the in-progress one).
         // Single version → play straight through.
@@ -3363,6 +3521,12 @@ class MoviesPage {
 
     // === Playback ===
 
+    orderMovieVersions(items) {
+        const preferences = this.getPreferences();
+        const ordered = MediaUtils.orderVersionsByPreference(items, preferences);
+        return window.NorvaPlaybackRefusals?.order(ordered, preferences, this.app) || ordered;
+    }
+
     getPreferences() {
         return {
             preferredLanguage: this.serverSettings.preferredLanguage || '',
@@ -3375,7 +3539,7 @@ class MoviesPage {
     }
 
     async playGroup(group) {
-        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        const ordered = this.orderMovieVersions(group.items);
         const best = this._selectInProgressVersion(ordered) || ordered[0];
         const watch = this._watchStateFor(best);
         const resumeTime = watch ? this.getResumeOffset(watch.progress, watch.duration) : 0;
@@ -3399,7 +3563,7 @@ class MoviesPage {
         const footer = document.getElementById('modal-footer');
         if (!modal || !body) return;
 
-        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        const ordered = this.orderMovieVersions(group.items);
         title.textContent = this.getMovieDisplayTitle(group.representative);
 
         body.innerHTML = `
@@ -3432,11 +3596,12 @@ class MoviesPage {
         modal.classList.add('active');
     }
 
-    async prepareForPlaybackSession() {
-        await Promise.allSettled([
+    async prepareForPlaybackSession({ strict = false } = {}) {
+        const results = await Promise.allSettled([
             this.app?.player?.stop?.(),
-            this.app?.pages?.watch?.releasePlaybackPipelineForRetry?.()
+            this.app?.pages?.watch?.releasePlaybackPipelineForRetry?.({ strict })
         ]);
+        if (strict && results.some(result => result.status === 'rejected')) throw new Error('Playback could not be closed');
     }
 
     getGatewayResumePlan(resumeOffset, requestedPreRoll = 0) {
@@ -3454,7 +3619,7 @@ class MoviesPage {
         };
     }
 
-    async playMovie(movie, { versions = null, resumeTime = 0, playbackPreferences = null } = {}) {
+    async playMovie(movie, { versions = null, resumeTime = 0, playbackPreferences = null, explicitRecoveryResume = false } = {}) {
         const watch = this.app.pages.watch;
         if (!watch) return;
         const container = movie.container_extension || 'mp4';
@@ -3549,6 +3714,7 @@ class MoviesPage {
             categoryId: movie.category_id,
             containerExtension: container,
             resumeTime: resumePlan.target,
+            ...(explicitRecoveryResume === true ? { explicitRecoveryResume: true } : {}),
             playbackPreferences,
             // Keep the authoritative catalogue/codec duration in the player.
             // Gateway EVENT playlists expose only their currently generated

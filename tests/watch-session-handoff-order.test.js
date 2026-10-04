@@ -209,6 +209,23 @@ function episodeContent(id) {
     };
 }
 
+test('an explicit recovery start or resume outranks server and local history for one invocation only', async () => {
+    for (const position of [0, 123]) {
+        const WatchPage = loadWatchPage();
+        const page = dynamicPageHarness(WatchPage, { events: [] });
+        let serverReads = 0, localReads = 0;
+        page._fetchServerResumeInfo = async () => { serverReads++; return { answered: true, position: 800 }; };
+        page._loadResumePosition = () => { localReads++; return 900; };
+        const content = { ...episodeContent('recovery-file'), type: 'movie', resumeTime: position, explicitRecoveryResume: true };
+        await page.play(content, async () => ({}));
+        assert.equal(page.resumeTime, position);
+        assert.equal(serverReads, 0); assert.equal(localReads, 0);
+        assert.equal(content.explicitRecoveryResume, undefined, 'the one-shot override cannot leak into resume snapshots');
+        await page.play({ ...content }, async () => ({}));
+        assert.equal(serverReads, 1); assert.equal(page.resumeTime, 800);
+    }
+});
+
 test('relaunching the active episode expires and cools the old slot before resolving', async () => {
     const WatchPage = loadWatchPage();
     const events = [];

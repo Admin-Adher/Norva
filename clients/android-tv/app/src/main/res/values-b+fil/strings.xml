@@ -108,4 +108,5 @@
     <string name="native_standalone_hint">Standalone: ganap na patakbuhin ang Norva sa TV na ito. Gamitin ito kapag ayaw mo ng account sa device na ito. Ginagamit ng playback ang TV native decoder.</string>
     <string name="native_connection_tip">Mga advanced na opsyon sa koneksyon: pindutin ang MENU, o pindutin ang BACK mula sa Home at piliin ang \"Mga setting ng koneksyon\".</string>
     <string name="native_setup_failed">Hindi makapagsimula si Norva sa TV na ito. Subukan muli.</string>
+    <string name="player_other_versions">Iba pang bersyon</string>
 </resources>

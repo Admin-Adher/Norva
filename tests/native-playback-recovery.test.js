@@ -1091,7 +1091,7 @@ function deferredNativeFixture() {
   return { promise, resolve, reject };
 }
 
-function nativeVodIntentFixture({ resumeInfo, stopSessions, resolveInitial, userAgent = 'NorvaTV-test', monotonicNow } = {}) {
+function nativeVodIntentFixture({ resumeInfo, stopSessions, resolveInitial, userAgent = 'NorvaTV-test', monotonicNow, itemType = 'series' } = {}) {
   const launches = [];
   const resolutions = [];
   const savedHistory = [];
@@ -1168,8 +1168,8 @@ function nativeVodIntentFixture({ resumeInfo, stopSessions, resolveInitial, user
   });
   vm.runInContext(read('public/js/utils/standalone.js'), context);
   const page = new WatchPage();
-  const play = (id) => page.play({
-    sourceId: 'fixture-source', id, type: 'series', title: id, containerExtension: 'mkv',
+  const play = (id, contentOptions = {}) => page.play({
+    sourceId: 'fixture-source', id, type: itemType, title: id, containerExtension: 'mkv', ...contentOptions,
   }, async () => {
     resolutions.push(id);
     if (resolveInitial) return resolveInitial(id);
@@ -1179,7 +1179,111 @@ function nativeVodIntentFixture({ resumeInfo, stopSessions, resolveInitial, user
     location.hash = hash;
     for (const listener of listeners.get('hashchange') || []) listener();
   };
-  return { window, play, navigate, launches, resolutions, savedHistory, scheduled, expired, notices };
+  return { window, document, owner: page, play, navigate, launches, resolutions, savedHistory, scheduled, expired, notices };
+}
+
+for (const scenario of ['versions', 'retry', 'details', 'owner-changed', 'close-failed', 'previous-close-failed']) {
+  test(`typed initial native movie refusal provides explicit recovery without launching Activity (${scenario})`, async () => {
+    const fixture = nativeVodIntentFixture({ itemType: 'movie', resolveInitial: async () => {
+      const error = new Error('private transport detail'); error.code = 'PROVIDER_FILE_REFUSED'; throw error;
+    } });
+    const nodes = [], marks = [], opens = [];
+    fixture.document.createElement = tag => {
+      const node = { tag, children: [], dataset: {}, listeners: {}, classList: { remove() {} },
+        setAttribute() {}, appendChild(child) { this.children.push(child); },
+        addEventListener(event, callback) { this.listeners[event] = callback; }, remove() {} };
+      nodes.push(node); return node;
+    };
+    fixture.document.body.appendChild = () => {};
+    fixture.window.NorvaModal = { installHygiene() {} };
+    fixture.window.app.currentUser = { id: 'fixture-owner' };
+    fixture.window.app.pages.movies = { async openPlaybackRecovery(item, options) { opens.push({ item, options }); return true; } };
+    const scope = {};
+    fixture.window.NorvaPlaybackRefusals = { capture: () => scope, markRefused: (...args) => marks.push(args) };
+    await fixture.play('movie-A');
+    assert.equal(fixture.launches.length, 0);
+    assert.equal(fixture.notices.length, 0, 'typed refusal replaces the generic one-action toast');
+    assert.equal(marks.length, 1);
+    assert.equal(marks[0][2], scope);
+    assert.equal(nodes.filter(node => node.tag === 'button').length, 3);
+    assert.ok(nodes.every(node => !/private transport/.test(node.textContent || '')), 'transport detail never enters UI');
+    const versions = nodes.find(node => node.dataset.nativeRecoveryAction === 'versions');
+    if (scenario === 'owner-changed') fixture.window.app.currentUser = { id: 'other-owner' };
+    if (scenario === 'close-failed' || scenario === 'previous-close-failed') {
+      // A previously failed close is still present in the owner's exact registry.
+      // Add it through the ordinary page registration surface, captured by the test harness.
+      fixture.window.NorvaCloud.playback.expireSession = async () => { throw Error('close refused'); };
+      // The fixture returns the actual owner so no fake global close flag is needed.
+      if (scenario === 'previous-close-failed') fixture.owner._unclosedCloudPlaybackSessionIds = new Set(['50000000-0000-4000-8000-000000000099']);
+      else fixture.owner.activeCloudPlaybackSessionIds.add('50000000-0000-4000-8000-000000000099');
+    }
+    const action = scenario === 'retry' || scenario === 'details' ? scenario : 'versions';
+    await nodes.find(node => node.dataset.nativeRecoveryAction === action).listeners.click();
+    if (scenario === 'versions' || scenario === 'details') {
+      assert.equal(opens.length, 1);
+      assert.deepEqual({ ...opens[0].item }, { sourceId: 'fixture-source', stream_id: 'movie-A' });
+      assert.equal(opens[0].options.focusVersions, scenario === 'versions');
+      assert.equal(opens[0].options.position, 120);
+      assert.equal(fixture.resolutions.length, 1);
+    } else if (scenario === 'retry') {
+      assert.equal(fixture.resolutions.length, 2);
+      assert.deepEqual(fixture.resolutions, ['movie-A', 'movie-A']);
+    } else {
+      assert.equal(opens.length, 0);
+      assert.equal(fixture.resolutions.length, 1);
+    }
+    assert.equal(fixture.launches.length, 0, 'no alternative session may be created by this UI');
+  });
+}
+
+for (const position of [0, 300]) {
+  test(`explicit native recovery start ${position}s is not replaced by another file's history`, async () => {
+    let lookups = 0;
+    const fixture = nativeVodIntentFixture({ itemType: 'movie', resumeInfo: async () => {
+      lookups++; return { answered: true, position: 720 };
+    } });
+    await fixture.play('chosen-copy', { resumeTime: position, explicitRecoveryResume: true });
+    assert.equal(fixture.launches[0].resumeSeconds, position);
+    assert.equal(lookups, 0);
+    assert.equal(fixture.launches[0].itemId, 'chosen-copy');
+  });
+}
+
+for (const invalidation of ['none', 'unclosed', 'close-failed', 'owner', 'route', 'new-intent']) {
+  test(`native movie versions hand-off requires exact completed close and current owner (${invalidation})`, async () => {
+    const fixture = nativeVodIntentFixture({ itemType: 'movie' });
+    const calls = [];
+    fixture.window.app.currentUser = { id: 'fixture-owner' };
+    fixture.window.app.pages.movies = { async openPlaybackRecovery(item, options) {
+      calls.push({ item, options }); return options.isCurrent();
+    } };
+    await fixture.play('movie-A');
+    const payload = fixture.launches[0];
+    assert.equal(payload.movieVersionRecovery, true);
+    assert.equal(await fixture.window.__norvaNative.onMovieVersionRecovery('wrong-source', 'movie', 'movie-A', 120), false);
+    if (invalidation === 'close-failed') {
+      fixture.window.NorvaCloud.playback.expireSession = async () => { throw new Error('expiry not acknowledged'); };
+    }
+    if (invalidation !== 'unclosed') {
+      fixture.window.__norvaNative.onPlaybackClosed(payload.sessionId, 'terminal');
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    if (invalidation === 'owner') fixture.window.app.currentUser = { id: 'other-owner' };
+    if (invalidation === 'route') fixture.navigate('#home');
+    if (invalidation === 'new-intent') fixture.window.__norvaNative.beginPlaybackIntent('fixture-source', 'movie', 'movie-B');
+    const result = await fixture.window.__norvaNative.onMovieVersionRecovery('fixture-source', 'movie', 'movie-A', 120);
+    assert.equal(result, invalidation === 'none');
+    assert.equal(calls.length, invalidation === 'none' ? 1 : 0);
+    if (calls.length) {
+      assert.deepEqual({ ...calls[0].item }, { sourceId: 'fixture-source', stream_id: 'movie-A' });
+      assert.equal(calls[0].options.position, 120);
+      assert.equal(calls[0].options.focusVersions, true);
+      assert.equal('refusedFile' in calls[0].options, false, 'generic native failure cannot mark a file refused');
+      assert.equal(await fixture.window.__norvaNative.onMovieVersionRecovery('fixture-source', 'movie', 'movie-A', 120), false);
+    }
+    assert.equal(fixture.resolutions.length, 1, 'catalogue hand-off must not resolve another stream');
+    assert.equal(fixture.launches.length, 1, 'no silent native replacement');
+  });
 }
 
 for (const invalidation of ['none', 'route', 'closed']) {

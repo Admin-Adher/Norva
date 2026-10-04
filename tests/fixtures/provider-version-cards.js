@@ -165,5 +165,189 @@ window.ProviderVersionCardsQA = (() => {
             throw Error('restored audio still stale');
         }
     }
-    return { mount, verify, verifyRestoration, get lastChoice() { return lastChoice?.stream_id ?? null; } };
+    let recoveryFixture;
+    const turn = () => new Promise(resolve => setTimeout(resolve, 35));
+    function mountPlaybackRecovery({ single = false, holdClose = false, lookupFails = false, closeFails = false } = {}) {
+        const host = document.getElementById('qa-host');
+        host.innerHTML = `<section id="qa-recovery-watch" class="watch-video-section" style="position:relative;min-height:360px">
+            <div id="watch-error" class="watch-error hidden"></div></section>
+            <section id="qa-recovery-details" class="movie-versions-section" hidden>
+            <h2>Example Film</h2><p class="hint">Offline recovery fixture · no media connection</p>
+            <p id="qa-recovery-summary"></p><div id="qa-recovery-versions" class="movie-versions-list"></div>
+            <p id="qa-recovery-started" role="status" aria-live="polite"></p></section>`;
+        const items = ['failed-file', 'english-copy', 'french-copy'].slice(0, single ? 1 : 3).map((id, index) => ({
+            id, stream_id: id, sourceId: 'qa-source', item_type: 'movie', title: 'Example Film',
+            name: 'Example Film', tmdb_id: 1234567, year: 2025, container_extension: index ? 'mp4' : 'mkv',
+            audio_tracks_scope: 'file', audio_tracks: [{ index: index + 1, lang: index === 2 ? 'fr' : 'en' }],
+            audio_language_validation_status: 'verified', subtitle_tracks_scope: 'file',
+            subtitle_tracks: [{ index: index + 4, lang: 'fr' }],
+        }));
+        const owner = { id: 'fixture-owner' };
+        // An auth session's expiry is a stable claim, not a rolling clock.
+        // Recomputing it during capture would invalidate the recovery scope
+        // every second and make normal human-paced clicks look like logout.
+        const session = { user: owner, expires_at: Math.floor(Date.now() / 1000) + 3600 };
+        const app = { currentUser: owner, currentPage: 'watch', pages: {},
+            navigateTo(page) { this.currentPage = page; }, showToast() {} };
+        window.app = app;
+        window.NorvaAuth = { getSession: () => session };
+        window.NorvaCloud = { catalogVisibility: { epoch: () => 1 } };
+        window.NorvaPlaybackRefusals?.reset();
+        let release;
+        const close = holdClose ? new Promise(resolve => { release = resolve; }) : Promise.resolve();
+        const evidence = { closed: 0, catalogueLookups: 0, plays: [], retries: [], items, app, release: () => release?.() };
+        window.API = { media: { page: async params => {
+            evidence.catalogueLookups++;
+            if (!evidence.closed) throw Error('catalogue opened before old session closed');
+            if (params.sourceId !== 'qa-source' || params.externalId !== 'failed-file' || params.q) throw Error('lookup lost exact file');
+            if (lookupFails) throw Error('fixture catalogue unavailable');
+            return { items };
+        } } };
+        const movies = Object.create(MoviesPage.prototype);
+        Object.assign(movies, {
+            app, sources: [{ id: 'qa-source', config_revision: '1', active_generation_id: 'fixture-generation' }],
+            detailsPanel: document.getElementById('qa-recovery-details'),
+            versionsList: document.getElementById('qa-recovery-versions'), versionSummary: document.getElementById('qa-recovery-summary'),
+            getPreferences: () => ({}), getSourceName: () => 'Source personnelle',
+            getMovieWatchState: () => ({ status: 'unwatched', data: {} }), isBrokenItem: () => false,
+            _isTvMode: () => false, _loadPanelExtras() {},
+            prepareForPlaybackSession: async () => { if (!evidence.closed) throw Error('overlapping media session'); },
+            // Only the surrounding artwork is replaced. The owned-file lookup,
+            // recovery state, version renderer, focus and actions are production methods.
+            showMovieDetails(group, selected, options = {}) {
+                this.currentMovie = selected; this.currentMovieGroup = group; this.currentMovieVersions = options.versions || group.items;
+                document.getElementById('qa-recovery-watch').hidden = true;
+                this.detailsPanel.hidden = false; this.renderMovieVersions(selected);
+                if (options.focusVersions) this._focusVersionsList();
+            },
+            async playMovie(movie, options) {
+                evidence.plays.push({ file: movie.stream_id, position: options.resumeTime, preferences: options.playbackPreferences });
+                document.getElementById('qa-recovery-started').textContent = `Fixture: ${movie.stream_id} · ${options.resumeTime}s`;
+            }
+        });
+        app.pages.movies = movies;
+        const watch = Object.create(WatchPage.prototype);
+        Object.assign(watch, {
+            app, content: { id: 'failed-file', type: 'movie', sourceId: 'qa-source', title: 'Example Film' },
+            _playbackAttemptId: 1, _fileRefusalScope: window.NorvaPlaybackRefusals?.capture(app),
+            hasCurrentMedia: () => false, clearDeferredPlaybackError() {}, hideLoading() {}, updateTranscodeStatus() {},
+            trackProduct() {}, clearPlaybackErrorRefreshTimer() {}, getResumeSnapshotPosition: () => 300,
+            releasePlaybackPipelineForRetry: async () => { await close; if (closeFails) throw Error('fixture close not acknowledged'); evidence.closed++; },
+            waitForProviderSlotRelease: async () => {},
+            retryPlaybackInPlace: () => { evidence.retries.push('failed-file'); }
+        });
+        app.pages.watch = watch;
+        watch.showPlaybackError('PROVIDER_FILE_REFUSED', { immediate: true });
+        evidence.movies = movies; evidence.watch = watch;
+        recoveryFixture = evidence;
+        return evidence;
+    }
+
+    async function verifyPlaybackRecovery() {
+        const assert = (condition, message) => { if (!condition) throw Error(message); };
+        let fixture = mountPlaybackRecovery({ holdClose: true });
+        const actions = [...document.querySelectorAll('#watch-error button')];
+        assert(actions.length === 3, 'refused file needs three explicit actions');
+        for (const button of actions) {
+            const rect = button.getBoundingClientRect();
+            assert(rect.height >= 44 && rect.width >= 44, 'recovery action touch target');
+            assert(button.scrollHeight <= button.clientHeight + 1, 'recovery action label clipped');
+        }
+        document.getElementById('watch-error-versions-btn').click();
+        assert(actions.every(button => button.disabled), 'overlapping recovery action enabled');
+        document.getElementById('watch-error-refresh-btn').click();
+        assert(fixture.retries.length === 0 && fixture.catalogueLookups === 0, 'work before exact close');
+        fixture.release(); await turn();
+        assert(fixture.app.currentPage === 'movies' && fixture.catalogueLookups === 1, 'catalogue recovery navigation');
+        let buttons = [...document.querySelectorAll('#qa-recovery-versions button')];
+        assert(buttons.length === 3 && buttons.includes(document.activeElement), 'version focus not restored');
+        await new Promise(resolve => setTimeout(resolve, 1100));
+        assert(fixture.movies.playbackRecoveryCurrent(), 'human-paced selection lost a stable authentication scope');
+        const other = buttons.find(button => fixture.movies.currentMovieVersions[Number(button.dataset.index)].stream_id === 'english-copy');
+        other.click();
+        assert(fixture.plays.length === 0, 'version selection silently started playback');
+        document.querySelector('[data-recovery-action="cancel"]').click(); await turn();
+        assert(fixture.plays.length === 0 && document.activeElement?.classList.contains('movie-version-item'), 'cancel changed playback or lost focus');
+        document.querySelector(`#qa-recovery-versions [data-index="${fixture.movies.currentMovieVersions.findIndex(item => item.stream_id === 'english-copy')}"]`).click();
+        document.querySelector('[data-recovery-action="resume"]').click(); await turn();
+        assert(fixture.plays.length === 1 && fixture.plays[0].file === 'english-copy' && fixture.plays[0].position === 300, 'explicit resume selection');
+        assert(!fixture.plays[0].preferences, 'old file track indices copied');
+
+        fixture = mountPlaybackRecovery();
+        document.getElementById('watch-error-refresh-btn').click();
+        assert(fixture.retries.length === 1 && fixture.retries[0] === 'failed-file' && fixture.plays.length === 0, 'retry changed file');
+        document.getElementById('watch-error-details-btn').click(); await turn();
+        assert(fixture.app.currentPage === 'movies' && fixture.plays.length === 0, 'back to details started playback');
+        buttons = [...document.querySelectorAll('#qa-recovery-versions button')];
+        buttons.find(button => fixture.movies.currentMovieVersions[Number(button.dataset.index)].stream_id === 'french-copy').click();
+        document.querySelector('[data-recovery-action="start"]').click(); await turn();
+        assert(fixture.plays[0]?.file === 'french-copy' && fixture.plays[0]?.position === 0, 'explicit start from beginning');
+
+        fixture = mountPlaybackRecovery({ single: true });
+        document.getElementById('watch-error-versions-btn').click(); await turn();
+        assert(fixture.movies._playbackRecovery.keys.size === 1 && fixture.plays.length === 0, 'single-version recovery');
+        assert(document.querySelector('.movie-version-recovery [role="status"]')?.textContent, 'missing no-other-version message');
+        assert(document.querySelectorAll('#qa-recovery-versions button').length === 0, 'invented alternative');
+
+        for (const failure of [{ lookupFails: true }, { closeFails: true }]) {
+            fixture = mountPlaybackRecovery(failure);
+            document.getElementById('watch-error-versions-btn').click(); await turn();
+            assert(fixture.app.currentPage === 'watch' && fixture.plays.length === 0, 'failed hand-off navigated or played');
+            assert(!document.getElementById('watch-error-versions-btn').disabled, 'failed hand-off cannot retry');
+            assert(document.getElementById('watch-error-version-status').textContent, 'failed hand-off lacks accessible status');
+        }
+        assert(document.documentElement.scrollWidth <= innerWidth + 1, 'recovery horizontal overflow');
+        mountPlaybackRecovery();
+        return { scenarios: 8, providerRequests: 0, explicitAlternativeChoices: 2 };
+    }
+    async function mountNativePlaybackRecovery() {
+        const fixture = mountPlaybackRecovery();
+        fixture.app.currentPage = 'movies';
+        document.getElementById('qa-recovery-watch').hidden = true;
+        document.getElementById('qa-recovery-details').hidden = false;
+        fixture.nativeLaunches = []; fixture.nativeResolutions = [];
+        window.NorvaTVCloud = { playVideoJson: payload => fixture.nativeLaunches.push(JSON.parse(payload)) };
+        if (!window.__norvaStandaloneBooted) await new Promise((resolve, reject) => {
+            const script = document.createElement('script'); script.src = '/js/utils/standalone.js';
+            script.onload = resolve; script.onerror = reject; document.head.append(script);
+        });
+        Object.assign(fixture.watch, {
+            activeCloudPlaybackSessionIds: new Set(),
+            stopCloudPlaybackSessions: async () => { fixture.closed++; },
+            _fetchServerResumeInfo: async () => ({ answered: true, position: 300 })
+        });
+        fixture.watch.content = null;
+        await fixture.watch.play({ id: 'failed-file', sourceId: 'qa-source', type: 'movie', title: 'Example Film' }, async () => {
+            fixture.nativeResolutions.push('failed-file');
+            const error = new Error('Fixture typed file refusal'); error.code = 'PROVIDER_FILE_REFUSED'; throw error;
+        });
+        await turn();
+        return fixture;
+    }
+
+    async function verifyNativePlaybackRecovery() {
+        let fixture = await mountNativePlaybackRecovery();
+        let overlay = document.querySelector('.norva-modal-overlay');
+        if (!overlay || overlay.getAttribute('aria-modal') !== 'true') throw Error('missing native pre-launch dialog');
+        const actions = [...overlay.querySelectorAll('[data-native-recovery-action]')];
+        if (actions.length !== 3 || !overlay.contains(document.activeElement)) throw Error('native pre-launch action focus');
+        if (!document.getElementById('qa-host').inert && !document.getElementById('qa-host').parentElement.inert) throw Error('native recovery background interactive');
+        if (fixture.nativeLaunches.length || fixture.nativeResolutions.length !== 1) throw Error('initial refusal launched native activity');
+        actions.find(action => action.dataset.nativeRecoveryAction === 'retry').click(); await turn();
+        if (fixture.nativeResolutions.length !== 2 || fixture.nativeLaunches.length) throw Error('pre-native retry changed file or launched activity');
+        overlay = document.querySelector('.norva-modal-overlay');
+        overlay.querySelector('[data-native-recovery-action="versions"]').click(); await turn();
+        if (document.querySelector('.norva-modal-overlay') || fixture.movies.currentMovieVersions?.length !== 3 || fixture.nativeLaunches.length) throw Error('native refusal did not open owned version list');
+        fixture = await mountNativePlaybackRecovery();
+        if (window.__norvaHandleBack() !== 'handled') throw Error('native hardware Back not consumed');
+        await turn();
+        if (document.querySelector('.norva-modal-overlay') || fixture.nativeLaunches.length) throw Error('Back should dismiss native prelaunch recovery');
+        fixture = await mountNativePlaybackRecovery();
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); await turn();
+        if (document.querySelector('.norva-modal-overlay') || fixture.nativeLaunches.length) throw Error('Escape should dismiss native prelaunch recovery');
+        mountPlaybackRecovery();
+        return { scenarios: 4, providerRequests: 0, nativeLaunches: 0 };
+    }
+    return { mount, verify, verifyRestoration, mountPlaybackRecovery, verifyPlaybackRecovery, mountNativePlaybackRecovery, verifyNativePlaybackRecovery,
+        get recovery() { return recoveryFixture; }, get lastChoice() { return lastChoice?.stream_id ?? null; } };
 })();

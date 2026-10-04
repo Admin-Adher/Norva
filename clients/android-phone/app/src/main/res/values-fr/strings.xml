@@ -25,6 +25,7 @@
     <string name="player_state_format_message">Cette version utilise un format que votre appareil ne peut pas décoder. Essayez une autre version si elle est disponible.</string>
     <string name="player_state_generic_terminal_message">La lecture s’est arrêtée de manière inattendue. Réessayez ou revenez au titre.</string>
     <string name="player_change_version">Changer de version</string>
+    <string name="player_other_versions">Autres versions</string>
     <string name="player_state_accessibility">%1$s. %2$s</string>
     <string name="player_tracks_button">Audio et sous-titres</string>
     <string name="player_tracks_title">Audio et sous-titres</string>

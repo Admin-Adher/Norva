@@ -25,6 +25,7 @@
     <string name="player_state_format_message">Bu sürüm, cihazınızın kodunu çözemediği bir format kullanıyor. Varsa başka bir sürüm deneyin.</string>
     <string name="player_state_generic_terminal_message">Oynatma beklenmedik bir şekilde durduruldu. Tekrar deneyin veya başlığa dönün.</string>
     <string name="player_change_version">Sürümü değiştir</string>
+    <string name="player_other_versions">Diğer sürümler</string>
     <string name="player_state_accessibility">%1$s. %2$s</string>
     <string name="player_tracks_button">Ses ve altyazılar</string>
     <string name="player_tracks_title">Ses ve altyazılar</string>

@@ -108,4 +108,5 @@
     <string name="native_standalone_hint">স্বতন্ত্র: এই টিভিতে সম্পূর্ণরূপে Norva চালান। আপনি যখন এই ডিভাইসে একটি অ্যাকাউন্ট চান না তখন এটি ব্যবহার করুন। প্লেব্যাক টিভি নেটিভ ডিকোডার ব্যবহার করে।</string>
     <string name="native_connection_tip">অ্যাডভান্সড কানেকশন অপশন: মেন্যু টিপুন বা হোম থেকে ব্যাক টিপুন এবং \"সংযোগ সেটিংস\" বাছাই করুন।</string>
     <string name="native_setup_failed">Norva এই টিভিতে শুরু করা যায়নি। আবার চেষ্টা করুন</string>
+    <string name="player_other_versions">অন্যান্য সংস্করণ</string>
 </resources>

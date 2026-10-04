@@ -25,6 +25,7 @@
     <string name="player_state_format_message">Gumagamit ang bersyon na ito ng format na hindi ma-decode ng iyong device. Subukan ang isa pang bersyon kung magagamit ang isa.</string>
     <string name="player_state_generic_terminal_message">Huminto ang pag-playback nang hindi inaasahan. Subukang muli o bumalik sa pamagat.</string>
     <string name="player_change_version">Baguhin ang bersyon</string>
+    <string name="player_other_versions">Iba pang bersyon</string>
     <string name="player_state_accessibility">%1$s. %2$s</string>
     <string name="player_tracks_button">Audio at mga subtitle</string>
     <string name="player_tracks_title">Audio at mga subtitle</string>

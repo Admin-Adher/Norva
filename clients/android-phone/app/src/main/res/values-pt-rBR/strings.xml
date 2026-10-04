@@ -25,6 +25,7 @@
     <string name="player_state_format_message">Esta versão usa um formato que seu dispositivo não consegue decodificar. Experimente outra versão, se houver alguma disponível.</string>
     <string name="player_state_generic_terminal_message">A reprodução parou inesperadamente. Tente novamente ou retorne ao título.</string>
     <string name="player_change_version">Alterar versão</string>
+    <string name="player_other_versions">Outras versões</string>
     <string name="player_state_accessibility">%1$s. %2$s</string>
     <string name="player_tracks_button">Áudio e legendas</string>
     <string name="player_tracks_title">Áudio e legendas</string>

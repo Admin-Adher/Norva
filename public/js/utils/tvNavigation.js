@@ -825,6 +825,13 @@
             scheduleModalFocusRestore(modal);
             return true;
         }
+        // The native recovery dialog owns dismissal independently of its three
+        // playback actions. Back must close it without choosing a version or retry.
+        if (typeof modal.__norvaCloseNativeRecovery === 'function') {
+            modal.__norvaCloseNativeRecovery();
+            scheduleModalFocusRestore(modal);
+            return true;
+        }
         // NorvaModal dialogs (.norva-modal-overlay) are promise-based: their buttons are
         // wired with addEventListener and the dialog dismisses by REMOVING its node (there
         // is no `active` class to strip, and no `.onclick`). Click Cancel — else Confirm/OK

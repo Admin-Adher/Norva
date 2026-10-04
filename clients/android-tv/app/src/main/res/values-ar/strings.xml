@@ -108,4 +108,5 @@
     <string name="native_standalone_hint">مستقل: قم بتشغيل Norva بالكامل على هذا التلفزيون. استخدم هذا عندما لا تريد حسابًا على هذا الجهاز. يستخدم التشغيل وحدة فك ترميز التلفزيون الأصلية.</string>
     <string name="native_connection_tip">خيارات الاتصال المتقدمة: اضغط على MENU، أو اضغط على BACK from Home واختر \"Connection settings\".</string>
     <string name="native_setup_failed">تعذر تشغيل Norva على هذا التلفزيون. حاول ثانية.</string>
+    <string name="player_other_versions">إصدارات أخرى</string>
 </resources>

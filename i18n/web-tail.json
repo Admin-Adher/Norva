@@ -1,7 +1,9 @@
 {
   "ui_web_source_email_not_url": {
     "source": "This is an email or app login, not a provider URL. Ask your provider for a complete M3U link or Xtream server details.",
-    "refs": ["public/js/components/SourceManager.js"],
+    "refs": [
+      "public/js/components/SourceManager.js"
+    ],
     "en": "This is an email or app login, not a provider URL. Ask your provider for a complete M3U link or Xtream server details.",
     "fr": "C’est une adresse email ou un identifiant d’application, pas une URL de fournisseur. Demandez à votre fournisseur un lien M3U complet ou les informations du serveur Xtream.",
     "pt-BR": "Isto é um email ou login de aplicativo, não uma URL do provedor. Peça ao seu provedor um link M3U completo ou os dados do servidor Xtream.",
@@ -26577,5 +26579,259 @@
     "refs": [
       "public/js/utils/sourceHealth.js"
     ]
+  },
+  "ui_playback_version_unavailable_title": {
+    "source": "This version is unavailable",
+    "refs": [
+      "public/js/pages/WatchPage.js",
+      "public/js/pages/MoviesPage.js"
+    ],
+    "en": "This version is unavailable",
+    "fr": "Cette version est indisponible",
+    "pt-BR": "Esta versão está indisponível",
+    "es": "Esta versión no está disponible",
+    "hi": "यह संस्करण उपलब्ध नहीं है",
+    "tr": "Bu sürüm kullanılamıyor",
+    "bn": "এই সংস্করণটি উপলভ্য নয়",
+    "ar": "هذا الإصدار غير متاح",
+    "id": "Versi ini tidak tersedia",
+    "fil": "Hindi available ang bersyong ito"
+  },
+  "ui_playback_version_unavailable_message": {
+    "source": "Access to this copy was refused.",
+    "refs": [
+      "public/js/pages/WatchPage.js",
+      "public/js/pages/MoviesPage.js"
+    ],
+    "en": "Access to this copy was refused.",
+    "fr": "L’accès à cette copie a été refusé.",
+    "pt-BR": "O acesso a esta cópia foi recusado.",
+    "es": "Se ha denegado el acceso a esta copia.",
+    "hi": "इस कॉपी तक पहुँच अस्वीकार कर दी गई।",
+    "tr": "Bu kopyaya erişim reddedildi.",
+    "bn": "এই কপিতে প্রবেশের অনুমতি প্রত্যাখ্যান করা হয়েছে।",
+    "ar": "تم رفض الوصول إلى هذه النسخة.",
+    "id": "Akses ke salinan ini ditolak.",
+    "fil": "Tinanggihan ang pag-access sa kopyang ito."
+  },
+  "ui_playback_version_other_versions": {
+    "source": "Other versions",
+    "refs": [
+      "public/js/pages/WatchPage.js",
+      "public/js/pages/MoviesPage.js"
+    ],
+    "en": "Other versions",
+    "fr": "Autres versions",
+    "pt-BR": "Outras versões",
+    "es": "Otras versiones",
+    "hi": "अन्य संस्करण",
+    "tr": "Diğer sürümler",
+    "bn": "অন্যান্য সংস্করণ",
+    "ar": "إصدارات أخرى",
+    "id": "Versi lain",
+    "fil": "Iba pang bersyon"
+  },
+  "ui_playback_version_retry": {
+    "source": "Retry this version",
+    "refs": [
+      "public/js/pages/WatchPage.js",
+      "public/js/pages/MoviesPage.js"
+    ],
+    "en": "Retry this version",
+    "fr": "Réessayer cette version",
+    "pt-BR": "Tentar esta versão novamente",
+    "es": "Reintentar esta versión",
+    "hi": "यह संस्करण फिर आज़माएँ",
+    "tr": "Bu sürümü yeniden dene",
+    "bn": "এই সংস্করণটি আবার চেষ্টা করুন",
+    "ar": "إعادة محاولة هذا الإصدار",
+    "id": "Coba lagi versi ini",
+    "fil": "Subukang muli ang bersyong ito"
+  },
+  "ui_playback_version_details": {
+    "source": "Back to details",
+    "refs": [
+      "public/js/pages/WatchPage.js",
+      "public/js/pages/MoviesPage.js"
+    ],
+    "en": "Back to details",
+    "fr": "Retour à la fiche",
+    "pt-BR": "Voltar aos detalhes",
+    "es": "Volver a los detalles",
+    "hi": "विवरण पर वापस जाएँ",
+    "tr": "Ayrıntılara dön",
+    "bn": "বিবরণে ফিরে যান",
+    "ar": "العودة إلى التفاصيل",
+    "id": "Kembali ke detail",
+    "fil": "Bumalik sa mga detalye"
+  },
+  "ui_playback_version_lookup_loading": {
+    "source": "Loading other versions…",
+    "refs": [
+      "public/js/pages/WatchPage.js",
+      "public/js/pages/MoviesPage.js"
+    ],
+    "en": "Loading other versions…",
+    "fr": "Chargement des autres versions…",
+    "pt-BR": "Carregando outras versões…",
+    "es": "Cargando otras versiones…",
+    "hi": "अन्य संस्करण लोड हो रहे हैं…",
+    "tr": "Diğer sürümler yükleniyor…",
+    "bn": "অন্যান্য সংস্করণ লোড হচ্ছে…",
+    "ar": "جارٍ تحميل الإصدارات الأخرى…",
+    "id": "Memuat versi lain…",
+    "fil": "Nilo-load ang iba pang bersyon…"
+  },
+  "ui_playback_version_lookup_failed": {
+    "source": "The versions could not be loaded. Please try again.",
+    "refs": [
+      "public/js/pages/WatchPage.js",
+      "public/js/pages/MoviesPage.js"
+    ],
+    "en": "The versions could not be loaded. Please try again.",
+    "fr": "Impossible de charger les versions. Veuillez réessayer.",
+    "pt-BR": "Não foi possível carregar as versões. Tente novamente.",
+    "es": "No se han podido cargar las versiones. Vuelve a intentarlo.",
+    "hi": "संस्करण लोड नहीं हो सके। कृपया फिर कोशिश करें।",
+    "tr": "Sürümler yüklenemedi. Lütfen yeniden deneyin.",
+    "bn": "সংস্করণগুলো লোড করা যায়নি। আবার চেষ্টা করুন।",
+    "ar": "تعذر تحميل الإصدارات. يُرجى المحاولة مرة أخرى.",
+    "id": "Versi tidak dapat dimuat. Silakan coba lagi.",
+    "fil": "Hindi ma-load ang mga bersyon. Pakisubukang muli."
+  },
+  "ui_playback_version_no_alternatives": {
+    "source": "No other version is offered in your catalogue.",
+    "refs": [
+      "public/js/pages/WatchPage.js",
+      "public/js/pages/MoviesPage.js"
+    ],
+    "en": "No other version is offered in your catalogue.",
+    "fr": "Aucune autre version n’est proposée dans votre catalogue.",
+    "pt-BR": "Nenhuma outra versão é oferecida no seu catálogo.",
+    "es": "Tu catálogo no ofrece ninguna otra versión.",
+    "hi": "आपकी सूची में कोई अन्य संस्करण उपलब्ध नहीं है।",
+    "tr": "Kataloğunuzda başka bir sürüm sunulmuyor.",
+    "bn": "আপনার ক্যাটালগে অন্য কোনো সংস্করণ নেই।",
+    "ar": "لا يوجد إصدار آخر في كتالوجك.",
+    "id": "Tidak ada versi lain di katalog Anda.",
+    "fil": "Walang ibang bersyon sa iyong katalogo."
+  },
+  "ui_playback_version_choose_hint": {
+    "source": "Choose a version and check its audio and subtitles.",
+    "refs": [
+      "public/js/pages/WatchPage.js",
+      "public/js/pages/MoviesPage.js"
+    ],
+    "en": "Choose a version and check its audio and subtitles.",
+    "fr": "Choisissez une version et vérifiez sa langue audio et ses sous-titres.",
+    "pt-BR": "Escolha uma versão e confira o áudio e as legendas.",
+    "es": "Elige una versión y comprueba el audio y los subtítulos.",
+    "hi": "कोई संस्करण चुनें और उसका ऑडियो और उपशीर्षक जाँचें।",
+    "tr": "Bir sürüm seçin ve sesini ve altyazılarını kontrol edin.",
+    "bn": "একটি সংস্করণ বেছে নিয়ে তার অডিও ও সাবটাইটেল দেখুন।",
+    "ar": "اختر إصدارًا وتحقق من الصوت والترجمة.",
+    "id": "Pilih versi dan periksa audio serta subtitelnya.",
+    "fil": "Pumili ng bersyon at tingnan ang audio at mga subtitle nito."
+  },
+  "ui_playback_version_resume_choice": {
+    "source": "Choose where to start this version.",
+    "refs": [
+      "public/js/pages/WatchPage.js",
+      "public/js/pages/MoviesPage.js"
+    ],
+    "en": "Choose where to start this version.",
+    "fr": "Choisissez où démarrer cette version.",
+    "pt-BR": "Escolha de onde iniciar esta versão.",
+    "es": "Elige dónde empezar esta versión.",
+    "hi": "चुनें कि यह संस्करण कहाँ से शुरू करें।",
+    "tr": "Bu sürümü nereden başlatacağınızı seçin.",
+    "bn": "এই সংস্করণটি কোথা থেকে শুরু হবে বেছে নিন।",
+    "ar": "اختر موضع بدء هذا الإصدار.",
+    "id": "Pilih posisi untuk memulai versi ini.",
+    "fil": "Piliin kung saan sisimulan ang bersyong ito."
+  },
+  "ui_playback_version_resume_at": {
+    "source": "Resume at {{position}}",
+    "refs": [
+      "public/js/pages/WatchPage.js",
+      "public/js/pages/MoviesPage.js"
+    ],
+    "en": "Resume at {{position}}",
+    "fr": "Reprendre à {{position}}",
+    "pt-BR": "Retomar em {{position}}",
+    "es": "Reanudar en {{position}}",
+    "hi": "{{position}} से जारी रखें",
+    "tr": "{{position}} konumundan sürdür",
+    "bn": "{{position}} থেকে আবার চালান",
+    "ar": "المتابعة من {{position}}",
+    "id": "Lanjutkan dari {{position}}",
+    "fil": "Ituloy mula {{position}}"
+  },
+  "ui_playback_version_start_over": {
+    "source": "Start from the beginning",
+    "refs": [
+      "public/js/pages/WatchPage.js",
+      "public/js/pages/MoviesPage.js"
+    ],
+    "en": "Start from the beginning",
+    "fr": "Repartir du début",
+    "pt-BR": "Começar do início",
+    "es": "Empezar desde el principio",
+    "hi": "शुरू से चलाएँ",
+    "tr": "Baştan başlat",
+    "bn": "শুরু থেকে চালান",
+    "ar": "البدء من البداية",
+    "id": "Mulai dari awal",
+    "fil": "Magsimula sa umpisa"
+  },
+  "ui_playback_version_cancel": {
+    "source": "Cancel",
+    "refs": [
+      "public/js/pages/WatchPage.js",
+      "public/js/pages/MoviesPage.js"
+    ],
+    "en": "Cancel",
+    "fr": "Annuler",
+    "pt-BR": "Cancelar",
+    "es": "Cancelar",
+    "hi": "रद्द करें",
+    "tr": "İptal",
+    "bn": "বাতিল",
+    "ar": "إلغاء",
+    "id": "Batal",
+    "fil": "Kanselahin"
+  },
+  "ui_playback_version_refused_recently": {
+    "source": "Refused during the last attempt",
+    "refs": [
+      "public/js/pages/WatchPage.js",
+      "public/js/pages/MoviesPage.js"
+    ],
+    "en": "Refused during the last attempt",
+    "fr": "Refusée lors du dernier essai",
+    "pt-BR": "Recusada na última tentativa",
+    "es": "Rechazada en el último intento",
+    "hi": "पिछली कोशिश में अस्वीकार किया गया",
+    "tr": "Son denemede reddedildi",
+    "bn": "শেষ চেষ্টায় প্রত্যাখ্যাত হয়েছে",
+    "ar": "تم رفضها في المحاولة الأخيرة",
+    "id": "Ditolak pada percobaan terakhir",
+    "fil": "Tinanggihan sa huling pagsubok"
+  },
+  "ui_playback_version_resume_hint": {
+    "source": "Different versions may place the same scene at a different time.",
+    "refs": [
+      "public/js/pages/MoviesPage.js"
+    ],
+    "en": "Different versions may place the same scene at a different time.",
+    "fr": "La même scène peut se trouver à un autre moment selon la version.",
+    "pt-BR": "A mesma cena pode estar em outro momento dependendo da versão.",
+    "es": "La misma escena puede aparecer en otro momento según la versión.",
+    "hi": "अलग-अलग संस्करणों में वही दृश्य अलग समय पर हो सकता है।",
+    "tr": "Aynı sahne farklı sürümlerde farklı bir zamanda yer alabilir.",
+    "bn": "সংস্করণভেদে একই দৃশ্য আলাদা সময়ে থাকতে পারে।",
+    "ar": "قد يظهر المشهد نفسه في وقت مختلف حسب الإصدار.",
+    "id": "Adegan yang sama dapat berada pada waktu berbeda di setiap versi.",
+    "fil": "Maaaring nasa ibang oras ang parehong eksena depende sa bersyon."
   }
 }

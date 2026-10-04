@@ -108,4 +108,5 @@
     <string name="native_standalone_hint">Autonome : exécutez Norva entièrement sur ce téléviseur. Utilisez-le lorsque vous ne souhaitez pas de compte sur cet appareil. La lecture utilise le décodeur natif du téléviseur.</string>
     <string name="native_connection_tip">Options de connexion avancées : appuyez sur MENU ou appuyez sur RETOUR depuis Accueil et choisissez \"Paramètres de connexion\".</string>
     <string name="native_setup_failed">Norva n\'a pas pu démarrer sur ce téléviseur. Essayer à nouveau.</string>
+    <string name="player_other_versions">Autres versions</string>
 </resources>

@@ -108,4 +108,5 @@
     <string name="native_standalone_hint">Mandiri: jalankan Norva sepenuhnya di TV ini. Gunakan ini bila Anda tidak ingin akun di perangkat ini. Pemutaran menggunakan dekoder asli TV.</string>
     <string name="native_connection_tip">Opsi koneksi lanjutan: tekan MENU, atau tekan BACK dari Beranda dan pilih \"Pengaturan koneksi\".</string>
     <string name="native_setup_failed">Norva tidak dapat memulai di TV ini. Coba lagi.</string>
+    <string name="player_other_versions">Versi lain</string>
 </resources>
