@@ -38,6 +38,10 @@ public final class NativeVfwMpeg4InstrumentedTest {
         // Start beyond the initial cluster without first rendering byte zero.
         replay("s_xvid_vfw_inband_aac.mkv",7,3);
     }
+    @Test public void advancedSimpleQpelBFramesRenderAndResume() throws Exception {
+        assertTrue(Mpeg4VideoDecoder.isAvailable());
+        replay("s_xvid_vfw_asp_qpel.mkv",3,7);
+    }
     private void replay(String asset,int resumeSeconds,int seekSeconds) throws Exception {
         Instrumentation ins=InstrumentationRegistry.getInstrumentation();
         Context target=ins.getTargetContext();
