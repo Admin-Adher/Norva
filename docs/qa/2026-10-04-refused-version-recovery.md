@@ -83,6 +83,18 @@ The regression evidence exercises:
 The coordinator separately reported **119 targeted tests passed**. That run
 overlaps these suites; its result must not be added to 124 as a unique-test count.
 
+A subsequent corner-case regression exercised an explicit start at zero, a
+typed refusal of that copy and the real Web retry method. It resolved the same
+source, file and container at zero, without reading server or local history.
+No Web retry behaviour change was needed. The detail-return button identifier
+was renamed to avoid colliding with the existing raw-diagnostic CSS security
+guard; the security test remained unchanged. The following follow-up command
+passed **32 tests**, overlapping the earlier run:
+
+```powershell
+node --test tests/consumer-error-sanitization.test.js tests/watch-session-handoff-order.test.js tests/watch-provider-file-refused.test.js tests/watch-version-recovery.test.js
+```
+
 ### Browser fixture evidence
 
 The coordinator's browser run completed **eight recovery fixture scenarios**

@@ -276,7 +276,7 @@ window.ProviderVersionCardsQA = (() => {
         fixture = mountPlaybackRecovery();
         document.getElementById('watch-error-refresh-btn').click();
         assert(fixture.retries.length === 1 && fixture.retries[0] === 'failed-file' && fixture.plays.length === 0, 'retry changed file');
-        document.getElementById('watch-error-details-btn').click(); await turn();
+        document.getElementById('watch-error-back-btn').click(); await turn();
         assert(fixture.app.currentPage === 'movies' && fixture.plays.length === 0, 'back to details started playback');
         buttons = [...document.querySelectorAll('#qa-recovery-versions button')];
         buttons.find(button => fixture.movies.currentMovieVersions[Number(button.dataset.index)].stream_id === 'french-copy').click();

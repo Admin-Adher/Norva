@@ -31,7 +31,7 @@
   "public/js/pages/PartnersPage.js": "2e4adbbee5",
   "public/js/pages/SeriesPage.js": "6c04a0e7fa",
   "public/js/pages/Settings.js": "995a273060",
-  "public/js/pages/WatchPage.js": "a5218b57e8",
+  "public/js/pages/WatchPage.js": "e1e9d471ad",
   "public/js/plan-selection-ui.js": "d9a5e6f499",
   "public/js/profiles.js": "a086ae985e",
   "public/js/promo-ui.js": "16352011b4",
@@ -41,6 +41,6 @@
   "public/js/utils/mediaUtils.js": "ae8caf6605",
   "public/js/utils/regions.js": "68b00bc227",
   "public/js/utils/sourceHealth.js": "c9d3adcf56",
-  "public/js/utils/standalone.js": "7df5caedf9",
+  "public/js/utils/standalone.js": "153ccc9273",
   "public/js/utils/tvNavigation.js": "63bd53a493"
 }

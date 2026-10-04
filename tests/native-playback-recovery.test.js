@@ -1247,6 +1247,41 @@ for (const position of [0, 300]) {
     assert.equal(lookups, 0);
     assert.equal(fixture.launches[0].itemId, 'chosen-copy');
   });
+
+  test(`initial refused copy retry preserves explicit ${position}s but the next ordinary intent refreshes history`, async () => {
+    let lookups = 0, attempts = 0;
+    const fixture = nativeVodIntentFixture({ itemType: 'movie', resumeInfo: async () => {
+      lookups++; return { answered: true, position: 720 };
+    }, resolveInitial: async () => {
+      if (++attempts === 1) {
+        const error = new Error('Fixture refusal'); error.code = 'PROVIDER_FILE_REFUSED'; throw error;
+      }
+      return { url: 'https://provider.example/chosen.mkv', sessionId: '50000000-0000-4000-8000-000000000011' };
+    } });
+    const nodes = [];
+    fixture.document.createElement = tag => {
+      const node = { tag, children: [], dataset: {}, listeners: {}, classList: { remove() {} },
+        setAttribute() {}, appendChild(child) { this.children.push(child); },
+        addEventListener(event, callback) { this.listeners[event] = callback; }, remove() {} };
+      nodes.push(node); return node;
+    };
+    fixture.document.body.appendChild = () => {};
+    fixture.window.NorvaModal = { installHygiene() {} };
+    fixture.window.app.currentUser = { id: 'fixture-owner' };
+    fixture.window.app.pages.movies = { async openPlaybackRecovery() { return true; } };
+    await fixture.play('chosen-copy', { resumeTime: position, explicitRecoveryResume: true });
+    assert.equal(fixture.launches.length, 0);
+    assert.equal(lookups, 0);
+    await nodes.find(node => node.dataset.nativeRecoveryAction === 'retry').listeners.click();
+    assert.equal(fixture.launches.length, 1);
+    assert.equal(fixture.launches[0].resumeSeconds, position);
+    assert.equal(fixture.launches[0].itemId, 'chosen-copy');
+    assert.equal(lookups, 0, 'same explicit recovery must not consult conflicting saved progress');
+    fixture.window.__norvaResetPlayThrottle();
+    await fixture.play('ordinary-copy');
+    assert.equal(lookups, 1, 'ordinary playback restores normal cross-device resume');
+    assert.equal(fixture.launches[1].resumeSeconds, 720);
+  });
 }
 
 for (const invalidation of ['none', 'unclosed', 'close-failed', 'owner', 'route', 'new-intent']) {

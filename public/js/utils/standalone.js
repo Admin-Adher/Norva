@@ -1627,10 +1627,16 @@
                     if (error?.name === 'AbortError' || !isCurrentLaunch()) return;
                     lastNativeIntentAt = 0;
                     dismissNativePlaybackStartFailure();
+                    // A retry within this explicit recovery keeps the viewer's
+                    // chosen beginning/position. Ordinary Play still refreshes
+                    // cross-device history through its existing path.
+                    const retryContent = explicitRecoveryResume
+                        ? { ...content, resumeTime: effectiveResume, explicitRecoveryResume: true }
+                        : content;
                     const errorText = typeof this.getErrorText === 'function' ? this.getErrorText(error) : String(error?.code || '');
                     if (content?.type === 'movie' && /\bPROVIDER_FILE_REFUSED\b/i.test(errorText)
                         && showNativeFileRefusal(this, content, effectiveResume, launchRefusalScope,
-                            isCurrentLaunch, () => this.play(content, streamUrl, playback))) return;
+                            isCurrentLaunch, () => this.play(retryContent, streamUrl, playback))) return;
                     nativePlaybackStartFailure = window.app?.showToast?.(
                         globalThis.NorvaI18n?.t('ui_web_05958c958fa0', {
                             defaultValue: 'This title could not be started. Please try again.'
@@ -1646,7 +1652,7 @@
                                 dismissNativePlaybackStartFailure();
                                 // Explicitly retry the same title through the full
                                 // launcher, including fresh cross-device progress.
-                                return this.play(content, streamUrl, playback);
+                                return this.play(retryContent, streamUrl, playback);
                             }
                         }
                     ) || null;

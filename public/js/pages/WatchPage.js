@@ -8392,13 +8392,13 @@ class WatchPage {
             <div class="watch-error-actions">
                 <button type="button" class="watch-error-refresh-btn" id="watch-error-versions-btn">${this.escapeHtml(t('ui_playback_version_other_versions', 'Other versions'))}</button>
                 <button type="button" class="watch-error-refresh-btn" id="watch-error-refresh-btn">${this.escapeHtml(t('ui_playback_version_retry', 'Retry this version'))}</button>
-                <button type="button" class="watch-error-refresh-btn" id="watch-error-details-btn">${this.escapeHtml(t('ui_playback_version_details', 'Back to details'))}</button>
+                <button type="button" class="watch-error-refresh-btn" id="watch-error-back-btn">${this.escapeHtml(t('ui_playback_version_details', 'Back to details'))}</button>
             </div></div>`;
         errorEl.setAttribute('role', 'alert');
         errorEl.classList.remove('hidden');
         videoSection?.classList.add('has-playback-error');
         document.getElementById('watch-error-versions-btn')?.addEventListener('click', () => this.openRefusedVersionDetails(true));
-        document.getElementById('watch-error-details-btn')?.addEventListener('click', () => this.openRefusedVersionDetails(false));
+        document.getElementById('watch-error-back-btn')?.addEventListener('click', () => this.openRefusedVersionDetails(false));
         document.getElementById('watch-error-refresh-btn')?.addEventListener('click', () => {
             if (this._versionRecoveryBusy) return;
             this._nextProductRetrySource = 'manual';
@@ -8416,7 +8416,7 @@ class WatchPage {
         const current = () => this.app.currentPage === 'watch' && this.content === content
             && this._playbackAttemptId === attempt && this.app.currentUser === owner && this.app.currentUser?.id === ownerId;
         const position = Math.max(0, Math.floor(Number(this.getResumeSnapshotPosition()) || 0));
-        const buttons = ['watch-error-versions-btn', 'watch-error-refresh-btn', 'watch-error-details-btn']
+        const buttons = ['watch-error-versions-btn', 'watch-error-refresh-btn', 'watch-error-back-btn']
             .map(id => document.getElementById(id)).filter(Boolean);
         const status = document.getElementById('watch-error-version-status');
         this._versionRecoveryBusy = true;
