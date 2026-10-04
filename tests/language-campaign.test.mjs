@@ -55,6 +55,23 @@ test('both lanes respect a viewer, provider circuit and uncertain HTTP outcome',
   }
 });
 
+test('live-session receipts with processed deferrals wait three minutes on both lanes', () => {
+  for (const field of ['skipped', 'code']) {
+    for (const lane of ['metadata', 'exact']) {
+      const state = recoverState(null, sources, 0);
+      const result = { [field]: 'live-session', processed: 1, attempted: 0, deferred: 1, hasMore: true };
+      recordResult(state.sources.a, lane, result, 2000);
+      // A processed receipt can record only a deferral, with no provider I/O.
+      assert.equal(chooseWork(state, [sources[0]], new Set(), 4000), undefined);
+      assert.equal(chooseWork(state, [sources[0]], new Set(), 181999), undefined);
+      assert.equal(state.sources.a.blockedUntil, 182000);
+      assert.equal(chooseWork(state, [sources[0]], new Set(), 182000).lane, 'metadata');
+      assert.equal(chooseWork(state, [sources[1]], new Set(), 4000).source.id, 'b');
+      assert.equal(state.sources.a.totals.attempted, 0);
+    }
+  }
+});
+
 test('finite metadata batches rotate fairly and exact work has priority in its window', () => {
   const state = recoverState(null, sources, 0);
   assert.equal(chooseWork(state, sources, new Set(), 1000).source.id, 'a');
