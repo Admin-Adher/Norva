@@ -1,0 +1,82 @@
+{
+  "at": "2026-10-04T14:48:45.161793+00:00",
+  "gateways": [
+    {
+      "port": 8081,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "port": 18086,
+      "status": 200,
+      "ok": true
+    }
+  ],
+  "dispatcherRunning": true,
+  "STOPpresent": false,
+  "admission": {
+    "cron": true,
+    "paused": false
+  },
+  "deployment": {
+    "at": 1791125173.691395,
+    "revision": "f7732a8f33bcb45cf7e0cbed705364596a7d9794",
+    "files": {
+      "norva-catalog/index.ts": "b75aa14aef60352ceac2efdc4762d5f5b5a94f0d5bd8e48a2bba73f5a262fc10",
+      "_shared/tmdb-search-policy.mjs": "d59b4d21d3df7e45a23b3aa1a0950d56a43b795aba5832a510f6a60ca2aa69f5",
+      "_shared/vod-title-projection.ts": "34971c24e2ab29e18b407baac22f4fe0bffde29c74538983d57389de0eda21ae"
+    },
+    "replicas": 2
+  },
+  "restoration": {
+    "pause": "2026-10-04T14:46:05.506229+00:00",
+    "restoredAt": "2026-10-04T14:46:13.782586+00:00",
+    "forcedLeases": false
+  },
+  "comparisons": [
+    {
+      "at": "2026-10-04T14:45:45.841332+00:00",
+      "results": [
+        {
+          "edge": "norva-edge-functions",
+          "ms": 553,
+          "files": 15,
+          "missingYear": 4,
+          "missingSynopsis": 4,
+          "validatedPublicIdentities": 0
+        },
+        {
+          "edge": "norva-nested-title-canary",
+          "ms": 894,
+          "files": 15,
+          "missingYear": 0,
+          "missingSynopsis": 0,
+          "validatedPublicIdentities": 15
+        }
+      ],
+      "fileCoordinatesAndLanguagesUnchanged": true
+    },
+    {
+      "at": "2026-10-04T14:46:43.613365+00:00",
+      "results": [
+        {
+          "edge": "norva-edge-functions",
+          "ms": 820,
+          "files": 15,
+          "missingYear": 0,
+          "missingSynopsis": 0,
+          "validatedPublicIdentities": 15
+        },
+        {
+          "edge": "norva-edge-functions-2",
+          "ms": 876,
+          "files": 15,
+          "missingYear": 0,
+          "missingSynopsis": 0,
+          "validatedPublicIdentities": 15
+        }
+      ],
+      "fileCoordinatesAndLanguagesUnchanged": true
+    }
+  ]
+}
