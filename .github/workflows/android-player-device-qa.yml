@@ -1,8 +1,6 @@
 name: Isolated Android player device QA
 on:
   workflow_dispatch:
-  push:
-    branches: ['codex/native-mpeg4-software-decode-20261004']
 permissions:
   contents: read
 jobs:
