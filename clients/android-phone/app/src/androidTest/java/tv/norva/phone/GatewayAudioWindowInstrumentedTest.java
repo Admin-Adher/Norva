@@ -14,7 +14,7 @@ import static org.junit.Assert.*;
 
 /** Actual WatchPage recovery contract in Android WebView; no provider/decoder claim. */
 public class GatewayAudioWindowInstrumentedTest {
-    private static final String HTML = "<!doctype html><html><body><script src='/js/pages/WatchPage.js'></script></body></html>";
+    private static final String HTML = "<!doctype html><html><body><script src='/js/utils/mediaUtils.js'></script><script src='/js/pages/WatchPage.js'></script></body></html>";
 
     @Test public void expiredAudioWindowKeepsAbsolutePositionAndPauseIntent() throws Exception {
         android.app.Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
@@ -53,7 +53,16 @@ public class GatewayAudioWindowInstrumentedTest {
                 + "if(!anchor||anchor.position!==340||anchor.autoplay!==!paused)throw Error('lost anchor or pause');"
                 + "if(hls.audioTrack!==0||stopped!==1||page.directAudioStreamIndex!==1)throw Error('unsafe track promotion');"
                 + "if(page.selectedAudioStreamIndex!==2)throw Error('wrong requested track');"
-                + "}return 'ok';}catch(e){return String(e);}})()",
+                + "}const audio=Object.create(WatchPage.prototype);"
+                + "audio.content={title:'Innocent Voices',rawTitle:'EN| Innocent Voices [SUB]',original_language:'en',subtitleLanguages:['en']};"
+                + "audio.audioTracks=[{index:1,language:'und',codec:'aac',channels:6}];"
+                + "if(audio.playingAudioVersionLabel()!==null)throw Error('subtitle or filename inferred as audio');"
+                + "if(!audio.getProbeAudioTracks()[0].label.startsWith('Audio track'))throw Error('unknown track mislabeled');"
+                + "audio.content={providerAudioLanguages:['es'],providerAudioLanguageStatus:'provider_declared'};"
+                + "if(audio.playingAudioVersionLabel()!==audio.getLanguageDisplayName('es'))throw Error('explicit declaration lost');"
+                + "audio.audioTracks[0].language='fr';audio.audioLanguageValidationStatus='probed';"
+                + "if(!audio.getProbeAudioTracks()[0].label.startsWith(audio.getLanguageDisplayName('fr')))throw Error('embedded track lost');"
+                + "return 'ok';}catch(e){return String(e);}})()",
                 value -> { result.set(value); done.countDown(); }));
             assertTrue("WebView completed recovery contract", done.await(20, TimeUnit.SECONDS));
             assertEquals("\"ok\"", result.get());
