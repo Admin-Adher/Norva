@@ -104,3 +104,11 @@ Aucun nouvel échec HTTP du dispatcher ni délai SQL dépassé dans les deux Edg
 
 Les Gateways et le dispatcher sont sains ; la campagne continue en conservant ses limites et protections. Aucune modification de production. Le débit technique ne fournit toujours pas de délai fiable pour achever l'ensemble des analyses vocales. Reçu : `2026-10-04-language-campaign-heartbeat-0213.json`.
 
+## Mesure du 4 octobre à 01:14 UTC — 03:14 Paris
+
+**8 465 variantes distinctes contrôlées**, soit +348 en 61 min 26 s : **340 contrôles techniques/h**, contre 833/h précédemment. **2 921 identifiées** (+111), **53 830 variantes / 41 356 fiches inconnues**, cohorte intégralement visible. Les délais de capacité, d'occupation et de protection fournisseur persistent, sans nouvelle expiration SQL.
+
+Reprise automatique Dino prouvée à 00:51:27 UTC : 29 contrôles et 16 identifications dans le premier lot après protection, puis dix lots avec tentatives jusqu'à 00:58. MAX OTT attend encore l'échéance de 01:56 ; sa nouvelle validation stricte à 00:51 finalise une capture antérieure et n'ajoute pas une version distincte au total contrôlé.
+
+**18 validations strictes réussies** (+1) et **38 analyses complètes indéterminées avec profil courant correspondant** (+5). Aucun bail de capture/finalisation expiré dans la cohorte au relevé de 01:14. Les services sont sains et la campagne reste active, sans modification de production ni prévision fiable de fin complète. Reçu : `2026-10-04-language-campaign-heartbeat-0314.json`.
+

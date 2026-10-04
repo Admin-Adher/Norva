@@ -1,0 +1,1071 @@
+{
+  "summary": {
+    "localTimeZone": "Europe/Paris",
+    "label": "4 octobre 2026, 03:14",
+    "initialVariants": 56751,
+    "uniqueChecked": 8465,
+    "identified": 2921,
+    "stillUnknown": 53830,
+    "distinctUnknownCards": 41356,
+    "uniqueCheckedDelta": 348,
+    "identifiedDelta": 111,
+    "observationSeconds": 3686.424,
+    "uniqueTechnicalChecksPerHour": 339.8415374899903,
+    "strictVerifiedWithEvidence": 18,
+    "strictCompletedInconclusiveMatchingProfile": 38,
+    "strictVerifiedDelta": 1,
+    "strictCompletedInconclusiveDelta": 5,
+    "status": "running",
+    "limitations": [
+      "Successive queries, not an atomic snapshot.",
+      "Technical checks are not completed speech analyses; overlapping counters must not be added.",
+      "First-pass rate estimates are not completion forecasts.",
+      "No further dispatcher HTTP error or Edge SQL timeout since the previously documented 21:20 UTC incident.",
+      "Dino metadata resumed autonomously at 00:51:27 UTC after its protection deadline; normal occupancy delays continue.",
+      "MAX OTT probe protection is still active until 01:56 UTC at this snapshot; its additional verified result finalized earlier captures.",
+      "No expired running or finalizing lease was found in the cohort at 01:14 UTC.",
+      "No production behavior, confidence threshold, capacity limit, lease or quarantine changed in this audit."
+    ]
+  },
+  "latest": {
+    "at": "2026-10-04T01:14:25.854934+00:00",
+    "startedAt": "2026-10-03T16:24:04.734234+00:00",
+    "initialVariants": 56751,
+    "sources": [
+      {
+        "intakeCodes": {
+          "server-capacity": 10,
+          "codec_probe_timeout": 8,
+          "provider-account-busy": 14,
+          "strict-analysis-queued": 11,
+          "declared-track-languages": 44,
+          "incomplete_codec_profile": 2,
+          "strict-analysis-deferred": 4
+        },
+        "intakeStates": {
+          "queued": 11,
+          "deferred": 38,
+          "identified": 44
+        },
+        "recentIntake": 92,
+        "strictStates": {
+          "failed": 5,
+          "running": 1,
+          "verified": 3,
+          "retry_wait": 2
+        },
+        "cohortVisible": 30194,
+        "cohortWithProfile": 67,
+        "cohortStillUnknown": 30147,
+        "currentUnknownCards": 22094,
+        "cohortWithAudioTracks": 67,
+        "currentUnknownVariants": 30147,
+        "strictCompletedWindows": 34,
+        "lastStrictProviderProgress": "2026-10-04T01:13:27.666422+00:00",
+        "source": "Strng IPTV 8K",
+        "initialUnknownVariants": 30194,
+        "cohortNowIdentified": 47,
+        "cohortChangedOrRemoved": 0
+      },
+      {
+        "intakeCodes": {
+          "server-capacity": 7,
+          "provider-account-busy": 48,
+          "strict-analysis-queued": 34,
+          "declared-track-languages": 1,
+          "incomplete_codec_profile": 2,
+          "strict-analysis-deferred": 30
+        },
+        "intakeStates": {
+          "queued": 34,
+          "deferred": 87,
+          "identified": 1
+        },
+        "recentIntake": 117,
+        "strictStates": {
+          "failed": 28,
+          "running": 1,
+          "verified": 3,
+          "retry_wait": 2
+        },
+        "cohortVisible": 183,
+        "cohortWithProfile": 174,
+        "cohortStillUnknown": 178,
+        "currentUnknownCards": 174,
+        "cohortWithAudioTracks": 173,
+        "currentUnknownVariants": 178,
+        "strictCompletedWindows": 174,
+        "lastStrictProviderProgress": "2026-10-04T01:11:23.062111+00:00",
+        "source": "Norva Selection",
+        "initialUnknownVariants": 183,
+        "cohortNowIdentified": 5,
+        "cohortChangedOrRemoved": 0
+      },
+      {
+        "intakeCodes": {
+          "server-capacity": 6,
+          "codec_probe_timeout": 1,
+          "intake-request-failed": 1,
+          "provider-account-busy": 18,
+          "strict-analysis-queued": 15,
+          "declared-track-languages": 10,
+          "strict-analysis-deferred": 10,
+          "codec_probe_invalid_media": 2
+        },
+        "intakeStates": {
+          "queued": 15,
+          "deferred": 38,
+          "identified": 10
+        },
+        "recentIntake": 63,
+        "strictStates": {
+          "failed": 9,
+          "queued": 1,
+          "verified": 4,
+          "retry_wait": 1
+        },
+        "cohortVisible": 8869,
+        "cohortWithProfile": 39,
+        "cohortStillUnknown": 7462,
+        "currentUnknownCards": 6500,
+        "cohortWithAudioTracks": 39,
+        "currentUnknownVariants": 7462,
+        "strictCompletedWindows": 60,
+        "lastStrictProviderProgress": "2026-10-04T01:12:44.84086+00:00",
+        "source": "Dino",
+        "initialUnknownVariants": 8869,
+        "cohortNowIdentified": 1407,
+        "cohortChangedOrRemoved": 0
+      },
+      {
+        "intakeCodes": {
+          "server-capacity": 7,
+          "codec_probe_failed": 2,
+          "codec_probe_timeout": 1,
+          "provider-account-busy": 15,
+          "strict-analysis-queued": 10,
+          "declared-track-languages": 3,
+          "incomplete_codec_profile": 2,
+          "strict-analysis-deferred": 13,
+          "codec_probe_access_denied": 2,
+          "provider_probe_circuit_open": 10
+        },
+        "intakeStates": {
+          "failed": 1,
+          "queued": 10,
+          "deferred": 51,
+          "identified": 3
+        },
+        "recentIntake": 63,
+        "strictStates": {
+          "failed": 4,
+          "verified": 8,
+          "retry_wait": 1
+        },
+        "cohortVisible": 17505,
+        "cohortWithProfile": 31,
+        "cohortStillUnknown": 16043,
+        "currentUnknownCards": 15700,
+        "cohortWithAudioTracks": 31,
+        "currentUnknownVariants": 16043,
+        "strictCompletedWindows": 24,
+        "lastStrictProviderProgress": "2026-10-04T00:11:31.945755+00:00",
+        "source": "MAX OTT",
+        "initialUnknownVariants": 17505,
+        "cohortNowIdentified": 1462,
+        "cohortChangedOrRemoved": 0
+      }
+    ],
+    "currentGlobal": {
+      "unknownCards": 41356,
+      "unknownVariants": 53830
+    },
+    "dispatcher": [
+      {
+        "source": "Strng IPTV 8K",
+        "calls": 438,
+        "totals": {
+          "processed": 3325,
+          "attempted": 3216,
+          "queued": 12,
+          "identified": 47,
+          "verified": 0,
+          "inconclusive": 3118,
+          "deferred": 116,
+          "failed": 32,
+          "scanned": 19572
+        },
+        "failures": 0,
+        "lastResult": {
+          "processed": 1,
+          "attempted": 0,
+          "queued": 0,
+          "identified": 0,
+          "verified": 0,
+          "inconclusive": 0,
+          "deferred": 1,
+          "failed": 0,
+          "scanned": 5,
+          "skipped": "provider-account-busy",
+          "hasMore": true
+        },
+        "lastAt": "2026-10-04T01:12:41.536Z"
+      },
+      {
+        "source": "Norva Selection",
+        "calls": 166,
+        "totals": {
+          "processed": 157,
+          "attempted": 75,
+          "queued": 29,
+          "identified": 1,
+          "verified": 0,
+          "inconclusive": 0,
+          "deferred": 112,
+          "failed": 15,
+          "scanned": 4039
+        },
+        "failures": 0,
+        "lastResult": {
+          "processed": 2,
+          "attempted": 0,
+          "queued": 1,
+          "identified": 0,
+          "verified": 0,
+          "inconclusive": 0,
+          "deferred": 1,
+          "failed": 0,
+          "scanned": 99,
+          "code": "server-capacity",
+          "outcome": "deferred",
+          "hasMore": true
+        },
+        "lastAt": "2026-10-04T01:14:25.806Z"
+      },
+      {
+        "source": "Dino",
+        "calls": 380,
+        "totals": {
+          "processed": 2719,
+          "attempted": 2605,
+          "queued": 15,
+          "identified": 1356,
+          "verified": 0,
+          "inconclusive": 1205,
+          "deferred": 123,
+          "failed": 20,
+          "scanned": 30742
+        },
+        "failures": 0,
+        "lastResult": {
+          "processed": 1,
+          "attempted": 0,
+          "queued": 0,
+          "identified": 0,
+          "verified": 0,
+          "inconclusive": 0,
+          "deferred": 1,
+          "failed": 0,
+          "scanned": 1,
+          "skipped": "provider-account-busy",
+          "hasMore": true
+        },
+        "lastAt": "2026-10-04T01:13:46.362Z"
+      },
+      {
+        "source": "MAX OTT",
+        "calls": 387,
+        "totals": {
+          "processed": 2460,
+          "attempted": 2344,
+          "queued": 10,
+          "identified": 1336,
+          "verified": 0,
+          "inconclusive": 971,
+          "deferred": 122,
+          "failed": 21,
+          "scanned": 22034
+        },
+        "failures": 0,
+        "lastResult": {
+          "processed": 1,
+          "attempted": 0,
+          "queued": 0,
+          "identified": 0,
+          "verified": 0,
+          "inconclusive": 0,
+          "deferred": 1,
+          "failed": 0,
+          "scanned": 23,
+          "code": "provider_probe_circuit_open",
+          "outcome": "deferred",
+          "hasMore": true
+        },
+        "lastAt": "2026-10-04T01:12:34.696Z"
+      }
+    ],
+    "container": {
+      "running": true,
+      "health": "healthy",
+      "restartCount": 0
+    }
+  },
+  "coverage": {
+    "startedAt": "2026-10-03T16:24:04.734234+00:00",
+    "at": "2026-10-04T01:14:49.327652+00:00",
+    "initial": 56751,
+    "uniqueChecked": 8465,
+    "elapsedMinutes": 530.7432236333333,
+    "checkedPerHour": 956.959933511813,
+    "remainingFirstPassDays": 2.1024042869625856,
+    "sources": [
+      {
+        "at": "2026-10-04T01:14:46.944004+00:00",
+        "uniqueChecked": 3327,
+        "profilesProbed": 58,
+        "metadataChecked": 3268,
+        "uniqueLast15Min": 70,
+        "strictWithProgress": 10,
+        "strictRecentTerminal": {
+          "verified": 3,
+          "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE": 5
+        },
+        "source": "Strng IPTV 8K"
+      },
+      {
+        "at": "2026-10-04T01:14:47.728503+00:00",
+        "uniqueChecked": 60,
+        "profilesProbed": 60,
+        "metadataChecked": 0,
+        "uniqueLast15Min": 2,
+        "strictWithProgress": 27,
+        "strictRecentTerminal": {
+          "verified": 3,
+          "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE": 23
+        },
+        "source": "Norva Selection"
+      },
+      {
+        "at": "2026-10-04T01:14:47.895749+00:00",
+        "uniqueChecked": 2646,
+        "profilesProbed": 34,
+        "metadataChecked": 2637,
+        "uniqueLast15Min": 2,
+        "strictWithProgress": 15,
+        "strictRecentTerminal": {
+          "verified": 4,
+          "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE": 9
+        },
+        "source": "Dino"
+      },
+      {
+        "at": "2026-10-04T01:14:48.525797+00:00",
+        "uniqueChecked": 2432,
+        "profilesProbed": 24,
+        "metadataChecked": 2410,
+        "uniqueLast15Min": 0,
+        "strictWithProgress": 9,
+        "strictRecentTerminal": {
+          "verified": 8,
+          "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE": 1
+        },
+        "source": "MAX OTT"
+      }
+    ]
+  },
+  "strict": [
+    {
+      "at": "2026-10-04T01:14:49.534356+00:00",
+      "groups": [
+        {
+          "jobs": 5,
+          "state": "failed",
+          "variants": 5,
+          "error_code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "last_retry": "2026-10-05T00:17:32.239+00:00",
+          "first_retry": "2026-10-04T17:35:24.945+00:00",
+          "last_update": "2026-10-04T00:17:32.241798+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 7,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-04T00:17:32.125915+00:00",
+          "stored_window_positions": 30
+        },
+        {
+          "jobs": 1,
+          "state": "queued",
+          "variants": 1,
+          "error_code": null,
+          "last_retry": null,
+          "first_retry": null,
+          "last_update": "2026-10-04T01:14:46.14413+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 13,
+          "min_provider_attempts": 13,
+          "last_provider_progress": "2026-10-04T01:14:46.145054+00:00",
+          "stored_window_positions": 3
+        },
+        {
+          "jobs": 1,
+          "state": "retry_wait",
+          "variants": 1,
+          "error_code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+          "last_retry": "2026-10-04T01:01:32.051+00:00",
+          "first_retry": "2026-10-04T01:01:32.051+00:00",
+          "last_update": "2026-10-04T01:01:02.053229+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 3,
+          "min_provider_attempts": 3,
+          "last_provider_progress": "2026-10-04T01:00:51.187773+00:00",
+          "stored_window_positions": 2
+        },
+        {
+          "jobs": 1,
+          "state": "retry_wait",
+          "variants": 1,
+          "error_code": "PROVIDER_ACCOUNT_BUSY",
+          "last_retry": "2026-10-04T01:11:17.586+00:00",
+          "first_retry": "2026-10-04T01:11:17.586+00:00",
+          "last_update": "2026-10-04T01:11:02.588483+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 0,
+          "min_provider_attempts": 0,
+          "last_provider_progress": null,
+          "stored_window_positions": 0
+        },
+        {
+          "jobs": 3,
+          "state": "verified",
+          "variants": 3,
+          "error_code": null,
+          "last_retry": null,
+          "first_retry": null,
+          "last_update": "2026-10-03T23:03:27.37248+00:00",
+          "quarantined": 0,
+          "last_verified": "2026-10-03T23:03:27.37248+00:00",
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 13,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-03T23:03:27.274972+00:00",
+          "stored_window_positions": 0
+        }
+      ],
+      "dueUnleased": 3,
+      "verifiedVariantsSinceStart": 3,
+      "verifiedCompleteTrackEvidence": 3,
+      "inconclusiveCompletedSinceStart": 5,
+      "verifiedWithProviderProgressSinceStart": 3,
+      "inconclusiveCompletedMatchingCurrentProfile": 5,
+      "source": "Strng IPTV 8K"
+    },
+    {
+      "at": "2026-10-04T01:14:49.61578+00:00",
+      "groups": [
+        {
+          "jobs": 28,
+          "state": "failed",
+          "variants": 28,
+          "error_code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "last_retry": "2026-10-05T01:04:14.407+00:00",
+          "first_retry": "2026-09-25T03:53:12.272+00:00",
+          "last_update": "2026-10-04T01:04:14.41023+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 13,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-04T01:04:14.341636+00:00",
+          "stored_window_positions": 168
+        },
+        {
+          "jobs": 2,
+          "state": "retry_wait",
+          "variants": 2,
+          "error_code": null,
+          "last_retry": "2026-10-04T01:14:21.973798+00:00",
+          "first_retry": "2026-10-04T00:54:44.658555+00:00",
+          "last_update": "2026-10-04T01:14:21.977225+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 0,
+          "min_provider_attempts": 0,
+          "last_provider_progress": null,
+          "stored_window_positions": 0
+        },
+        {
+          "jobs": 1,
+          "state": "running",
+          "variants": 1,
+          "error_code": null,
+          "last_retry": null,
+          "first_retry": null,
+          "last_update": "2026-10-04T01:11:23.061204+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": "2026-10-04T01:16:02.530019+00:00",
+          "first_lease_expiry": "2026-10-04T01:16:02.530019+00:00",
+          "max_provider_attempts": 8,
+          "min_provider_attempts": 8,
+          "last_provider_progress": "2026-10-04T01:11:23.062111+00:00",
+          "stored_window_positions": 6
+        },
+        {
+          "jobs": 3,
+          "state": "verified",
+          "variants": 3,
+          "error_code": null,
+          "last_retry": null,
+          "first_retry": null,
+          "last_update": "2026-10-03T21:17:10.02215+00:00",
+          "quarantined": 0,
+          "last_verified": "2026-10-03T21:17:10.02215+00:00",
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 6,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-03T21:17:09.969335+00:00",
+          "stored_window_positions": 0
+        }
+      ],
+      "dueUnleased": 2,
+      "verifiedVariantsSinceStart": 3,
+      "verifiedCompleteTrackEvidence": 3,
+      "inconclusiveCompletedSinceStart": 23,
+      "verifiedWithProviderProgressSinceStart": 3,
+      "inconclusiveCompletedMatchingCurrentProfile": 23,
+      "source": "Norva Selection"
+    },
+    {
+      "at": "2026-10-04T01:14:49.701973+00:00",
+      "groups": [
+        {
+          "jobs": 9,
+          "state": "failed",
+          "variants": 9,
+          "error_code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "last_retry": "2026-10-05T00:27:26.349+00:00",
+          "first_retry": "2026-10-04T16:46:18.151+00:00",
+          "last_update": "2026-10-04T00:27:26.351252+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 17,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-04T00:27:26.261577+00:00",
+          "stored_window_positions": 54
+        },
+        {
+          "jobs": 1,
+          "state": "queued",
+          "variants": 1,
+          "error_code": null,
+          "last_retry": null,
+          "first_retry": null,
+          "last_update": "2026-10-04T01:12:44.839453+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 1,
+          "min_provider_attempts": 1,
+          "last_provider_progress": "2026-10-04T01:12:44.84086+00:00",
+          "stored_window_positions": 1
+        },
+        {
+          "jobs": 1,
+          "state": "retry_wait",
+          "variants": 1,
+          "error_code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+          "last_retry": "2026-10-04T01:09:30.672+00:00",
+          "first_retry": "2026-10-04T01:09:30.672+00:00",
+          "last_update": "2026-10-04T01:09:00.674464+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 6,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-04T01:08:42.749672+00:00",
+          "stored_window_positions": 5
+        },
+        {
+          "jobs": 4,
+          "state": "verified",
+          "variants": 4,
+          "error_code": null,
+          "last_retry": null,
+          "first_retry": null,
+          "last_update": "2026-10-03T23:42:19.479032+00:00",
+          "quarantined": 0,
+          "last_verified": "2026-10-03T23:42:19.479032+00:00",
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 15,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-03T23:42:19.406007+00:00",
+          "stored_window_positions": 0
+        }
+      ],
+      "dueUnleased": 2,
+      "verifiedVariantsSinceStart": 4,
+      "verifiedCompleteTrackEvidence": 4,
+      "inconclusiveCompletedSinceStart": 9,
+      "verifiedWithProviderProgressSinceStart": 4,
+      "inconclusiveCompletedMatchingCurrentProfile": 9,
+      "source": "Dino"
+    },
+    {
+      "at": "2026-10-04T01:14:49.802879+00:00",
+      "groups": [
+        {
+          "jobs": 4,
+          "state": "failed",
+          "variants": 4,
+          "error_code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "last_retry": "2026-10-04T22:03:27.828+00:00",
+          "first_retry": "2026-10-04T03:32:22.642+00:00",
+          "last_update": "2026-10-03T22:03:27.829962+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 13,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-03T22:03:27.736706+00:00",
+          "stored_window_positions": 24
+        },
+        {
+          "jobs": 1,
+          "state": "retry_wait",
+          "variants": 1,
+          "error_code": null,
+          "last_retry": "2026-10-04T01:06:26.413809+00:00",
+          "first_retry": "2026-10-04T01:06:26.413809+00:00",
+          "last_update": "2026-10-04T01:06:26.418655+00:00",
+          "quarantined": 0,
+          "last_verified": null,
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 0,
+          "min_provider_attempts": 0,
+          "last_provider_progress": null,
+          "stored_window_positions": 0
+        },
+        {
+          "jobs": 8,
+          "state": "verified",
+          "variants": 8,
+          "error_code": null,
+          "last_retry": null,
+          "first_retry": null,
+          "last_update": "2026-10-04T00:51:00.464123+00:00",
+          "quarantined": 0,
+          "last_verified": "2026-10-04T00:51:00.464123+00:00",
+          "last_lease_expiry": null,
+          "first_lease_expiry": null,
+          "max_provider_attempts": 14,
+          "min_provider_attempts": 6,
+          "last_provider_progress": "2026-10-04T00:11:31.945755+00:00",
+          "stored_window_positions": 0
+        }
+      ],
+      "dueUnleased": 1,
+      "verifiedVariantsSinceStart": 8,
+      "verifiedCompleteTrackEvidence": 8,
+      "inconclusiveCompletedSinceStart": 1,
+      "verifiedWithProviderProgressSinceStart": 8,
+      "inconclusiveCompletedMatchingCurrentProfile": 1,
+      "source": "MAX OTT"
+    }
+  ],
+  "health": {
+    "at": "2026-10-04T01:14:49.881568+00:00",
+    "sinceLastSqlChange": "2026-10-03T18:01:46Z",
+    "dispatcherHttpErrors": 1,
+    "completedMetadataBatches": 511,
+    "stopFilePresent": false,
+    "gateways": [
+      {
+        "port": 8081,
+        "httpStatus": 200,
+        "status": null,
+        "ok": true,
+        "activeSessions": 0,
+        "metadataCapacity": {
+          "protocol": 1,
+          "maxWorkers": 2,
+          "reason": "capacity-available",
+          "observedAt": "2026-10-04T01:14:49.893Z"
+        },
+        "foreground": {
+          "protocol": 1,
+          "busy": false,
+          "activeOperations": 0,
+          "admissionChecks": 0,
+          "pendingPriorityJobs": 0,
+          "deferredBackgroundJobs": 0
+        }
+      },
+      {
+        "port": 18086,
+        "httpStatus": 200,
+        "status": null,
+        "ok": true,
+        "activeSessions": 0,
+        "metadataCapacity": {
+          "protocol": 1,
+          "maxWorkers": 2,
+          "reason": "capacity-available",
+          "observedAt": "2026-10-04T01:14:49.894Z"
+        },
+        "foreground": {
+          "protocol": 1,
+          "busy": false,
+          "activeOperations": 0,
+          "admissionChecks": 0,
+          "pendingPriorityJobs": 0,
+          "deferredBackgroundJobs": 0
+        }
+      }
+    ],
+    "databaseTimeoutDiagnostics": {
+      "norva-edge-functions": 1,
+      "norva-edge-functions-2": 1
+    },
+    "admission": {
+      "enrichmentPaused": false,
+      "strictCronEnabled": true
+    }
+  },
+  "dueAudit": {
+    "at": "2026-10-04T01:14:51.303218+00:00",
+    "picked": [
+      {
+        "state": "queued",
+        "enabled": true,
+        "retry_at": null,
+        "error_code": null,
+        "updated_at": "2026-10-04T01:14:46.14413+00:00",
+        "quarantined": false,
+        "sync_status": "ready",
+        "attempt_count": 23,
+        "exact_enabled": true,
+        "source_exists": true,
+        "request_origin": "automatic",
+        "capture_enabled": true,
+        "lease_expires_at": null,
+        "provider_attempt_count": 13,
+        "observed_profile_exists": true,
+        "obsolete_observed_profile": false
+      },
+      {
+        "state": "queued",
+        "enabled": true,
+        "retry_at": null,
+        "error_code": null,
+        "updated_at": "2026-10-04T01:12:44.839453+00:00",
+        "quarantined": false,
+        "sync_status": "ready",
+        "attempt_count": 2,
+        "exact_enabled": true,
+        "source_exists": true,
+        "request_origin": "automatic",
+        "capture_enabled": true,
+        "lease_expires_at": null,
+        "provider_attempt_count": 1,
+        "observed_profile_exists": true,
+        "obsolete_observed_profile": false
+      },
+      {
+        "state": "retry_wait",
+        "enabled": true,
+        "retry_at": "2026-10-04T01:06:26.413809+00:00",
+        "error_code": null,
+        "updated_at": "2026-10-04T01:06:26.418655+00:00",
+        "quarantined": false,
+        "sync_status": "ready",
+        "attempt_count": 0,
+        "exact_enabled": true,
+        "source_exists": true,
+        "request_origin": "automatic",
+        "capture_enabled": true,
+        "lease_expires_at": null,
+        "provider_attempt_count": 0,
+        "observed_profile_exists": true,
+        "obsolete_observed_profile": false
+      }
+    ],
+    "capacity": [
+      {
+        "reason": "capacity-available",
+        "singleton": true,
+        "expires_at": "2026-10-04T01:14:10.187+00:00",
+        "max_workers": 2,
+        "observed_at": "2026-10-04T01:14:00.187+00:00"
+      }
+    ],
+    "cronRuns": [
+      {
+        "status": "succeeded",
+        "end_time": "2026-10-04T01:14:00.223814+00:00",
+        "start_time": "2026-10-04T01:14:00.161001+00:00"
+      },
+      {
+        "status": "succeeded",
+        "end_time": "2026-10-04T01:13:00.255865+00:00",
+        "start_time": "2026-10-04T01:13:00.190581+00:00"
+      },
+      {
+        "status": "succeeded",
+        "end_time": "2026-10-04T01:12:00.283662+00:00",
+        "start_time": "2026-10-04T01:12:00.233005+00:00"
+      },
+      {
+        "status": "succeeded",
+        "end_time": "2026-10-04T01:11:00.283726+00:00",
+        "start_time": "2026-10-04T01:11:00.246287+00:00"
+      }
+    ]
+  },
+  "providerDeferralAudit": [
+    {
+      "at": "2026-10-04T01:14:50.262907+00:00",
+      "circuit": {
+        "fail_ticks": 0,
+        "open_count": 0,
+        "open_until": null,
+        "last_failure_at": "2026-10-02T13:38:38.346533+00:00",
+        "last_success_at": "2026-10-03T03:59:12.407622+00:00"
+      },
+      "retries": [
+        {
+          "n": 1,
+          "attempts": 1,
+          "last_code": "metadata-request-failed",
+          "updated_at": "2026-10-04T01:09:29.721429+00:00",
+          "active_leases": 0,
+          "next_attempt_at": "2026-10-04T02:09:29.721429+00:00"
+        },
+        {
+          "n": 1,
+          "attempts": 0,
+          "last_code": "provider-account-busy",
+          "updated_at": "2026-10-04T01:12:41.499115+00:00",
+          "active_leases": 0,
+          "next_attempt_at": "2026-10-04T01:17:41.499115+00:00"
+        }
+      ],
+      "source": "Strng IPTV 8K"
+    },
+    {
+      "at": "2026-10-04T01:14:50.338617+00:00",
+      "circuit": null,
+      "retries": [],
+      "source": "Norva Selection"
+    },
+    {
+      "at": "2026-10-04T01:14:50.416751+00:00",
+      "circuit": {
+        "fail_ticks": 0,
+        "open_count": 2,
+        "open_until": "2026-10-04T00:34:09.763585+00:00",
+        "last_failure_at": "2026-10-03T23:34:09.763585+00:00",
+        "last_success_at": "2026-10-03T16:02:14.533363+00:00"
+      },
+      "retries": [
+        {
+          "n": 3,
+          "attempts": 0,
+          "last_code": "provider-account-busy",
+          "updated_at": "2026-10-04T01:13:46.306793+00:00",
+          "active_leases": 0,
+          "next_attempt_at": "2026-10-04T01:06:05.638227+00:00"
+        },
+        {
+          "n": 7,
+          "attempts": 1,
+          "last_code": "provider-metadata-invalid",
+          "updated_at": "2026-10-04T00:54:19.393062+00:00",
+          "active_leases": 0,
+          "next_attempt_at": "2026-10-04T01:54:02.864705+00:00"
+        }
+      ],
+      "source": "Dino"
+    },
+    {
+      "at": "2026-10-04T01:14:50.495135+00:00",
+      "circuit": {
+        "fail_ticks": 0,
+        "open_count": 3,
+        "open_until": "2026-10-04T01:56:05.272372+00:00",
+        "last_failure_at": "2026-10-03T23:56:05.272372+00:00",
+        "last_success_at": "2026-10-03T03:10:25.376557+00:00"
+      },
+      "retries": [
+        {
+          "n": 4,
+          "attempts": 0,
+          "last_code": "provider-account-busy",
+          "updated_at": "2026-10-04T00:14:55.322289+00:00",
+          "active_leases": 0,
+          "next_attempt_at": "2026-10-04T00:13:53.222798+00:00"
+        },
+        {
+          "n": 11,
+          "attempts": 0,
+          "last_code": "provider_probe_circuit_open",
+          "updated_at": "2026-10-04T01:09:30.431194+00:00",
+          "active_leases": 0,
+          "next_attempt_at": "2026-10-04T00:08:03.194245+00:00"
+        }
+      ],
+      "source": "MAX OTT"
+    }
+  ],
+  "expiredJobAudit": [
+    {
+      "at": "2026-10-04T01:14:50.822692+00:00",
+      "expiredCohortJobs": [],
+      "eligibleProviderLanes": 3,
+      "source": "Strng IPTV 8K"
+    },
+    {
+      "at": "2026-10-04T01:14:50.91404+00:00",
+      "expiredCohortJobs": [],
+      "eligibleProviderLanes": 3,
+      "source": "Norva Selection"
+    },
+    {
+      "at": "2026-10-04T01:14:51.018897+00:00",
+      "expiredCohortJobs": [],
+      "eligibleProviderLanes": 3,
+      "source": "Dino"
+    },
+    {
+      "at": "2026-10-04T01:14:51.155202+00:00",
+      "expiredCohortJobs": [],
+      "eligibleProviderLanes": 3,
+      "source": "MAX OTT"
+    }
+  ],
+  "providerResumption": {
+    "at": "2026-10-04T01:16:21.575635+00:00",
+    "sources": [
+      {
+        "source": "Dino",
+        "circuitDeadline": "2026-10-04T00:34:09.763585Z",
+        "metadataBatchesWithAttemptsAfterDeadline": 10,
+        "first": {
+          "at": "2026-10-04T00:51:27.911Z",
+          "processed": 29,
+          "attempted": 29,
+          "identified": 16,
+          "inconclusive": 13,
+          "deferred": 0,
+          "failed": 0
+        },
+        "last": {
+          "at": "2026-10-04T00:58:02.518Z",
+          "processed": 10,
+          "attempted": 9,
+          "identified": 4,
+          "inconclusive": 5,
+          "deferred": 1,
+          "failed": 0,
+          "skipped": "provider-account-busy"
+        }
+      },
+      {
+        "source": "MAX OTT",
+        "circuitDeadline": "2026-10-04T01:56:05.272372Z",
+        "metadataBatchesWithAttemptsAfterDeadline": 0,
+        "first": null,
+        "last": null
+      }
+    ]
+  },
+  "staleProfileFollowup": {
+    "at": "2026-10-04T01:15:20.251782+00:00",
+    "since": "2026-10-03T20:28:46.375719Z",
+    "cohortUpdatedStates": [
+      {
+        "jobs": 28,
+        "state": "failed",
+        "error_code": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+        "last_update": "2026-10-04T01:04:14.41023+00:00",
+        "last_verified": null,
+        "last_provider_progress": "2026-10-04T01:04:14.341636+00:00"
+      },
+      {
+        "jobs": 1,
+        "state": "queued",
+        "error_code": null,
+        "last_update": "2026-10-04T01:12:44.839453+00:00",
+        "last_verified": null,
+        "last_provider_progress": "2026-10-04T01:12:44.84086+00:00"
+      },
+      {
+        "jobs": 3,
+        "state": "retry_wait",
+        "error_code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+        "last_update": "2026-10-04T01:15:04.844228+00:00",
+        "last_verified": null,
+        "last_provider_progress": "2026-10-04T01:14:46.145054+00:00"
+      },
+      {
+        "jobs": 1,
+        "state": "retry_wait",
+        "error_code": "PROVIDER_ACCOUNT_BUSY",
+        "last_update": "2026-10-04T01:11:02.588483+00:00",
+        "last_verified": null,
+        "last_provider_progress": null
+      },
+      {
+        "jobs": 3,
+        "state": "retry_wait",
+        "error_code": null,
+        "last_update": "2026-10-04T01:14:21.977225+00:00",
+        "last_verified": null,
+        "last_provider_progress": null
+      },
+      {
+        "jobs": 1,
+        "state": "running",
+        "error_code": null,
+        "last_update": "2026-10-04T01:11:23.061204+00:00",
+        "last_verified": null,
+        "last_provider_progress": "2026-10-04T01:11:23.062111+00:00"
+      },
+      {
+        "jobs": 10,
+        "state": "verified",
+        "error_code": null,
+        "last_update": "2026-10-04T00:51:00.464123+00:00",
+        "last_verified": "2026-10-04T00:51:00.464123+00:00",
+        "last_provider_progress": "2026-10-04T00:11:31.945755+00:00"
+      }
+    ],
+    "obsoleteRetiredGlobal": 2,
+    "latestProviderProgress": "2026-10-04T01:14:46.145054+00:00",
+    "cohortVerifiedAfterDeployment": 10,
+    "cohortJobsWithNewProviderProgress": 43,
+    "cohortDistinctVariantsWithNewProviderProgress": 43
+  }
+}
