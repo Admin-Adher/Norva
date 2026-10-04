@@ -247,3 +247,32 @@ La maintenance globale découvre toujours 53 sources / 47 propriétaires. Hors c
 Deux Gateways sains, Edge sains et maintenance permanente active. Un quatrième HTTP 500 a été trouvé à 14:37:11 sur les métadonnées Strng, avant le renouvellement des logs Edge de 14:46 ; cause précise non établie. Aucun nouveau diagnostic de finalisation dans ces nouvelles fenêtres ne supprime les incidents historiques. Quarantaines Dino et ancien finaliseur Strng restent protégés.
 
 Correction ciblée du budget des demandes explicites déployée à 16:07:55, sans augmenter les captures simultanées : voir `2026-10-04-manual-language-resampling-admission.md`. Innocent Voices et Ochi sont admis mais pas identifiés. Reçu : `2026-10-04-language-campaign-heartbeat-1755.json`.
+
+## Contrôle du 4 octobre à 21:48 UTC — 23:48 Paris
+
+Le manifeste initial compte **20 629 contrôles techniques uniques, 7 424
+identifiées et 49 327 inconnues** ; 56 751 variantes restent visibles et
+38 765 fiches du compte initial restent sans langue selon le compteur
+historique. Depuis le reçu privé de 20:08 : +182 contrôles et +62
+identifications. **37 validations strictes complètes et 78 analyses complètes
+indéterminées au profil courant**, ensembles recoupés et inchangés depuis
+20:08. Les confirmations humaines publiées sont exclues de ce compteur.
+
+Le service global couvre maintenant **54 sources / 47 propriétaires**. La
+source ajoutée à la découverte à 20:38 existait déjà depuis septembre : aucun
+nouvel import n'est prouvé. Hors manifeste initial : 3 566 tentatives et
+1 638 identifications en reçus cumulés, pas variantes uniques. La capacité
+principale s'est libérée naturellement après des travaux de storyboards ;
+aucune hausse de limites ni correction spéculative. Lost et Ochi ont été
+admis par la voie manuelle ordinaire, puis reportés pour occupation sans
+capture au premier contrôle ; Mars et Bolt restent protégés par les gardes.
+
+Le détail et les observations suivantes sont dans
+[le contrôle 23:48](2026-10-04-language-campaign-heartbeat-2348.md) et son reçu
+JSON. La maintenance globale reste active et aucune clôture n'est annoncée.
+
+À 22:00:41 UTC, l'audit strict distinct confirme **38 validations complètes /
+78 indéterminées compatibles**, après une validation Dino du manifeste à
+21:57:11 avec preuve complète et profil concordant. Lost progresse à deux
+fenêtres/deux reçus, sans identification encore publiée ; Ochi reste reporté
+pour occupation. Ce suivi ne modifie pas rétroactivement le tableau 21:48.
