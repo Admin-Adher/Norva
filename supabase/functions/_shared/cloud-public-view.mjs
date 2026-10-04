@@ -1,4 +1,5 @@
 import { publicProviderAudioLanguages } from './selection-provider-languages.mjs';
+import { humanAudioFields } from './owned-human-language-confirmations.mjs';
 import { isSelectionSourceAttribution, isEditorialTextField } from './catalog-editorial-text.mjs';
 
 const PROFILE_FIELDS = Object.freeze([
@@ -1035,6 +1036,11 @@ export function sanitizeWatchHistory(value) {
   const source = isRecord(value) ? value : {};
   const history = pick(source, WATCH_HISTORY_FIELDS);
   history.data = sanitizeHistoryData(source.data);
+  // Only read-time server hydration carries this private marker. The write
+  // sanitizer above intentionally strips all human confirmation fields.
+  Object.assign(history.data, humanAudioFields({
+    __owned_human_audio_tracks: source.data?.__owned_human_audio_tracks,
+  }));
   // Read-time editorial hydration is public display information. Keep it out
   // of sanitizeHistoryData, which also gates writes, so playback never stores
   // a synopsis snapshot on every progress update.

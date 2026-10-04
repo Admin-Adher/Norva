@@ -62,6 +62,15 @@ public class GatewayAudioWindowInstrumentedTest {
                 + "if(audio.playingAudioVersionLabel()!==audio.getLanguageDisplayName('es'))throw Error('explicit declaration lost');"
                 + "audio.audioTracks[0].language='fr';audio.audioLanguageValidationStatus='probed';"
                 + "if(!audio.getProbeAudioTracks()[0].label.startsWith(audio.getLanguageDisplayName('fr')))throw Error('embedded track lost');"
+                + "const human={humanAudioLanguages:['es'],humanAudioLanguageStatus:'human_confirmed',humanAudioLanguageScope:'file',humanAudioTrackLanguages:[{index:1,language:'es'}]};"
+                + "const film={title:'Innocent Voices',rawTitle:'EN| Innocent Voices [SUB]',audioLanguageValidationStatus:'pending',...human};"
+                + "const badge=MediaUtils.catalogLanguageInfo(film);const mount=document.createElement('div');"
+                + "mount.innerHTML=MediaUtils.languageBadgeHtml(badge,'fixture-badge');document.body.append(mount);"
+                + "if(mount.textContent!==MediaUtils.languageDisplayFull('es')||badge.audioSource!=='human-confirmed')throw Error('confirmed badge absent');"
+                + "if(MediaUtils.catalogLanguageInfo({...film,defaultVariant:{title:'Other copy'}}).headline===badge.headline)throw Error('sibling inherited confirmation');"
+                + "audio.content=film;audio.audioLanguageValidationStatus='pending';audio.audioTracks=[{index:1,language:'und',codec:'aac'},{index:2,language:'und',codec:'aac'}];"
+                + "const rows=audio.getProbeAudioTracks();if(!rows[0].label.startsWith(audio.getLanguageDisplayName('es'))||rows[1].label.includes(audio.getLanguageDisplayName('es')))throw Error('track scope lost');"
+                + "if(audio.isAudioLanguageVerified()||audio.content.audioLanguages)throw Error('human report promoted to machine evidence');"
                 + "return 'ok';}catch(e){return String(e);}})()",
                 value -> { result.set(value); done.countDown(); }));
             assertTrue("WebView completed recovery contract", done.await(20, TimeUnit.SECONDS));

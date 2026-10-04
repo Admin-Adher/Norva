@@ -3273,7 +3273,11 @@ class HomePage {
             ['subtitle_languages','subtitleLanguages',null],
             ['subtitle_languages_scope','subtitleLanguagesScope',null],
             ['provider_audio_languages','providerAudioLanguages',null],
-            ['provider_audio_language_status','providerAudioLanguageStatus',null]
+            ['provider_audio_language_status','providerAudioLanguageStatus',null],
+            ['human_audio_languages','humanAudioLanguages',null],
+            ['human_audio_language_status','humanAudioLanguageStatus',null],
+            ['human_audio_language_scope','humanAudioLanguageScope',null],
+            ['human_audio_track_languages','humanAudioTrackLanguages',null]
         ]) {
             fileEvidence[snake] = fileEvidence[camel] = variant[snake] ?? variant[camel] ?? fallback;
         }
@@ -3646,6 +3650,7 @@ class HomePage {
             title: this.displayTitle(item),
             rawTitle: item.raw_title || item.rawTitle || item.name || item.title
                 || data.rawTitle || data.raw_title || null,
+            ...window.MediaUtils?.humanAudioMetadata?.({ ...data, ...item }),
             providerAudioLanguages: item.providerAudioLanguages || item.provider_audio_languages || data.providerAudioLanguages || data.provider_audio_languages || null,
             providerAudioLanguageStatus: item.providerAudioLanguageStatus || item.provider_audio_language_status || data.providerAudioLanguageStatus || data.provider_audio_language_status || null,
             subtitle: type === 'episode'

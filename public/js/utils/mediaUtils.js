@@ -1135,6 +1135,32 @@ const MediaUtils = (() => {
         return (scores.length ? Math.max(...scores) : 0) + scoreGenrePreferences(item, normalizedPrefs);
     }
 
+    // Server-confirmed listening reports remain a separate, exact-file display
+    // source. They never become a provider declaration, ffprobe tag or LID result.
+    function humanAudioLanguages(item = {}) {
+        if ((item.humanAudioLanguageStatus || item.human_audio_language_status) !== 'human_confirmed'
+            || (item.humanAudioLanguageScope || item.human_audio_language_scope) !== 'file') return [];
+        const raw = item.humanAudioLanguages || item.human_audio_languages;
+        return Array.isArray(raw) ? [...new Set(raw.slice(0, 32).filter(code =>
+            typeof code === 'string' && /^(?:[a-z]{2}|fil|yue)$/.test(code)
+            && !['un', 'xx', 'zz'].includes(code)))] : [];
+    }
+
+    function humanAudioMetadata(item = {}) {
+        const languages = humanAudioLanguages(item);
+        const rawTracks = item.humanAudioTrackLanguages || item.human_audio_track_languages;
+        const tracks = languages.length && Array.isArray(rawTracks) ? rawTracks.slice(0, 32)
+            .filter(track => Number.isSafeInteger(track?.index) && track.index >= 0
+                && languages.includes(track.language))
+            .map(track => ({ index: track.index, language: track.language })) : [];
+        return {
+            humanAudioLanguages: languages,
+            humanAudioLanguageStatus: languages.length ? 'human_confirmed' : null,
+            humanAudioLanguageScope: languages.length ? 'file' : null,
+            humanAudioTrackLanguages: tracks,
+        };
+    }
+
     function providerAudioLanguages(item = {}) {
         if (hasDisplayableAudioLanguage(item)) return [];
         if ((item.providerAudioLanguageStatus || item.provider_audio_language_status) !== 'provider_declared') return [];
@@ -1163,7 +1189,8 @@ const MediaUtils = (() => {
 
     function versionLanguageBadge(item, prefs = {}) {
         const validation = audioLanguageValidationStatus(item);
-        if (!hasDisplayableAudioLanguage(validation)) return providerAudioBadge(item) || audioLanguageAnalysisLabel(item);
+        if (!hasDisplayableAudioLanguage(validation)) return humanAudioLanguages(item).map(languageDisplayFull).join(' / ')
+            || providerAudioBadge(item) || audioLanguageAnalysisLabel(item);
         const analysis = analyzeLanguageCompatibility(item, prefs);
         const candidates = [];
         let audioCandidate = '';
@@ -2302,6 +2329,13 @@ const MediaUtils = (() => {
         const aggregate = providerHints && displayable && !(scope === 'series' && type !== 'series')
             ? versionLanguageBadge(item, prefs) : '';
         const aggregateKnown = aggregate && aggregate !== audioLanguageAnalysisLabel(item);
+        const human = humanAudioLanguages(item);
+        // A real accepted language or known-empty audio inventory keeps precedence.
+        if (human.length && (!displayable || !(state.known || languages.known || aggregateKnown))) {
+            const headline = human.map(languageDisplayFull).join(' / ');
+            return { headline, accessibleHeadline: headline, languageStatus: '',
+                languageConfirmationStatus: '', audioSource: 'human-confirmed' };
+        }
         const declared = !displayable ? providerAudioBadge(item) : '';
         // A pending/unaccepted file tag is not a confirmed soundtrack. Keep an
         // explicit catalogue declaration visible, with supplier provenance internal,
@@ -2632,6 +2666,7 @@ const MediaUtils = (() => {
         analyzeLanguageCompatibility, scoreVersionLanguage, scoreTitleForPreferences,
         audioLanguageValidationStatus,
         providerAudioLanguages, providerAudioStatusLabel, providerAudioBadge,
+        humanAudioLanguages, humanAudioMetadata,
         catalogLanguageInfo, languageBadgeHtml,
         orderVersionsByPreference, versionLabel, versionLanguageBadge, audioLanguageBadge,
         versionDescriptor, catalogCount,

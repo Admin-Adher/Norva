@@ -561,7 +561,7 @@ class WatchPage {
     sanitizeResumeContent(content = {}) {
         if (!content || typeof content !== 'object') return null;
 
-        const copy = {};
+        const copy = { ...window.MediaUtils?.humanAudioMetadata?.(content) };
         [
             'type', 'id', 'title', 'rawTitle', 'subtitle', 'poster', 'description', 'year', 'rating',
             'sourceId', 'cloudSourceId', 'seriesId', 'categoryId', 'currentSeason',
@@ -595,6 +595,7 @@ class WatchPage {
                     rawTitle: version.rawTitle || version.raw_title || null,
                     providerAudioLanguages: window.MediaUtils?.providerAudioLanguages?.(version) || [],
                     providerAudioLanguageStatus: 'provider_declared',
+                    ...window.MediaUtils?.humanAudioMetadata?.(version),
                     codecProfile: codecProfile || null,
                     audioTracks: Array.isArray(audioTracks) ? audioTracks : null,
                     audioTracksScope: Array.isArray(audioTracks)
@@ -2070,6 +2071,7 @@ class WatchPage {
         }
 
         this.content = content;
+        this.refreshHumanAudioMetadata(playbackMetadata);
         this.contentType = content.type;
         this.trackProduct('content_opened', { step: 'content', state: 'started' });
         this.beginPlaybackTelemetry(cloudPlaybackSessionId, playbackAttemptId, {
@@ -2330,6 +2332,7 @@ class WatchPage {
             }
             streamUrl = resolved.url;
             playbackMetadata = resolvedPlaybackMetadata;
+            this.refreshHumanAudioMetadata(playbackMetadata);
             this._resumePlaybackMetadata = playbackMetadata;
             const resolvedStartOffset = Number(
                 playbackMetadata.actualStartOffset ??
@@ -4574,12 +4577,14 @@ class WatchPage {
         const language = languageKnown ? this.getLanguageDisplayName(track.language) : null;
         const codec = track.codec ? String(track.codec).toUpperCase() : null;
         const channels = this.formatChannelLayout(track.channelLayout || track.channel_layout, track.channels);
-        const providerLabel = type === 'audio' && !title && !language && this.audioTracks.length <= 1
+        const humanLabel = type === 'audio' && !title && !language ? this.humanAudioTrackLabel(track) : null;
+        const providerLabel = type === 'audio' && !title && !language && !humanLabel && this.audioTracks.length <= 1
             ? this.playingAudioVersionLabel()
             : null;
 
         if (title) parts.push(title);
         if (language && !parts.some(part => part.toLowerCase() === language.toLowerCase())) parts.push(language);
+        if (humanLabel) parts.push(humanLabel);
         if (providerLabel) parts.push(providerLabel);
         if (type === 'audio' && !parts.length) parts.push(fallback || (globalThis.NorvaI18n?.t("ui_web_e4a847983868", { defaultValue: "Audio track" }) ?? 'Audio track'));
         if (codec && type === 'audio') parts.push(codec);
@@ -8819,6 +8824,8 @@ class WatchPage {
                 // A sibling file must never inherit the previous dub's declaration.
                 this.content.providerAudioLanguages = window.MediaUtils?.providerAudioLanguages?.(next) || [];
                 this.content.providerAudioLanguageStatus = 'provider_declared';
+                Object.assign(this.content, window.MediaUtils?.humanAudioMetadata?.(next));
+                this.refreshHumanAudioMetadata(this.playbackMetadataFromResult(result));
                 delete this.content.provider_audio_languages;
                 delete this.content.provider_audio_language_status;
                 this.content.codecProfile = nextCodecProfile;
@@ -10212,9 +10219,40 @@ class WatchPage {
     // Use the same curated, file-scoped provider declaration as catalogue badges.
     // A filename prefix, subtitle tag or TMDB original language cannot name an
     // untagged audio track (e.g. EN| Innocent Voices [SUB] has English subtitles).
+    refreshHumanAudioMetadata(metadata = {}) {
+        if (!this.content || !Object.prototype.hasOwnProperty.call(metadata, 'humanAudioLanguageStatus')
+            && !Object.prototype.hasOwnProperty.call(metadata, 'human_audio_language_status')) return;
+        // A fresh server response can withdraw a stale resume confirmation after
+        // a profile/generation change. Do not retain the previous snake alias.
+        Object.assign(this.content, window.MediaUtils?.humanAudioMetadata?.(metadata));
+        delete this.content.human_audio_languages;
+        delete this.content.human_audio_language_status;
+        delete this.content.human_audio_language_scope;
+        delete this.content.human_audio_track_languages;
+    }
+
+    humanAudioTrackLabel(track) {
+        const item = this.currentEpisodeMetadata() || this.content || {};
+        const metadata = window.MediaUtils?.humanAudioMetadata?.(item);
+        const rawIndex = track?.index ?? track?.streamIndex;
+        if (rawIndex === null || rawIndex === undefined || rawIndex === '') return null;
+        const index = Number(rawIndex);
+        const languages = [...new Set((metadata?.humanAudioTrackLanguages || [])
+            .filter(entry => entry.index === index).map(entry => entry.language))];
+        return languages.length === 1 ? this.getLanguageDisplayName(languages[0]) : null;
+    }
+
     playingAudioVersionLabel() {
         try {
             const item = this.currentEpisodeMetadata() || this.content || {};
+            const human = window.MediaUtils?.humanAudioLanguages?.(item) || [];
+            const tracks = Array.isArray(this.audioTracks) ? this.audioTracks : [];
+            // A file-level listening report cannot label arbitrary sibling tracks.
+            if (human.length === 1 && tracks.length <= 1) {
+                if (!tracks.length) return this.getLanguageDisplayName(human[0]);
+                const exact = this.humanAudioTrackLabel(tracks[0]);
+                if (exact) return exact;
+            }
             const languages = window.MediaUtils?.providerAudioLanguages?.(item) || [];
             return languages.length === 1 ? this.getLanguageDisplayName(languages[0]) : null;
         } catch (_) {
@@ -14580,6 +14618,7 @@ class WatchPage {
                     containerExtension: this.containerExtension,
                     durationHint: duration,
                     playbackPreferences: this.getPlaybackPreferences(),
+                    ...window.MediaUtils?.humanAudioMetadata?.(this.currentEpisodeMetadata() || this.content),
                     // Keep declarations separate from observed tracks across resume.
                     providerAudioLanguages: window.MediaUtils?.providerAudioLanguages?.(this.currentEpisodeMetadata() || this.content) || [],
                     providerAudioLanguageStatus: 'provider_declared',
