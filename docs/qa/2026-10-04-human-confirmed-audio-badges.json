@@ -1,0 +1,525 @@
+{
+  "codeCommit": "a6bb8bc947fdf1d0cec0e1ea78e37fb68adf05cf",
+  "assetManifestCommit": "a8e2ec8d04f1e98243e7002e9a5da68f4ceec0de",
+  "mergeCommit": "c33ce20aff8509c3ccecd4856bbf4c71861accdf",
+  "sqlProof": {
+    "checks": [
+      "absent_audio_track_rejected",
+      "anonymous_cannot_confirm",
+      "anonymous_cannot_read_rpc",
+      "authenticated_cannot_confirm",
+      "authenticated_cannot_read_rpc",
+      "automatic_observations_unchanged",
+      "changed_audio_track_invalidates_testimony",
+      "changed_credentials_invalidates_testimony",
+      "changed_file_size_invalidates_testimony",
+      "disabled_source_hidden",
+      "duplicate_null_requests_bounded",
+      "empty_variants_closed",
+      "explicit_correction_appends_evidence",
+      "explicit_human_provenance",
+      "external_file_fence",
+      "foreign_owner_cannot_read",
+      "foreign_source_cannot_read",
+      "idempotent_no_duplicate",
+      "incomplete_lid_profile_accepts_actual_heard_track",
+      "jobs_receipts_bails_unchanged",
+      "latest_testimony_wins_same_track",
+      "no_direct_service_writes",
+      "noncanonical_language_rejected",
+      "null_language_rejected",
+      "null_owner_closed",
+      "null_source_closed",
+      "null_variants_closed",
+      "old_human_evidence_retained",
+      "oversize_batch_rejected",
+      "provider_declarations_unchanged",
+      "provider_identity_change_invalidates_testimony",
+      "provider_identity_fence",
+      "reimport_generation_invalidates_testimony",
+      "rls_enabled",
+      "same_evidence_idempotent",
+      "same_provider_file_other_owner_not_promoted",
+      "same_reference_cannot_change_language",
+      "same_title_other_copy_not_promoted",
+      "service_can_confirm",
+      "service_can_read_rpc",
+      "source_visibility_invalidates_testimony",
+      "submitted_profile_fence",
+      "timestamp_only_refresh_preserves_testimony",
+      "unchanged_exact_file_visible",
+      "unknown_language_rejected",
+      "un_language_rejected",
+      "unsafe_evidence_reference_rejected",
+      "unsupported_language_rejected",
+      "user_visibility_invalidates_testimony",
+      "variant_facts_not_rewritten",
+      "writer_head_cas",
+      "writer_owner_cas",
+      "xx_language_rejected"
+    ],
+    "passed": 53,
+    "at": "2026-10-04T17:20:22.494205+00:00",
+    "migrationSha256": "7163e4246571489670a7c218fbc8211a9a300b75e5b32775164abba2d696e311",
+    "network": "none",
+    "customerRowsCopied": 0
+  },
+  "migration": {
+    "at": "2026-10-04T17:22:11.312923+00:00",
+    "migration": "20261004190000_owned_human_audio_confirmations.sql",
+    "sha256": "7163e4246571489670a7c218fbc8211a9a300b75e5b32775164abba2d696e311",
+    "proof": {
+      "checks": [
+        "absent_audio_track_rejected",
+        "anonymous_cannot_confirm",
+        "anonymous_cannot_read_rpc",
+        "authenticated_cannot_confirm",
+        "authenticated_cannot_read_rpc",
+        "automatic_observations_unchanged",
+        "changed_audio_track_invalidates_testimony",
+        "changed_credentials_invalidates_testimony",
+        "changed_file_size_invalidates_testimony",
+        "disabled_source_hidden",
+        "duplicate_null_requests_bounded",
+        "empty_variants_closed",
+        "explicit_correction_appends_evidence",
+        "explicit_human_provenance",
+        "external_file_fence",
+        "foreign_owner_cannot_read",
+        "foreign_source_cannot_read",
+        "idempotent_no_duplicate",
+        "incomplete_lid_profile_accepts_actual_heard_track",
+        "jobs_receipts_bails_unchanged",
+        "latest_testimony_wins_same_track",
+        "no_direct_service_writes",
+        "noncanonical_language_rejected",
+        "null_language_rejected",
+        "null_owner_closed",
+        "null_source_closed",
+        "null_variants_closed",
+        "old_human_evidence_retained",
+        "oversize_batch_rejected",
+        "provider_declarations_unchanged",
+        "provider_identity_change_invalidates_testimony",
+        "provider_identity_fence",
+        "reimport_generation_invalidates_testimony",
+        "rls_enabled",
+        "same_evidence_idempotent",
+        "same_provider_file_other_owner_not_promoted",
+        "same_reference_cannot_change_language",
+        "same_title_other_copy_not_promoted",
+        "service_can_confirm",
+        "service_can_read_rpc",
+        "source_visibility_invalidates_testimony",
+        "submitted_profile_fence",
+        "timestamp_only_refresh_preserves_testimony",
+        "unchanged_exact_file_visible",
+        "unknown_language_rejected",
+        "un_language_rejected",
+        "unsafe_evidence_reference_rejected",
+        "unsupported_language_rejected",
+        "user_visibility_invalidates_testimony",
+        "variant_facts_not_rewritten",
+        "writer_head_cas",
+        "writer_owner_cas",
+        "xx_language_rejected"
+      ],
+      "passed": 53,
+      "at": "2026-10-04T17:20:22.494205+00:00",
+      "migrationSha256": "7163e4246571489670a7c218fbc8211a9a300b75e5b32775164abba2d696e311",
+      "network": "none",
+      "customerRowsCopied": 0
+    }
+  },
+  "publication": {
+    "at": "2026-10-04T17:22:25.243444+00:00",
+    "confirmationsPublished": 5,
+    "results": [
+      {
+        "title": "Broke [MULTI-SUB]",
+        "language": "en",
+        "track": 1,
+        "method": "owner-listening-v1"
+      },
+      {
+        "title": "California King [MULTI-SUB]",
+        "language": "en",
+        "track": 1,
+        "method": "owner-listening-v1"
+      },
+      {
+        "title": "Sinners [MULTI-SUB]",
+        "language": "en",
+        "track": 1,
+        "method": "owner-listening-v1"
+      },
+      {
+        "title": "Prey [MULTI-SUB]",
+        "language": "en",
+        "track": 1,
+        "method": "owner-listening-v1"
+      },
+      {
+        "title": "EN| Innocent Voices [SUB]",
+        "language": "es",
+        "track": 1,
+        "method": "owner-listening-v1"
+      }
+    ],
+    "automatedResultsChanged": false,
+    "providerRequests": 0
+  },
+  "edgeDeployment": {
+    "at": 1791134675.321706,
+    "revision": "a6bb8bc947fdf1d0cec0e1ea78e37fb68adf05cf",
+    "files": {
+      "norva-catalog/index.ts": "b9e2991d0fe08fee636a680d010b27bc44c13ad632c67d3dd73b5ea3accbabe5",
+      "norva-cloud/index.ts": "4bfdd83c6ba5a451328fafea554a1f8c602853851d7c79df8bbe07f317180088",
+      "norva-playback/index.ts": "ece2defa63857cbd710194a44441d7675911186e336742e74ca77deb5c0b6265",
+      "_shared/owned-human-language-confirmations.mjs": "215374b9336546ce1b4975ec28c3dc858d2d9a5b9d294779260b25c924b1d3a5",
+      "_shared/catalog-public-view.mjs": "de41447543e36e908edd011e43ddf60ef639cbe6de6ec2387e116236c7c8d42e",
+      "_shared/cloud-public-view.mjs": "48081254298e11d43b22720f10a3e492e13b0b83835473672b43fa44c1132353"
+    },
+    "replicas": 2
+  },
+  "admissionRestoration": {
+    "pause": "2026-10-04T17:24:16.737403+00:00",
+    "restoredAt": "2026-10-04T17:24:35.407764+00:00",
+    "forcedLeases": false
+  },
+  "productionApi": [
+    {
+      "at": "2026-10-04T17:25:14.924450+00:00",
+      "edge": "norva-edge-functions",
+      "requests": [
+        {
+          "route": "norva-catalog/media-genre-rails",
+          "status": 200,
+          "elapsedMs": 2155,
+          "files": [
+            {
+              "title": "Broke [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ],
+              "statuses": [
+                "human_confirmed"
+              ]
+            },
+            {
+              "title": "California King [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ],
+              "statuses": [
+                "human_confirmed"
+              ]
+            },
+            {
+              "title": "Sinners [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ],
+              "statuses": [
+                "human_confirmed"
+              ]
+            },
+            {
+              "title": "Prey [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ],
+              "statuses": [
+                "human_confirmed"
+              ]
+            },
+            {
+              "title": "EN| Innocent Voices [SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "es"
+                ]
+              ],
+              "statuses": [
+                "human_confirmed"
+              ]
+            }
+          ]
+        },
+        {
+          "route": "norva-cloud/history",
+          "status": 200,
+          "elapsedMs": 437,
+          "files": [
+            {
+              "title": "Broke [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ]
+            },
+            {
+              "title": "California King [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ]
+            },
+            {
+              "title": "Sinners [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ]
+            },
+            {
+              "title": "Prey [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ]
+            },
+            {
+              "title": "EN| Innocent Voices [SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "es"
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2026-10-04T17:25:14.924184+00:00",
+      "edge": "norva-edge-functions-2",
+      "requests": [
+        {
+          "route": "norva-catalog/media-genre-rails",
+          "status": 200,
+          "elapsedMs": 2165,
+          "files": [
+            {
+              "title": "Broke [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ],
+              "statuses": [
+                "human_confirmed"
+              ]
+            },
+            {
+              "title": "California King [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ],
+              "statuses": [
+                "human_confirmed"
+              ]
+            },
+            {
+              "title": "Sinners [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ],
+              "statuses": [
+                "human_confirmed"
+              ]
+            },
+            {
+              "title": "Prey [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ],
+              "statuses": [
+                "human_confirmed"
+              ]
+            },
+            {
+              "title": "EN| Innocent Voices [SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "es"
+                ]
+              ],
+              "statuses": [
+                "human_confirmed"
+              ]
+            }
+          ]
+        },
+        {
+          "route": "norva-cloud/history",
+          "status": 200,
+          "elapsedMs": 427,
+          "files": [
+            {
+              "title": "Broke [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ]
+            },
+            {
+              "title": "California King [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ]
+            },
+            {
+              "title": "Sinners [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ]
+            },
+            {
+              "title": "Prey [MULTI-SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "en"
+                ]
+              ]
+            },
+            {
+              "title": "EN| Innocent Voices [SUB]",
+              "matches": 1,
+              "languages": [
+                [
+                  "es"
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "health": {
+    "at": "2026-10-04T17:25:46.125651+00:00",
+    "paused": false,
+    "strictCron": true,
+    "dispatcher": {
+      "at": 1791134744174,
+      "inFlight": 0,
+      "stopping": false,
+      "discoveryOk": true,
+      "sourceCount": 53,
+      "ownerCount": 47
+    },
+    "norva-edge-functions": {
+      "running": true,
+      "startedAt": "2026-10-04T17:24:28.806364826Z",
+      "health": "healthy"
+    },
+    "norva-edge-functions-2": {
+      "running": true,
+      "startedAt": "2026-10-04T17:24:32.643063124Z",
+      "health": "healthy"
+    },
+    "norva-media-gateway": {
+      "running": true,
+      "startedAt": "2026-10-04T13:06:00.163037849Z",
+      "health": "healthy",
+      "healthHttp": 200,
+      "healthOk": true
+    },
+    "norva-resume-cache-pilot-20260916": {
+      "running": true,
+      "startedAt": "2026-10-04T13:06:03.671217934Z",
+      "health": null,
+      "healthHttp": 200,
+      "healthOk": true
+    }
+  },
+  "emulator": {
+    "run": 37220208490,
+    "codeCommit": "a6bb8bc947fdf1d0cec0e1ea78e37fb68adf05cf",
+    "phone": "four configurations passed; gestures/three-button, font1.0/1.3",
+    "tv": "two consent D-pad configurations passed; not a native audio-decoder test"
+  },
+  "frontendDeployment": {
+    "id": 37220559966,
+    "status": "completed",
+    "conclusion": "success",
+    "head_sha": "c33ce20aff8509c3ccecd4856bbf4c71861accdf",
+    "updated_at": "2026-10-04T17:29:38Z"
+  },
+  "browserVerification": {
+    "at": "2026-10-04T17:31:29.756987+00:00",
+    "url": "https://norva.tv/app#movies",
+    "method": "reload then rendered card DOM and screenshot",
+    "assets": {
+      "mediaUtils": "ae8caf6605",
+      "MoviesPage": "a66150f975"
+    },
+    "badges": [
+      {
+        "title": "Innocent Voices [SUB]",
+        "label": "Espagnol"
+      },
+      {
+        "title": "Proie",
+        "label": "Anglais"
+      },
+      {
+        "title": "Pécheurs",
+        "label": "Anglais"
+      },
+      {
+        "title": "California King",
+        "label": "Anglais"
+      },
+      {
+        "title": "Amoché",
+        "label": "Anglais"
+      }
+    ],
+    "providerRequestsDuringVerification": 0
+  },
+  "automaticLidSuccessesAdded": 0
+}

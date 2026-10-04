@@ -104,3 +104,13 @@ The next user message also confirms English for `Broke [MULTI-SUB]`. This
 brings the listening register to five confirmed copies, with the same
 provenance and publication limits. Broke is outside the original six-film
 request; the four outstanding films in that request remain unchanged.
+
+### Publication after explicit owner request
+
+The user then requested badge updates. The five confirmed copies were resolved
+against the server playback history and published through a separate,
+owner-scoped human-confirmation register. Production browser verification now
+shows Spanish for Innocent Voices and English for Prey, Sinners, California
+King and Broke. See [the publication proof](2026-10-04-human-confirmed-audio-badges.md).
+This supersedes the earlier documentary-only badge limitation. Automated LID
+records and their outcomes were not rewritten.
