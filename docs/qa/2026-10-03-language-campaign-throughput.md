@@ -229,3 +229,21 @@ Le compteur des **variantes de films mis en avant avec langue connue passe de 13
 Le travail Strng précédemment réinitialisé a repassé l'admission puis a été reporté à 10:35 pour `PROVIDER_ACCOUNT_BUSY`. **29 tentatives fournisseur inchangées**, zéro reçu et dernière capture à 09:35 : aucune nouvelle sonde ni récidive de réinitialisation prouvée. L'ancien finaliseur SQL reste distinct, en report au 5 octobre. Les deux quarantaines Dino ne sont pas relancées.
 
 Deux Gateways HTTP 200 / ok, deux Edge sains, dispatcher sans redémarrage, admission et crons actifs. Trois anciennes erreurs HTTP conservées, aucune nouvelle à 11:05 ; aucun nouveau diagnostic de finalisation. Les cinq vérifications GitHub de la PR documentaire 624 ont désormais réussi, paquets compris. Aucune mutation de production. Reçu : `2026-10-04-language-campaign-heartbeat-1305.json`.
+
+## Contrôle du 4 octobre à 15:55–15:57 UTC — 17:55 Paris
+
+| Catalogue initial | Contrôles techniques distincts | Identifiées | Encore sans langue |
+| --- | ---: | ---: | ---: |
+| Strng IPTV 8K | 7 347 | 131 | 30 063 |
+| Norva Selection | 85 | 9 | 174 |
+| Dino | 6 768 | 3 645 | 5 224 |
+| MAX OTT | 5 779 | 3 442 | 14 063 |
+| **Cohorte initiale** | **19 979** | **7 227** | **49 524** |
+
+Les 56 751 variantes restent visibles ; 38 825 fiches du compte initial restent sans langue. Depuis le relevé de 12:31 : +1 046 contrôles techniques et +345 identifications. Cette période inclut les lectures humaines et diagnostics de saccades ; elle ne fournit pas un débit vocal ni global. Aucun délai de fin n'est extrapolé. L'audit strict compte 36 validations complètes et 79 analyses complètes indéterminées au profil courant ; ces ensembles recoupent les autres compteurs.
+
+La maintenance globale découvre toujours 53 sources / 47 propriétaires. Hors cohorte initiale : 49 sources / 46 propriétaires appelés, 2 981 reçus de tentative et 1 570 reçus d'identification, non assimilables à des fichiers uniques. Aucun nouveau compte/import observé dans cette fenêtre. Les priorités comptent 384 indices, dont 188 films et 196 séries, avec 145 variantes de films identifiées parmi 6 805 variantes visibles. Les dates de priorité ont été rafraîchies : les compteurs « depuis priorité » ne mesurent pas une différence avec l'ancien relevé.
+
+Deux Gateways sains, Edge sains et maintenance permanente active. Un quatrième HTTP 500 a été trouvé à 14:37:11 sur les métadonnées Strng, avant le renouvellement des logs Edge de 14:46 ; cause précise non établie. Aucun nouveau diagnostic de finalisation dans ces nouvelles fenêtres ne supprime les incidents historiques. Quarantaines Dino et ancien finaliseur Strng restent protégés.
+
+Correction ciblée du budget des demandes explicites déployée à 16:07:55, sans augmenter les captures simultanées : voir `2026-10-04-manual-language-resampling-admission.md`. Innocent Voices et Ochi sont admis mais pas identifiés. Reçu : `2026-10-04-language-campaign-heartbeat-1755.json`.
