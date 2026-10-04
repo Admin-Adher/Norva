@@ -1,5 +1,5 @@
 """Read-only aggregate global rollout audit. No credential or account ids in output."""
-import datetime,hashlib,json,pathlib,runpy,subprocess,time,uuid
+import datetime,hashlib,json,pathlib,runpy,subprocess,time,urllib.request,uuid
 c=runpy.run_path('/home/adrien/.norva/language-campaign-20261003.py');root=pathlib.Path('/home/adrien/.norva/global-featured-language-20261004');base=c['ROOT']
 q="""set request.jwt.claim.role='service_role';select jsonb_build_object('at',clock_timestamp(),
  'priority',(select jsonb_build_object('owners',count(distinct f.user_id),'titles',count(*),'physicalMovies',count(*) filter(where t.item_type='movie'),'physicalSeries',count(*) filter(where t.item_type='series'),'virtualTitles',count(*) filter(where t.id is null)) from catalog_featured_language_titles f left join cloud_titles t on t.id=f.title_id and t.user_id=f.user_id where expires_at>now()),
@@ -29,6 +29,11 @@ r['outsideOriginal']={'sourcesInState':len(new),'sourcesCalled':sum(v.get('calls
  'deferredReceipts':sum(v.get('totals',{}).get('deferred',0) for k,v in new)}
 if (root/'dispatcher-before/state.json').exists():
  old=json.loads((root/'dispatcher-before/state.json').read_text());r['countersPreserved']=all(state['sources'][k]['calls']>=v['calls'] for k,v in old['sources'].items())
-for name in ['norva-edge-functions','norva-edge-functions-2']:
- info=c['inspect'](name);r[name]={'running':info['State']['Running'],'startedAt':info['State']['StartedAt']}
+for name in ['norva-edge-functions','norva-edge-functions-2','norva-media-gateway','norva-resume-cache-pilot-20260916']:
+ info=c['inspect'](name);r[name]={'running':info['State']['Running'],'startedAt':info['State']['StartedAt'],'health':info['State'].get('Health',{}).get('Status')}
+ if name in ['norva-media-gateway','norva-resume-cache-pilot-20260916']:
+  env=dict(x.split('=',1) for x in info['Config']['Env']);port=int(env.get('PORT','8080'))
+  ip=next(iter(info['NetworkSettings']['Networks'].values()))['IPAddress']
+  with urllib.request.urlopen('http://'+ip+':'+str(port)+'/health',timeout=10) as response:
+   body=json.load(response);r[name]['healthHttp']=response.status;r[name]['healthOk']=body.get('ok')
 (root/'runtime.safe.json').write_text(json.dumps(r));print(json.dumps(r))
