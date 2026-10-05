@@ -1,0 +1,84 @@
+{
+  "date": "2026-10-05",
+  "scope": "Exact MAX OTT copies selected by owner; one playback at a time",
+  "films": [
+    "Until Dawn [MULTI-SUB]",
+    "A Breed Apart [MULTI-SUB]",
+    "What Happens After the Massacre? [MULTI-SUB]"
+  ],
+  "originFix": {
+    "pr": 665,
+    "merge": "c6d63d84d903ac8ff962aa91330955fa59899b50",
+    "webAsset": "5ed456ed1d",
+    "productionEvidence": {
+      "at": "2026-10-05T18:19:51.714Z",
+      "title": "A Breed Apart [MULTI-SUB]",
+      "seek": 119,
+      "buffer": [
+        1.517333,
+        111.544333
+      ],
+      "currentTime": 1.517333,
+      "paused": true,
+      "meaning": "Positive origin aligned after normal reserve. Successive-seek autoplay loss remained."
+    }
+  },
+  "intentFix": {
+    "pr": 666,
+    "head": "53c9f80b767995bded2d3eda5179b353e674f360",
+    "localTests": {
+      "count": 192,
+      "passed": 192
+    },
+    "productionVerified": true,
+    "merge": "2e9bc0fcd66a821b718a243432c2f23791be8203",
+    "webAsset": "9cbeb7d244",
+    "deployment": {
+      "run": 37357094996,
+      "status": "success",
+      "tests": 5968,
+      "passed": 5941,
+      "skipped": 27,
+      "failed": 0
+    },
+    "android": {
+      "run": 37355435607,
+      "finalConfigurationsPassed": 6,
+      "initialTvFont13Failure": "Consent acceptance expected granted, received denied",
+      "targetedRerunRequested": true,
+      "finalTvFont13Job": 111919866259
+    },
+    "productionEvidence": {
+      "title": "A Breed Apart [MULTI-SUB]",
+      "requestedSeek": 1814,
+      "playStartedAt": "2026-10-05T18:40:23.775989Z",
+      "observations": [
+        {
+          "at": "2026-10-05T18:41:18.069Z",
+          "currentTime": 54.541331,
+          "paused": false,
+          "ready": 4,
+          "error": null
+        },
+        {
+          "at": "2026-10-05T18:41:46.684Z",
+          "currentTime": 83.156522,
+          "paused": false,
+          "ready": 4,
+          "error": null
+        }
+      ],
+      "allReplaySessionsExpired": true
+    }
+  },
+  "limits": [
+    "Source corruption independently observed for Breed and Massacre, not attributed between provider and shared proxy",
+    "Clean bounded Until prefix does not certify later positions",
+    "No full-film or native TV decoder certification",
+    "No media-server, provider route, concurrency or startup threshold change"
+  ],
+  "residualVideoGapsSeconds": {
+    "breed": 2.127,
+    "massacre": 3.545
+  }
+}
