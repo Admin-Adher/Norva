@@ -1,0 +1,942 @@
+{
+  "date": "2026-10-05",
+  "mode": "read-only",
+  "productionMutations": 0,
+  "providerRequests": 0,
+  "admissions": 0,
+  "comparison": {
+    "manifest": {
+      "unknownCards": 38344,
+      "at": "2026-10-05T04:15:35.987459+00:00",
+      "unknownVariants": 48267,
+      "deltaUniqueChecked": 818,
+      "uniqueChecked": 25261,
+      "historicalIdentified": 8484.0,
+      "visible": 56751.0,
+      "deltaHistoricalIdentified": 244.0
+    },
+    "strict": {
+      "at": "2026-10-05T04:15:36.943204+00:00",
+      "completeValidations": 41.0,
+      "quarantines": [
+        {
+          "source": "Dino",
+          "count": 2,
+          "lastUpdate": "2026-10-04T08:26:15.285909+00:00"
+        },
+        {
+          "source": "MAX OTT",
+          "count": 3,
+          "lastUpdate": "2026-10-05T02:54:47.376392+00:00"
+        }
+      ],
+      "oldStrngRemainsVerified": true,
+      "compatibleInconclusive": 81.0
+    },
+    "global": {
+      "at": "2026-10-05T04:15:02.580314+00:00",
+      "deltaIdentifiedReceipts": 366,
+      "deltaAttempts": 689,
+      "discovered": {
+        "sources": 54,
+        "owners": 47
+      },
+      "outsideOriginal": {
+        "sourcesInState": 50,
+        "sourcesCalled": 50,
+        "ownersCalled": 46,
+        "attempted": 5244,
+        "identifiedReceipts": 2395,
+        "deferredReceipts": 2747
+      }
+    },
+    "priority": {
+      "hints": 670,
+      "knownMovieVariants": 385,
+      "visibleVariants": 7136,
+      "deltaKnownMovieVariants": 1,
+      "owners": 3
+    },
+    "newValidations": [
+      {
+        "state": "verified",
+        "visible": true,
+        "itemType": "movie",
+        "identified": true,
+        "proofCount": 1,
+        "verifiedAt": "2026-10-05T03:30:18.73407+00:00",
+        "localAttempts": 6,
+        "cacheLanguages": [
+          "es"
+        ],
+        "expectedTracks": 1,
+        "profileMatches": true,
+        "cacheVerifiedAt": "2026-10-05T03:30:18.73407+00:00",
+        "completedTracks": 1,
+        "fileSizeMatches": true,
+        "identityMatches": true,
+        "providerAttempts": 6,
+        "audioIndicesMatch": true,
+        "generationMatches": true,
+        "cacheProfileMatches": true,
+        "lastProviderProgressAt": "2026-10-05T03:30:18.66176+00:00",
+        "cacheFingerprintMatches": true,
+        "profileTimestampMatches": true,
+        "inInitialManifest": false,
+        "sourceInInitialManifest": false,
+        "sourceLabel": "outside initial sources"
+      },
+      {
+        "state": "verified",
+        "visible": true,
+        "itemType": "movie",
+        "identified": true,
+        "proofCount": 1,
+        "verifiedAt": "2026-10-05T03:38:47.456211+00:00",
+        "localAttempts": 10,
+        "cacheLanguages": [
+          "es"
+        ],
+        "expectedTracks": 1,
+        "profileMatches": true,
+        "cacheVerifiedAt": "2026-10-05T03:38:47.456211+00:00",
+        "completedTracks": 1,
+        "fileSizeMatches": true,
+        "identityMatches": true,
+        "providerAttempts": 6,
+        "audioIndicesMatch": true,
+        "generationMatches": true,
+        "cacheProfileMatches": true,
+        "lastProviderProgressAt": "2026-10-05T03:38:47.409559+00:00",
+        "cacheFingerprintMatches": true,
+        "profileTimestampMatches": true,
+        "inInitialManifest": false,
+        "sourceInInitialManifest": false,
+        "sourceLabel": "outside initial sources"
+      },
+      {
+        "state": "verified",
+        "visible": true,
+        "itemType": "movie",
+        "identified": true,
+        "proofCount": 1,
+        "verifiedAt": "2026-10-05T03:56:25.393399+00:00",
+        "localAttempts": 11,
+        "cacheLanguages": [
+          "en"
+        ],
+        "expectedTracks": 1,
+        "profileMatches": true,
+        "cacheVerifiedAt": "2026-10-05T03:56:25.393399+00:00",
+        "completedTracks": 1,
+        "fileSizeMatches": true,
+        "identityMatches": true,
+        "providerAttempts": 6,
+        "audioIndicesMatch": true,
+        "generationMatches": true,
+        "cacheProfileMatches": true,
+        "lastProviderProgressAt": "2026-10-05T03:56:25.265614+00:00",
+        "cacheFingerprintMatches": true,
+        "profileTimestampMatches": true,
+        "inInitialManifest": true,
+        "sourceInInitialManifest": true,
+        "sourceLabel": "MAX OTT"
+      }
+    ],
+    "incidents": {
+      "targetedRpcErrors": [
+        {
+          "at": "2026-10-05T03:22:08.524391329Z",
+          "rpc": "fail_catalog_file_audio_validation_job",
+          "publicRoute": "other",
+          "status": 500
+        },
+        {
+          "at": "2026-10-05T03:26:11.020295707Z",
+          "rpc": null,
+          "publicRoute": "audio-backfill",
+          "status": 500
+        },
+        {
+          "at": "2026-10-05T03:26:13.148966821Z",
+          "rpc": "claim_catalog_provider_audio_metadata",
+          "publicRoute": "other",
+          "status": 500
+        },
+        {
+          "at": "2026-10-05T04:11:28.673987430Z",
+          "rpc": "fail_catalog_file_audio_validation_job",
+          "publicRoute": "other",
+          "status": 500
+        }
+      ],
+      "edgeDiagnostics": [
+        {
+          "name": "norva-edge-functions",
+          "events": [
+            {
+              "at": "2026-10-05T03:26:13.158179242Z",
+              "diagnostic": "database-statement-timeout",
+              "allowedCodes": [
+                "57014"
+              ]
+            }
+          ],
+          "lineCount": 2369
+        },
+        {
+          "name": "norva-edge-functions-2",
+          "events": [
+            {
+              "at": "2026-10-05T03:26:11.016818350Z",
+              "diagnostic": "database-statement-timeout",
+              "allowedCodes": [
+                "57014"
+              ]
+            }
+          ],
+          "lineCount": 2094
+        }
+      ],
+      "since": "2026-10-05T03:20:00Z",
+      "dispatcherHttpErrors": [
+        {
+          "at": "2026-10-05T03:26:13.163Z",
+          "lane": "provider-metadata",
+          "httpError": 500
+        }
+      ],
+      "historicalDispatcherHttpCount": 6,
+      "noNewFinalizerDiagnostic": true
+    },
+    "health": {
+      "paused": false,
+      "gatewaysHealthy": true,
+      "leases": {
+        "intake": 0,
+        "strict": 1,
+        "metadata": 0,
+        "sourceSchedule": 0,
+        "lastIntakeExpiry": null,
+        "lastStrictExpiry": "2026-10-05T04:16:20.528071+00:00"
+      },
+      "dispatcher": {
+        "at": 1791173695321,
+        "inFlight": 0,
+        "stopping": false,
+        "discoveryOk": true,
+        "sourceCount": 54,
+        "ownerCount": 47
+      },
+      "edgesHealthy": true,
+      "strictCron": true
+    },
+    "limits": [
+      "Initial-manifest figures concern 56751 variants / 43125 titles of 4 sources of the controlled owner.",
+      "Historical identifications exclude human badges and must not be added to strict validations.",
+      "Strict validation and complete inconclusive sets can overlap.",
+      "Outside-initial receipts are attempts/results, not unique files.",
+      "Three new validations: two outside initial sources, one in initial MAX; all current concordances verified read-only.",
+      "HTTP500 and57014 timestamps do not establish internal cause; no failed RPC replayed.",
+      "No admission, provider request or production mutation during source audits; this report is a later documentation change.",
+      "Service health is a snapshot; historical incidents remain documented."
+    ]
+  },
+  "continuation": {
+    "at": "2026-10-05T04:15:08.630019Z",
+    "since": "2026-10-05T03:20:00Z",
+    "until": "2026-10-05T04:15:00Z",
+    "mode": "read-only",
+    "providerRequests": 0,
+    "admissions": 0,
+    "edges": [
+      {
+        "name": "norva-edge-functions",
+        "available": true,
+        "lineCount": 2306,
+        "possiblyTailLimited": false,
+        "counts": {
+          "completed": 17,
+          "deferred": 7,
+          "eligible": 23,
+          "started": 18
+        },
+        "deferredByReason": {
+          "selection": 5,
+          "worker-stopped": 1,
+          "budget": 1
+        },
+        "completedContinuationDuration": {
+          "count": 17,
+          "minMs": 11147,
+          "medianMs": 13709,
+          "p90Ms": 22457,
+          "maxMs": 23174
+        },
+        "continuationLatency": {
+          "measured": true,
+          "source": "elapsedMs-attached-to-each-completed-result"
+        },
+        "lastEvents": [
+          {
+            "at": "2026-10-05T03:54:13.633377Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T03:54:25.846135Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 12212
+          },
+          {
+            "at": "2026-10-05T03:58:11.584330Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T03:58:11.602387Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T03:58:22.750125Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 11147
+          },
+          {
+            "at": "2026-10-05T04:04:14.326970Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T04:04:14.343399Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T04:04:26.564180Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 12220
+          },
+          {
+            "at": "2026-10-05T04:05:14.087423Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T04:05:14.106132Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T04:05:26.600159Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 12493
+          },
+          {
+            "at": "2026-10-05T04:05:54.469909Z",
+            "event": "deferred",
+            "reason": "budget"
+          },
+          {
+            "at": "2026-10-05T04:06:13.021751Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T04:06:13.038722Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T04:06:24.740312Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 11702
+          },
+          {
+            "at": "2026-10-05T04:08:21.017582Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T04:08:21.046079Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T04:08:44.220269Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 23174
+          },
+          {
+            "at": "2026-10-05T04:11:40.549256Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T04:11:40.567720Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T04:12:03.024295Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 22457
+          },
+          {
+            "at": "2026-10-05T04:14:15.969794Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T04:14:15.998263Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T04:14:31.438520Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 15440
+          }
+        ],
+        "unparsedContinuationDiagnostics": 0
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "available": true,
+        "lineCount": 2025,
+        "possiblyTailLimited": false,
+        "counts": {
+          "completed": 19,
+          "deferred": 6,
+          "eligible": 22,
+          "started": 19
+        },
+        "deferredByReason": {
+          "budget": 3,
+          "selection": 3
+        },
+        "completedContinuationDuration": {
+          "count": 19,
+          "minMs": 10098,
+          "medianMs": 13451,
+          "p90Ms": 21189,
+          "maxMs": 26634
+        },
+        "continuationLatency": {
+          "measured": true,
+          "source": "elapsedMs-attached-to-each-completed-result"
+        },
+        "lastEvents": [
+          {
+            "at": "2026-10-05T03:55:09.070812Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T03:55:13.708726Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T03:55:13.725481Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T03:55:21.099217Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 12029
+          },
+          {
+            "at": "2026-10-05T03:55:24.220801Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 10495
+          },
+          {
+            "at": "2026-10-05T03:56:12.764551Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T03:56:12.783496Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T03:56:14.178630Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T03:56:14.212086Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T03:56:25.377808Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 11165
+          },
+          {
+            "at": "2026-10-05T03:56:25.431490Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 12648
+          },
+          {
+            "at": "2026-10-05T03:57:14.515905Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T03:57:14.547274Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T03:57:25.054019Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 10506
+          },
+          {
+            "at": "2026-10-05T03:57:32.915943Z",
+            "event": "deferred",
+            "reason": "budget"
+          },
+          {
+            "at": "2026-10-05T03:59:14.422782Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T03:59:14.439622Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T03:59:32.930475Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 18491
+          },
+          {
+            "at": "2026-10-05T04:07:24.798356Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T04:07:24.815496Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T04:07:46.005086Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 21189
+          },
+          {
+            "at": "2026-10-05T04:13:18.766033Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T04:13:18.796298Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T04:13:35.169873Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 16373
+          }
+        ],
+        "unparsedContinuationDiagnostics": 0
+      }
+    ],
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "available": true,
+        "lineCount": 222,
+        "possiblyTailLimited": false,
+        "counts": {
+          "admission:LANGUAGE_ENRICHMENT_CAPACITY_BUSY": 12,
+          "capture_saved:OK": 95,
+          "inference_finished:OK": 95,
+          "store:LID_CAPTURE_DURATION_INVALID": 1,
+          "store:STRICT_LID_AUDIO_INVALID_DATA": 1
+        },
+        "timing": {
+          "admission:LANGUAGE_ENRICHMENT_CAPACITY_BUSY": {
+            "count": 12,
+            "minMs": 0,
+            "medianMs": 0.0,
+            "p90Ms": 1,
+            "maxMs": 1
+          },
+          "capture_saved:OK": {
+            "count": 95,
+            "minMs": 6113,
+            "medianMs": 10797,
+            "p90Ms": 17481,
+            "maxMs": 110321
+          },
+          "inference_finished:OK": {
+            "count": 95,
+            "minMs": 1171,
+            "medianMs": 2793,
+            "p90Ms": 5358,
+            "maxMs": 22643
+          },
+          "store:LID_CAPTURE_DURATION_INVALID": {
+            "count": 1,
+            "minMs": 19152,
+            "medianMs": 19152,
+            "p90Ms": 19152,
+            "maxMs": 19152
+          },
+          "store:STRICT_LID_AUDIO_INVALID_DATA": {
+            "count": 1,
+            "minMs": 5876,
+            "medianMs": 5876,
+            "p90Ms": 5876,
+            "maxMs": 5876
+          }
+        },
+        "lastSuccessfulStages": [
+          {
+            "at": "2026-10-05T04:11:38.068150Z",
+            "stage": "capture_saved",
+            "elapsedMs": 17360
+          },
+          {
+            "at": "2026-10-05T04:11:40.539458Z",
+            "stage": "inference_finished",
+            "elapsedMs": 2427
+          },
+          {
+            "at": "2026-10-05T04:11:57.883526Z",
+            "stage": "capture_saved",
+            "elapsedMs": 17124
+          },
+          {
+            "at": "2026-10-05T04:12:03.015712Z",
+            "stage": "inference_finished",
+            "elapsedMs": 5060
+          },
+          {
+            "at": "2026-10-05T04:13:11.731919Z",
+            "stage": "capture_saved",
+            "elapsedMs": 11130
+          },
+          {
+            "at": "2026-10-05T04:13:18.752645Z",
+            "stage": "inference_finished",
+            "elapsedMs": 6954
+          },
+          {
+            "at": "2026-10-05T04:13:29.640563Z",
+            "stage": "capture_saved",
+            "elapsedMs": 10634
+          },
+          {
+            "at": "2026-10-05T04:13:35.154729Z",
+            "stage": "inference_finished",
+            "elapsedMs": 5446
+          },
+          {
+            "at": "2026-10-05T04:14:11.102174Z",
+            "stage": "capture_saved",
+            "elapsedMs": 10490
+          },
+          {
+            "at": "2026-10-05T04:14:15.956238Z",
+            "stage": "inference_finished",
+            "elapsedMs": 4792
+          },
+          {
+            "at": "2026-10-05T04:14:27.883331Z",
+            "stage": "capture_saved",
+            "elapsedMs": 10431
+          },
+          {
+            "at": "2026-10-05T04:14:31.426083Z",
+            "stage": "inference_finished",
+            "elapsedMs": 3474
+          }
+        ],
+        "unparsedDiagnostics": 0
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "available": true,
+        "lineCount": 5,
+        "possiblyTailLimited": false,
+        "counts": {},
+        "timing": {},
+        "lastSuccessfulStages": [],
+        "unparsedDiagnostics": 0
+      }
+    ],
+    "strictJobs": {
+      "scope": "all-current-durable-jobs-at-audit-snapshot",
+      "activeLeasesNow": 2,
+      "lastVerifiedInWindow": "2026-10-05T03:56:25.393399+00:00",
+      "jobsMarkedVerifiedInWindow": 3,
+      "lastProviderProgressInWindow": "2026-10-05T04:14:31.429718+00:00",
+      "updatedQuarantinedJobsInWindow": 1,
+      "jobsWithProviderProgressInWindow": 24,
+      "completedTracksOfThoseVerifiedJobs": 3
+    },
+    "interpretation": {
+      "completedMeans": "a second sequential step persisted a window checkpoint; not necessarily a verified language",
+      "timingPairs": "No Edge event pairing: completed durations use only the elapsedMs attached directly to each result.",
+      "gatewayStages": "Global stages within this window, not attributed to a particular continuation or provider.",
+      "jobCounts": "Unique current job rows, not captures, provider HTTP requests, unique files, or newly published languages.",
+      "noProgressDoesNotProveFailure": "Continuation requires the same job first and first-step total duration at most 30 seconds."
+    }
+  },
+  "targets": {
+    "at": "2026-10-05T04:15:37.317670+00:00",
+    "baselineAt": "2026-10-05T03:14:59.242863+00:00",
+    "readOnly": true,
+    "providerRequests": 0,
+    "productionMutations": 0,
+    "items": [
+      {
+        "title": "Lost on a Mountain in Maine",
+        "jobsUnchanged": true,
+        "guardsUnchanged": true,
+        "cacheUnchanged": true,
+        "profileTracksUnchanged": true,
+        "profileComplete": true,
+        "automaticallyIdentified": false,
+        "knownCacheLanguages": []
+      },
+      {
+        "title": "The Legend of Ochi",
+        "jobsUnchanged": true,
+        "guardsUnchanged": true,
+        "cacheUnchanged": true,
+        "profileTracksUnchanged": true,
+        "profileComplete": true,
+        "automaticallyIdentified": false,
+        "knownCacheLanguages": []
+      },
+      {
+        "title": "Bolt from the Blue",
+        "jobsUnchanged": true,
+        "guardsUnchanged": true,
+        "cacheUnchanged": true,
+        "profileTracksUnchanged": true,
+        "profileComplete": true,
+        "automaticallyIdentified": true,
+        "knownCacheLanguages": [
+          "en"
+        ]
+      },
+      {
+        "title": "I Want to Live on Mars",
+        "jobsUnchanged": true,
+        "guardsUnchanged": true,
+        "cacheUnchanged": true,
+        "profileTracksUnchanged": true,
+        "profileComplete": true,
+        "automaticallyIdentified": false,
+        "knownCacheLanguages": []
+      }
+    ],
+    "humanConfirmations": {
+      "registered": 5,
+      "projectedLanguages": {
+        "en": 4,
+        "es": 1
+      },
+      "registeredLanguages": {
+        "en": 4,
+        "es": 1
+      },
+      "currentlyProjectable": 5
+    },
+    "humanConfirmationsUnchanged": true,
+    "limits": [
+      "Receipt counts and persisted job facts are compared; no claim of receipt-byte identity is made from these audits. No provider request, terminal retry, sampling-pass change, or admission."
+    ]
+  },
+  "play": {
+    "observedAroundUtc": "2026-10-05T04:18:00Z",
+    "method": "existing-browser-publishing-overview",
+    "tvVersionCode": 38,
+    "mobileVersionCode": 46,
+    "tvState": "in_review",
+    "mobileState": "in_review",
+    "actionRequired": false,
+    "availabilityProven": false,
+    "mutations": 0
+  },
+  "previousDocumentationChecks": {
+    "pr": 656,
+    "head": "7841b3897639e44e15bc3a19640650a24936ea40",
+    "observedAtUtc": "2026-10-05T04:18:48Z",
+    "success": 5,
+    "pending": 0,
+    "failed": 0
+  },
+  "scopeNotes": [
+    "Immutable initial manifest: 56751 variants / 43125 titles, four catalogues of the initial owner.",
+    "Historical metadata/track identifications exclude human confirmations. Strict compatible sets overlap and must not be added.",
+    "Outside-initial counts are cumulative receipts from sources outside the original four, not unique files.",
+    "No whole-platform unique identified-file count or causal throughput multiplier is established.",
+    "Lost/Ochi/Mars terminal delays remain in force; no consumed operator marker replayed."
+  ],
+  "naturalSqlObservation": {
+    "startedAt": "2026-10-05T04:20:31.709594+00:00",
+    "readOnly": true,
+    "providerRequests": 0,
+    "replayedRpc": false,
+    "productionMutations": 0,
+    "sampleIntervalSeconds": 1,
+    "maximumSamples": 60,
+    "events": [
+      {
+        "at": "2026-10-05T04:20:53.129237+00:00",
+        "sample": 21,
+        "activity": [
+          {
+            "state": "active",
+            "blockers": [],
+            "function": "claim_catalog_provider_audio_metadata",
+            "waitType": null,
+            "waitEvent": null,
+            "blockerCount": 0,
+            "elapsedSeconds": 0.193
+          }
+        ]
+      },
+      {
+        "at": "2026-10-05T04:20:54.194174+00:00",
+        "sample": 22,
+        "activity": [
+          {
+            "state": "active",
+            "blockers": [],
+            "function": "claim_catalog_provider_audio_metadata",
+            "waitType": null,
+            "waitEvent": null,
+            "blockerCount": 0,
+            "elapsedSeconds": 1.258
+          }
+        ]
+      },
+      {
+        "at": "2026-10-05T04:20:55.258427+00:00",
+        "sample": 23,
+        "activity": [
+          {
+            "state": "active",
+            "blockers": [],
+            "function": "claim_catalog_provider_audio_metadata",
+            "waitType": null,
+            "waitEvent": null,
+            "blockerCount": 0,
+            "elapsedSeconds": 2.322
+          }
+        ]
+      },
+      {
+        "at": "2026-10-05T04:20:58.448455+00:00",
+        "sample": 26,
+        "activity": [
+          {
+            "state": "active",
+            "blockers": [],
+            "function": "claim_catalog_provider_audio_metadata",
+            "waitType": null,
+            "waitEvent": null,
+            "blockerCount": 0,
+            "elapsedSeconds": 0.488
+          }
+        ]
+      },
+      {
+        "at": "2026-10-05T04:21:33.830664+00:00",
+        "sample": 59,
+        "activity": [
+          {
+            "state": "active",
+            "blockers": [],
+            "function": "claim_catalog_provider_audio_metadata",
+            "waitType": null,
+            "waitEvent": null,
+            "blockerCount": 0,
+            "elapsedSeconds": 0.081
+          }
+        ]
+      }
+    ],
+    "errors": [],
+    "baselineJobs": [
+      {
+        "state": "running",
+        "retryAt": null,
+        "itemType": "movie",
+        "errorCode": null,
+        "updatedAt": "2026-10-05T04:19:00.53581+00:00",
+        "proofCount": 0,
+        "verifiedAt": null,
+        "quarantined": false,
+        "windowCount": 6,
+        "leaseExpired": false,
+        "receiptCount": 1,
+        "localAttempts": 4,
+        "expectedTracks": 1,
+        "leaseExpiresAt": "2026-10-05T04:24:00.443603+00:00",
+        "windowPosition": 1,
+        "completedTracks": 0,
+        "providerAttempts": 2,
+        "lastProviderProgressAt": "2026-10-05T04:18:15.562425+00:00"
+      }
+    ],
+    "samples": 60,
+    "samplingSeconds": 63.068,
+    "waitAggregates": [
+      {
+        "function": "claim_catalog_provider_audio_metadata",
+        "waitType": null,
+        "waitEvent": null,
+        "blockerCount": 0,
+        "sampleOccurrences": 5
+      }
+    ],
+    "maximumObservedAgeSeconds": {
+      "claim_catalog_provider_audio_metadata": 2.322
+    },
+    "afterJobs": [
+      {
+        "state": "running",
+        "retryAt": null,
+        "itemType": "movie",
+        "errorCode": null,
+        "updatedAt": "2026-10-05T04:19:00.53581+00:00",
+        "proofCount": 0,
+        "verifiedAt": null,
+        "quarantined": false,
+        "windowCount": 6,
+        "leaseExpired": false,
+        "receiptCount": 1,
+        "localAttempts": 4,
+        "expectedTracks": 1,
+        "leaseExpiresAt": "2026-10-05T04:24:00.443603+00:00",
+        "windowPosition": 1,
+        "completedTracks": 0,
+        "providerAttempts": 2,
+        "lastProviderProgressAt": "2026-10-05T04:18:15.562425+00:00",
+        "observedAtBaseline": true,
+        "stateBefore": "running",
+        "updatedSinceBaseline": false,
+        "providerAttemptsDelta": 0,
+        "localAttemptsDelta": 0
+      }
+    ],
+    "finalizerSummary": [
+      {
+        "total": 0,
+        "activeLease": 0,
+        "expiredLease": 0
+      }
+    ],
+    "finishedAt": "2026-10-05T04:21:35.011262+00:00",
+    "limits": [
+      "Current waits cannot identify a historical timeout cause.",
+      "Samples are observations, not unique calls; internal statement text and identifiers are never emitted.",
+      "No wait observation does not establish absence of brief contention.",
+      "An expired lease is recoverable work, not by itself proof of a stuck job.",
+      "Historical HTTP500 failure codes remain unknown without a matching diagnostic."
+    ]
+  }
+}
