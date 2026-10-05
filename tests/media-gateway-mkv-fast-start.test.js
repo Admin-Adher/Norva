@@ -1863,6 +1863,9 @@ test('an admitted replay starts one FFmpeg graph with copied video and proof-sel
     audioMapForSession: () => '0:1',
     normalizeAudioStreamIndex: (value) => Number(value),
     videoModeForSession: (value) => value.videoMode,
+    finiteMp4CopyVideoBitstreamArgs: vm.runInNewContext(`(${between(GATEWAY, 'function finiteMp4CopyVideoBitstreamArgs(', '\nfunction videoModeForSession(').trim()})`, {
+      asRecord: value => value || {}, normalizeCodecToken: value => value, videoModeForSession: value => value.videoMode,
+    }),
     vaapiHardwareDecodeCodecForSession: () => null,
     videoEncoderInputArgs,
     videoEncoderOutputArgs,
