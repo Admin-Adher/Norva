@@ -1,0 +1,206 @@
+{
+  "date": "2026-10-05",
+  "pr": 659,
+  "code": "e6b77152c6d6327f4cc501b4d1ba656bad0fe29c",
+  "merge": "2ffa976e6e864bf28611c0f012fa395d6902703c",
+  "checksPassed": 12,
+  "proof": {
+    "productionSelectionsEquivalent": 11,
+    "priorityAssertions": 39,
+    "baselineLockTimeoutMs": 1563.233,
+    "providerRequests": 0,
+    "contentionAssertions": 3,
+    "migrationSha256": "2a19e2c2128a7ccb64169d59f89c4a4996faaeeedd86f515011e8f2419d1d4b0",
+    "truthAssertions": 15,
+    "repairedLockDeferralMs": 81.83,
+    "network": "none",
+    "metadataAssertions": 31,
+    "at": "2026-10-05T06:16:46.7426950Z",
+    "customerRows": 0
+  },
+  "deployment": {
+    "at": "2026-10-05T06:19:47.379421+00:00",
+    "definitions": {
+      "catalog_movie_audio_identified": "90a62de1d22d7058454424a503697c4f",
+      "claim_catalog_provider_audio_metadata": "e5b8946039a0f5467fe25ac3d02b27f6"
+    },
+    "otherFunctions": {
+      "hash": "0db5a817ae284658644fdff36559db7c",
+      "count": 1304
+    },
+    "applied": true,
+    "sha256": "2a19e2c2128a7ccb64169d59f89c4a4996faaeeedd86f515011e8f2419d1d4b0",
+    "otherFunctionsAndAttributesUnchanged": true,
+    "evidenceAndJobsUnchangedInSnapshot": true,
+    "providerRequests": 0,
+    "rowWrites": 0,
+    "restarts": 0
+  },
+  "readback": {
+    "at": "2026-10-05T06:20:15.899935+00:00",
+    "definitions": {
+      "catalog_movie_audio_identified": "90a62de1d22d7058454424a503697c4f",
+      "claim_catalog_provider_audio_metadata": "e5b8946039a0f5467fe25ac3d02b27f6"
+    },
+    "otherFunctions": {
+      "hash": "0db5a817ae284658644fdff36559db7c",
+      "count": 1304
+    },
+    "verified": true,
+    "providerRequests": 0,
+    "rowWrites": 0
+  },
+  "rpcWindow": {
+    "since": "2026-10-05T06:20:18.087943+00:00",
+    "until": "2026-10-05T06:22:28.430463+00:00",
+    "successfulCalls": 88,
+    "meanMs": 94.86520040907304
+  },
+  "dispatcher": {
+    "at": "2026-10-05T06:22:49.657003+00:00",
+    "since": "2026-10-05T06:19:47Z",
+    "firstEventAt": "2026-10-05T06:20:06.586Z",
+    "lastEventAt": "2026-10-05T06:22:40.184Z",
+    "dispatchEvents": 17,
+    "batchesWithAttempts": 5,
+    "attemptReceipts": 114,
+    "identificationReceipts": 61,
+    "failedReceipts": 0,
+    "httpErrors": [],
+    "sourceDiscoverySamples": 1,
+    "sourceDiscoveryFirst": {
+      "at": "2026-10-05T06:20:07.479Z",
+      "sources": 54,
+      "owners": 47
+    },
+    "sourceDiscoveryLast": {
+      "at": "2026-10-05T06:20:07.479Z",
+      "sources": 54,
+      "owners": 47
+    },
+    "outcomes": [
+      {
+        "lane": "provider-metadata",
+        "skipped": null,
+        "code": null,
+        "httpError": null,
+        "events": 4
+      },
+      {
+        "lane": "exact-profile",
+        "skipped": null,
+        "code": "provider-account-busy",
+        "httpError": null,
+        "events": 5
+      },
+      {
+        "lane": "exact-profile",
+        "skipped": null,
+        "code": "strict-analysis-queued",
+        "httpError": null,
+        "events": 1
+      },
+      {
+        "lane": "provider-metadata",
+        "skipped": "provider_probe_circuit_open",
+        "code": null,
+        "httpError": null,
+        "events": 4
+      },
+      {
+        "lane": "provider-metadata",
+        "skipped": "metadata-sweep-resting",
+        "code": null,
+        "httpError": null,
+        "events": 1
+      },
+      {
+        "lane": "provider-metadata",
+        "skipped": "provider-account-busy",
+        "code": null,
+        "httpError": null,
+        "events": 1
+      },
+      {
+        "lane": "provider-metadata",
+        "skipped": "metadata-capacity",
+        "code": null,
+        "httpError": null,
+        "events": 1
+      }
+    ],
+    "scope": "Global dispatcher receipt counts, not distinct files or strict vocal completions."
+  },
+  "errors": {
+    "at": "2026-10-05T06:22:50.432287+00:00",
+    "since": "2026-10-05T06:19:47Z",
+    "readOnly": true,
+    "providerRequests": 0,
+    "edges": [
+      {
+        "name": "norva-edge-functions",
+        "events": [],
+        "lineCount": 94
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "events": [],
+        "lineCount": 99
+      }
+    ],
+    "kong": {
+      "targetedErrors": [
+        {
+          "at": "2026-10-05T06:22:00.871829119Z",
+          "rpc": null,
+          "publicRoute": "strict-worker",
+          "status": 403
+        }
+      ],
+      "aggregateErrors": [
+        {
+          "route": "other",
+          "status": 500,
+          "count": 5
+        },
+        {
+          "route": "norva_run_replacement_cleanup_batch",
+          "status": 409,
+          "count": 3
+        },
+        {
+          "route": "other",
+          "status": 403,
+          "count": 1
+        },
+        {
+          "route": "strict-worker",
+          "status": 403,
+          "count": 1
+        }
+      ]
+    },
+    "dispatcherHttpErrors": []
+  },
+  "manifest": {
+    "variants": 56751,
+    "titles": 43125,
+    "checked": 26078,
+    "identified": 8636,
+    "unknown": 48115,
+    "unknownTitles": 38216,
+    "deltaSince0716": {
+      "checked": 542,
+      "identified": 81,
+      "unknown": -81,
+      "unknownTitles": -73
+    },
+    "strictComplete": 43,
+    "strictCompleteInconclusiveCompatible": 87,
+    "humanConfirmationCountSeparate": 5
+  },
+  "hourlyCodexAutomationDeleted": true,
+  "serverCampaignActive": true,
+  "allUnknownLanguagesResolved": false,
+  "allHistoricalIncidentsResolved": false
+}
