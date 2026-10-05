@@ -53,6 +53,17 @@ window.CatalogLanguageQA = (() => {
     }
     async function mount(next = 'movies', detailIndex = 1) {
         surface = next; chosen = null;
+        const qualitySample = { title:'Complete QA', poster_url:'/img/qa-poster.jpg',
+            description:'Synthetic synopsis', audioLanguages:['en'], audioLanguageValidationStatus:'probed' };
+        const ranked = MediaUtils.rankByPresentation([{title:'Unknown QA'}, qualitySample]);
+        if (ranked[0] !== qualitySample || ranked.length !== 2) throw Error('presentation priority or fallback lost');
+        for (const Page of [MoviesPage, SeriesPage]) {
+            const candidate = Object.create(Page.prototype);
+            candidate.sortSelect = {value:'default'};
+            const cards = [{representative:{name:'Unknown QA'}}, {representative:qualitySample}];
+            candidate.sortCards(cards);
+            if (cards[0].representative !== qualitySample) throw Error('default grid presentation priority lost');
+        }
         const host = document.getElementById('qa-host');
         host.innerHTML = '<div id="qa-grid"></div>';
         const grid = document.getElementById('qa-grid');
@@ -69,6 +80,7 @@ window.CatalogLanguageQA = (() => {
             grid.className = 'horizontal-scroll';
             grid.innerHTML = items.map((item,index) => home.createRailCard(item,0,index)).join('');
         } else if (surface === 'genres') {
+            items = MediaUtils.rankByPresentation(items);
             GenreRails.render(grid, [{id:'qa-genre',title:'Catalogue',items}], {onItemClick:item => {chosen=item;}});
         } else {
             appMarkup ||= new DOMParser().parseFromString(await (await fetch('/app.html')).text(), 'text/html');
@@ -93,7 +105,7 @@ window.CatalogLanguageQA = (() => {
     }
     function verify() {
         const host = document.getElementById('qa-host');
-        const pendingView = MediaUtils.catalogLanguageInfo(items[9]);
+        const pendingView = MediaUtils.catalogLanguageInfo(items.find(item => item.stream_id === '9'));
         if (pendingView.headline !== MediaUtils.languageDisplayFull('en') || pendingView.audioSource !== 'provider-label') throw Error('unaccepted tag hides language or loses internal provenance');
         const providerMention = NorvaI18n.t('ui_web_38fc9a457587',{p0:'QA'}).replace('QA','').replace(/^[\s·]+/,'');
         const confirmMention = NorvaI18n.t('ui_web_provider_language_to_confirm',{language:'QA'}).replace('QA','').replace(/^[\s·]+/,'');
