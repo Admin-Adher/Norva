@@ -3634,3 +3634,18 @@ test('MP4 precise resume emits aligned decoded audio and video on the real GPU',
         ff(['-xerror','-i',root+'/output.ts','-t','4','-f','null','-']);
     } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+
+test('split-track MP4 grows reopened ranges after completed warmup without extra connections', {timeout:8000},async(t)=>{
+ const data=Buffer.alloc(4*1024*1024,39),calls=[];let active=0,peak=0;
+ const provider=http.createServer((req,res)=>{calls.push(req.headers.range);active++;peak=Math.max(peak,active);res.once('finish',()=>active--);sendExactRange(req,res,data)});
+ const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+ const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,dispatcher:null,
+  pathPrefix:'finite-mkv-seek',finiteWindowBytes:2*1024*1024,finiteFirstWindowBytes:256*1024,
+  finiteSteadyFirstWindowBytes:2*1024*1024,finiteCacheBytes:data.length,releaseDelayMs:0});t.after(()=>broker.close());
+ for(let i=0;i<4;i++){const start=i*256*1024,r=await fetch(broker.inputUrl,{headers:{Range:`bytes=${start}-${start+256*1024-1}`}});assert.deepEqual(Buffer.from(await r.arrayBuffer()),data.subarray(start,start+256*1024));}
+ const r=await fetch(broker.inputUrl,{headers:{Range:`bytes=${1024*1024}-${3*1024*1024-1}`}});
+ assert.deepEqual(Buffer.from(await r.arrayBuffer()),data.subarray(1024*1024,3*1024*1024));
+ assert.equal(calls.length,5);assert.equal(calls[4],`bytes=${1024*1024}-${3*1024*1024-1}`);
+ assert.equal(peak,1);assert.equal(broker.interruptedProviderFetches,0);
+});

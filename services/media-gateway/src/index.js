@@ -6212,7 +6212,8 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 const effectiveWindowBytes = finiteWindowIsWarmup
                     ? context.finiteWarmupWindowBytes
                     : (regularProviderWindowsCompleted === 0 && context.finiteFirstWindowBytes > 0)
-                        ? context.finiteFirstWindowBytes
+                        ? (context.finiteSteadyFirstWindowBytes > 0 && context.completedProviderFetches >= 4
+                            ? context.finiteSteadyFirstWindowBytes : context.finiteFirstWindowBytes)
                     : (regularProviderWindowsCompleted > 0 || forwarded >= context.finiteWindowBytes
                         ? context.finiteInitialSequentialWindowBytes > 0
                             && forwarded < (context.finiteSequentialGrowthBytes || context.finiteInitialSequentialWindowBytes)
@@ -7198,6 +7199,12 @@ async function createStrictLidBroker(options = {}) {
     context.finiteFirstWindowBytes = pathPrefix === 'finite-mkv-seek'
         && Number.isSafeInteger(options.finiteFirstWindowBytes) && options.finiteFirstWindowBytes > 0
         ? Math.max(64 * 1024, Math.min(context.finiteWindowBytes, options.finiteFirstWindowBytes)) : 0;
+    // Split-track MP4 reopens local ranges for individual packets. After four
+    // complete warmup windows, amortize request latency over bounded 2 MiB reads.
+    context.finiteSteadyFirstWindowBytes = pathPrefix === 'finite-mkv-seek'
+        && Number.isSafeInteger(options.finiteSteadyFirstWindowBytes) && options.finiteSteadyFirstWindowBytes > 0
+        ? Math.max(context.finiteFirstWindowBytes, Math.min(context.finiteWindowBytes, 2 * 1024 * 1024,
+            options.finiteSteadyFirstWindowBytes)) : 0;
     context.finiteResumePrefixTargetBytes = Math.min(
         context.fileSizeBytes,
         context.finiteWindowBytes,
@@ -15557,6 +15564,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         finiteWarmupWindowBytes: warmupWindowBytes,
         finiteSequentialWindowBytes: sequentialWindowBytes,
         finiteFirstWindowBytes: finiteMp4 ? 256 * 1024 : 0,
+        finiteSteadyFirstWindowBytes: finiteMp4 ? 2 * 1024 * 1024 : 0,
         finiteCacheBytes: FINITE_MKV_SEEK_CACHE_BYTES,
         finiteResumePrefixTargetBytes: finiteTs ? 0 : Math.min(effectiveWindowBytes, INBAND_HEADER_BYTES),
         finiteResumePrefixWeakValidationBytes: FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES,
