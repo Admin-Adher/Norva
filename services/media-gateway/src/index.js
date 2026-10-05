@@ -12575,6 +12575,13 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             session.finiteMp4SeekBroker = true;
             session.finiteMp4BufferObservation = windowedMp4Transport;
             await prepareFiniteMkvSeekBroker(session, sessionRequestAbortController.signal);
+            // A resumed MP4 can earn the same decoded output proof as a cold
+            // retained MP4. This opts into verification, not eligibility:
+            // finalized segments, continuity and sustained rate still decide.
+            if (videoModeForSession(session) === 'copy'
+                && !multiAudioHlsEnabled(session) && !exactSubtitleHlsEnabled(session)) {
+                session.finiteVodOutputStartupFormat = 'mp4';
+            }
         }
         applyVaapiVodStartupReadiness(session);
         session.hlsCacheDescriptor = session.videoMode === 'copy'
