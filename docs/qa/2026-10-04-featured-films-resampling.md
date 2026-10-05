@@ -178,3 +178,25 @@ Innocent Voices (`es`) and Prey (`en`) from owner listening, and Bolt (`en`) fro
 automatic validation. Lost/Ochi remain incomplete under their existing failure
 delays; Mars remains without a profile. See the
 [04:12 Paris follow-up](2026-10-05-language-campaign-heartbeat-0412.md).
+
+### Mars profile acquired; incomplete analysis quarantined, 5 October
+
+The ordinary exact-profile request succeeded at 02:19:52 UTC, one attempt and
+one persisted profile. One ordinary validation admission followed at 02:24:47,
+sampling pass 0. Both exclusive operator markers are consumed. The previous
+statements that Mars had no profile describe the earlier snapshots.
+
+Mars completed two authenticated receipts: one insufficient and one qualified
+English window (probability 0.996697). This is below the four-window requirement.
+After four consecutive attempts without durable progress, the job became
+`LANGUAGE_VALIDATION_NO_PROGRESS_QUARANTINED` at 02:54:47.376 UTC, with six
+provider attempts. No language is published. The ordinary delay through
+6 October 02:54:47 remains in place and no new request was sent.
+
+Historical Gateway logs contain four extraction timeouts during this period,
+with drainage attested; the last is six milliseconds before quarantine. Anonymous
+diagnostics do not prove individual attribution of all four events or the root
+cause of extraction failure. The new acceleration Edge deployment started after
+this quarantine and does not reset it. At 03:14:59 the target jobs and evidence
+are unchanged; all five human confirmations remain projectable. See the
+[05:13 Paris follow-up](2026-10-05-language-campaign-heartbeat-0513.md).
