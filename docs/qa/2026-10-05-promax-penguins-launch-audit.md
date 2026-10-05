@@ -52,4 +52,3 @@ Bilan : quatre copies ont effectivement commencé à jouer lors des essais, avec
 ## Correctifs ultérieurs
 
 Cet audit décrit l'état avant modification. Les corrections, incidents intermédiaires et rejeux finaux sont consignés dans [le rapport de correction](2026-10-05-promax-penguins-startup-fix.md). Les constats et limites historiques ci-dessus sont conservés.
-
