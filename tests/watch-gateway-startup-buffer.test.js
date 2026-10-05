@@ -982,7 +982,7 @@ test('fresh first-fragment origin admits A Breed Apart only with matching seekab
     for (const scenario of [
         { name: 'full reserve', allowed: true },
         { name: 'missing first fragment', sn: 8 },
-        { name: 'seekable mismatch', seekStart: 0 },
+        { name: 'seekable mismatch', seekStart: 8 },
         { name: 'previously played', played: 1 },
         { name: 'outside first fragment', fragmentStart: 0 },
         { name: 'insufficient reserve', end: 31.596333 },
@@ -999,7 +999,7 @@ test('fresh first-fragment origin admits A Breed Apart only with matching seekab
             fragments: [{ sn, start: scenario.fragmentStart ?? start, duration: 2 }] } }] };
         const video = { currentTime: 0, paused: true, readyState: 4,
             played: { length: scenario.played ?? 0 },
-            seekable: { length: 1, start: () => scenario.seekStart ?? start },
+            seekable: { length: 1, start: () => scenario.seekStart ?? 0, end: () => 100 },
             buffered: { length: 1, start: () => start, end: () => scenario.end ?? start + 96 } };
         const page = { video, hls, _gatewayUserPaused: scenario.userPaused,
             _pendingLocalSeekTarget: scenario.pending, isStalePlaybackAttempt: () => false,
@@ -1021,7 +1021,7 @@ test('a positive startup origin earns adaptive growth without moving before admi
         fragments: [0,1,2].map(sn => ({ sn, start: start + sn * 2, duration: 2 })) } }] };
     const video = { paused: true, readyState: 4, videoWidth: 1280,
         get currentTime() { return position; }, set currentTime(v) { position = v; movedAt = now; },
-        played: { length: 0 }, seekable: { length: 1, start: () => start },
+        played: { length: 0 }, seekable: { length: 1, start: () => 0, end: () => 100 },
         buffered: { length: 1, start: () => start, end: () => start + 6 + Math.floor(now / 500) * 2 } };
     const page = { video, hls, isStalePlaybackAttempt: () => false,
         gatewayBufferedAheadSeconds() { return measure.call(this); } };

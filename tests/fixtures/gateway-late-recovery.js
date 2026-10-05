@@ -16,7 +16,7 @@ async function verifyGatewayLateRecovery(WatchPage, Hls, tick) {
     // A Breed Apart: a fresh paused timeline begins at 3.569333, not zero.
     startup.video.played = { length: 0 };
     startup.video.currentTime = 0;
-    startup.video.seekable = { length: 1, start: () => 3.569333 };
+    startup.video.seekable = { length: 1, start: () => 0, end: () => 100 };
     startup.video.buffered = { length: 1, start: () => 3.569333, end: () => 100 };
     startupHls.levels[0].details = { live: true, startSN: 0,
         fragments: [{ sn: 0, start: 3.569333, duration: 2 }] };

@@ -6105,7 +6105,8 @@ class WatchPage {
                         const seekable = startupVideo.seekable;
                         const attestedFirstOrigin = startupVideo.played?.length === 0
                             && seekable?.length > 0
-                            && Math.abs(Number(seekable.start(0)) - start) <= 0.25
+                            && Number(seekable.start(0)) <= start
+                            && Number(seekable.end(0)) > start
                             && Number.isInteger(details?.startSN) && details.startSN >= 0 && details.startSN <= 1
                             && first?.sn === details.startSN
                             && Number.isFinite(first?.duration) && first.duration > 0 && first.duration <= 12.25
@@ -7154,6 +7155,7 @@ class WatchPage {
         const requestId = Number.isInteger(options.requestId)
             ? options.requestId
             : ++this._gatewaySeekRequestId;
+        const seekRequestedAt = Date.now();
         const playbackAttemptId = this._playbackAttemptId;
         const playbackResolveSignal = this.playbackResolveSignalForAttempt(playbackAttemptId);
         const subtitleSwitchRequestId = Number.isInteger(options.subtitleSwitchRequestId)
@@ -7200,7 +7202,7 @@ class WatchPage {
 
         // A seek replaces the HLS graph. Startup evidence and observers belong
         // to that graph, not to the previously playing session.
-        this.beginPlaybackTelemetry(null, playbackAttemptId);
+        this.beginPlaybackTelemetry(null, playbackAttemptId, { requestedAt: seekRequestedAt });
 
         let playbackHint = {
             ...(MediaUtils.playbackHintFromItem
