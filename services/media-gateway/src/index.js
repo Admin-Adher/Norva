@@ -8562,7 +8562,9 @@ function initializeStrictLidCapturePipeline(store) {
                 planStrictSpeechWindow(binding.durationSeconds, binding.windowOrdinal, binding.samplingPass),
                 { ...options, selectedWavPath: `${wavPath}.selected.wav`, timeoutMs: 8000 });
             if (!prepared.ok) throw capturePipelineError(prepared.preempted
-                ? 'LANGUAGE_VALIDATION_VIEWER_PREEMPTED' : 'LID_CAPTURE_PREPARATION_FAILED');
+                ? 'LANGUAGE_VALIDATION_VIEWER_PREEMPTED'
+                : prepared.code === 'LID_CAPTURE_AUDIO_WINDOW_UNAVAILABLE'
+                    ? prepared.code : 'LID_CAPTURE_PREPARATION_FAILED');
             const batch = await runStrictWhisperBatch([`${wavPath}.selected.wav`], {
                 ...options, timeoutMs: Math.max(1, deadline - Date.now()),
                 evaluateSample: sample => strictLanguageBatchSampleResult(sample, prepared.offset),
@@ -8625,6 +8627,7 @@ async function handleStrictLidCaptureRequest(req, res, action) {
             'LID_CAPTURE_DISABLED', 'LID_CAPTURE_NOT_FOUND', 'LID_CAPTURE_STORE_FULL', 'LID_CAPTURE_ALREADY_RUNNING',
             'LID_CAPTURE_COMPUTE_BUSY', 'LID_CAPTURE_DRAIN_UNCONFIRMED', 'LID_CAPTURE_EXTRACTION_TIMEOUT',
             'LID_CAPTURE_EXTRACTION_FAILED', 'LID_CAPTURE_INFERENCE_FAILED', 'LID_CAPTURE_PREPARATION_FAILED',
+            'LID_CAPTURE_AUDIO_WINDOW_UNAVAILABLE',
             'PROVIDER_BUSY', 'PROXY_AUTH_FAILED', 'PROVIDER_AUTH_FAILED', 'PROVIDER_FIRST_BYTE_TIMEOUT', 'PROVIDER_IDLE_TIMEOUT',
             'PROVIDER_UPSTREAM_TRANSIENT', 'PROVIDER_REQUEST_FAILED', 'VOD_CHANGED', 'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH',
             'MP4_DECLARED_MEDIA_EXCEEDS_FILE']);
@@ -8633,7 +8636,8 @@ async function handleStrictLidCaptureRequest(req, res, action) {
             'PROVIDER_IDLE_TIMEOUT', 'PROVIDER_UPSTREAM_TRANSIENT', 'PROVIDER_REQUEST_FAILED', 'VOD_CHANGED', 'RANGE_UNSUPPORTED', 'RANGE_LENGTH_MISMATCH',
             'MP4_DECLARED_MEDIA_EXCEEDS_FILE']);
         const status = providerCodes.has(code) && Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599
-            ? error.status : code === 'LID_CAPTURE_NOT_FOUND' ? 409
+            ? error.status : code === 'LID_CAPTURE_AUDIO_WINDOW_UNAVAILABLE' ? 422
+            : code === 'LID_CAPTURE_NOT_FOUND' ? 409
             : (['LANGUAGE_ENRICHMENT_CAPACITY_BUSY', 'LID_CAPTURE_STORE_FULL', 'LID_CAPTURE_COMPUTE_BUSY', 'LID_CAPTURE_ALREADY_RUNNING'].includes(code) ? 429
                 : (code === 'LANGUAGE_VALIDATION_VIEWER_PREEMPTED' ? 409 : 502));
         if (!res.destroyed && !res.writableEnded) return res.status(status).json({ code,

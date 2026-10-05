@@ -99,6 +99,7 @@ function edgeFixture(options = {}) {
                 : { ok: true, status: 200, payload: captured };
             if (action === 'infer') {
                 assert.equal(account, false); assert.equal(identity, false); assert.equal(claims.captureRelease, uuid);
+                if (options.inferResponse) return options.inferResponse;
                 return options.inferFails ? { ok: false, status: 409, payload: { code: 'preempted', ...drain } }
                     : { ok: true, status: 200, payload: { windowOrdinal: 1, windowCount: 6, receipt: 'opaque', ...drain } };
             }
@@ -121,6 +122,8 @@ function edgeFixture(options = {}) {
     });
     vm.runInContext(stripTypeScriptTypes(section(edge, 'async function exactFileProbeAdmissionEnabled(', 'async function runAutomaticVodLanguageMetadataBatch('), { mode: 'transform' }), context);
     vm.runInContext(stripTypeScriptTypes(section(edge, 'async function processOneLanguageValidationTrack(', 'async function finalizeLanguageValidationTrackWindows('), { mode: 'transform' }), context);
+    if (options.realFailurePolicy) vm.runInContext(stripTypeScriptTypes(section(edge,
+        'function languageValidationTaskErrorCode(', 'function languageValidationPendingResponse('), { mode: 'transform' }), context);
     return { events, failures, run: () => context.processOneLanguageValidationTrack(db, uuid), slots: () => ({ account, identity }) };
 }
 
@@ -256,6 +259,75 @@ test('actual Gateway missing stored audio returns 409, never transparently downl
     const f = gatewayFixture({ missing: true }); await f.run(); assert.equal(f.res.statusCode, 409);
     assert.equal(f.res.payload.code, 'LID_CAPTURE_NOT_FOUND'); assert.equal(f.res.payload.providerDrained, true);
     assert.deepEqual(f.called, ['infer']);
+});
+
+test('short no-speech PCM flows through actual sampler, Gateway and Edge as incomplete daily failure without another capture', async (t) => {
+    const fsp = require('node:fs/promises');
+    const os = require('node:os');
+    const { prepareStrictLidSpeechSample } = require('../services/media-gateway/src/strict-lid-speech-sampler');
+    const { planStrictSpeechWindow } = require('../services/media-gateway/src/strict-lid-speech-window');
+    const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'norva-short-capture-'));
+    t.after(async () => {
+        assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
+        assert.ok(path.basename(directory).startsWith('norva-short-capture-'));
+        await fsp.rm(directory, { recursive: true, force: true });
+    });
+    const pcm = Buffer.alloc(44 + 611477 * 2);
+    pcm.write('RIFF'); pcm.writeUInt32LE(pcm.length - 8, 4); pcm.write('WAVEfmt ', 8);
+    pcm.writeUInt32LE(16, 16); pcm.writeUInt16LE(1, 20); pcm.writeUInt16LE(1, 22);
+    pcm.writeUInt32LE(16000, 24); pcm.writeUInt32LE(32000, 28);
+    pcm.writeUInt16LE(2, 32); pcm.writeUInt16LE(16, 34);
+    pcm.write('data', 36); pcm.writeUInt32LE(pcm.length - 44, 40);
+    const wavPath = path.join(directory, 'raw.wav'); await fsp.writeFile(wavPath, pcm);
+    const context = vm.createContext({ Date,
+        createStrictLidCapturePipeline: options => options,
+        capturePipelineError: code => Object.assign(new Error(code), { code }),
+        planStrictSpeechWindow,
+        runStrictSpeechSampler: (input, plan, options) => prepareStrictLidSpeechSample({
+            wavPath: input, plan, ...options, bin: '/fixture/vad', model: '/fixture/model',
+            runVadImpl: async () => ({ ok: true, outcome: 'succeeded', segments: [] }),
+        }),
+        runStrictWhisperBatch: () => assert.fail('no valid window must never reach language recognition'),
+    });
+    vm.runInContext(section(gateway, 'function initializeStrictLidCapturePipeline(',
+        'async function handleStrictLidCaptureRequest('), context);
+    let failure;
+    try { await context.initializeStrictLidCapturePipeline({}).infer(wavPath,
+        { durationSeconds: 5891.136, windowOrdinal: 6, samplingPass: 0 }, { accountKey: 'fixture' }, new AbortController().signal); }
+    catch (error) { failure = error; }
+    assert.equal(failure?.code, 'LID_CAPTURE_AUDIO_WINDOW_UNAVAILABLE');
+    assert.deepEqual(await fsp.readFile(wavPath), pcm, 'existing PCM remains immutable');
+    const g = gatewayFixture({ failure }); await g.run();
+    assert.equal(g.res.statusCode, 422);
+    assert.equal(g.res.payload.code, failure.code);
+    assert.equal(g.res.payload.providerDrained, true);
+    const f = edgeFixture({ cached: true, realFailurePolicy: true,
+        inferResponse: { ok: false, status: g.res.statusCode, payload: g.res.payload } });
+    await f.run();
+    assert.equal(f.failures.length, 1);
+    assert.equal(f.failures[0].errorCode, 'LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE');
+    assert.equal(f.failures[0].terminal, true);
+    assert.equal(f.failures[0].retryAt, null, 'use existing daily failure default, not 30-second capture retry');
+    for (const event of ['fetch:capture', 'fetch:ack', 'rpc:checkpoint_catalog_file_audio_validation_window',
+        'rpc:reset_catalog_file_audio_validation_windows', 'rpc:claim_provider_account_language_validation']) {
+        assert.equal(f.events.includes(event), false, event);
+    }
+});
+
+test('Edge only terminates attested deterministic short-window failure; transient preparation failures keep local retry', async () => {
+    for (const response of [
+        { status: 502, payload: { code: 'LID_CAPTURE_PREPARATION_FAILED', ...drain } },
+        { status: 422, payload: { code: 'LID_CAPTURE_AUDIO_WINDOW_UNAVAILABLE', providerDrained: false, providerDrainProtocol: 1 } },
+        { status: 502, payload: { code: 'LID_CAPTURE_AUDIO_WINDOW_UNAVAILABLE', ...drain } },
+    ]) {
+        const before = Date.now();
+        const f = edgeFixture({ cached: true, realFailurePolicy: true, inferResponse: { ok: false, ...response } });
+        await f.run();
+        assert.equal(f.failures[0].errorCode, 'LANGUAGE_CAPTURE_INFERENCE_DEFERRED');
+        assert.equal(f.failures[0].terminal, false);
+        assert.ok(Date.parse(f.failures[0].retryAt) >= before + 30000);
+        assert.equal(f.events.includes('fetch:capture'), false);
+    }
 });
 
 test('actual Gateway excludes an out-of-cohort capture action BEFORE touching retained audio or compute', async () => {

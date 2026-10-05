@@ -265,6 +265,29 @@ test('short WAV clips are not padded, and fallback fails if the anchor is unavai
     assert.equal(analyzePcm16Wav(await fs.readFile(fixture.wavPath)).durationSeconds, 20);
 });
 
+test('short capture with successful zero-speech VAD is typed unavailable, but unavailable VAD remains retryable', async (t) => {
+    for (const [outcome, ok, segments] of [['succeeded', true, []], ['unavailable', false, null],
+        ['failed', false, null], ['timed-out', false, null], ['succeeded', true, [{ start: -1, end: 20 }]]]) {
+        const fixture = await wavFixture(t, 38.2173125);
+        const selectedWavPath = path.join(path.dirname(fixture.wavPath), 'selected.wav');
+        const result = await prepareStrictLidSpeechSample({ ...fixture, selectedWavPath,
+            bin: '/bin/vad', model: '/model', runVadImpl: async () => ({ ok, outcome, segments }) });
+        assert.equal(result.ok, false);
+        assert.equal(result.selection, null);
+        assert.equal(result.code, ok && Array.isArray(segments) && segments.length === 0
+            ? 'LID_CAPTURE_AUDIO_WINDOW_UNAVAILABLE' : undefined);
+        assert.deepEqual(await fs.readFile(fixture.wavPath), fixture.bytes);
+        await assert.rejects(fs.stat(selectedWavPath), { code: 'ENOENT' });
+    }
+    const completeAnchor = await wavFixture(t, 40);
+    const result = await prepareStrictLidSpeechSample({ ...completeAnchor,
+        bin: '/bin/vad', model: '/model', runVadImpl: async () => ({ ok: true, outcome: 'succeeded', segments: [] }) });
+    assert.equal(result.ok, true);
+    assert.equal(result.selection.selector, 'anchor-fallback');
+    assert.equal(result.selection.speechMilliseconds, 0);
+    assert.equal(result.code, undefined);
+});
+
 test('invalid WAV and plan are rejected without invoking VAD or overwriting the input', async (t) => {
     const fixture = await wavFixture(t);
     const wrongPlan = { ...fixture.plan, searchDurationMilliseconds: 90000 };
