@@ -101,3 +101,21 @@ Vérifications locales : **196 tests WatchPage réussis**. Canary synthétique s
 Reçus locaux : `breed-matched-decode.safe.json`, `massacre-matched-decode.safe.json`, `massacre-preroll-decode.safe.json`, `client-preroll-canary.safe.json` sous `.codex-artifacts/three-vod-seek-20261005/`. Ces fichiers sont des preuves locales ; les marqueurs d'acquisition ont été consommés et ne doivent pas être rejoués.
 
 **État au commit candidat :** tests Android, publication et rejeu navigateur encore à effectuer. Le coût supplémentaire de préparation doit être mesuré ; aucun gain de délai n'est revendiqué. Les données manquantes restent non réparées et leur origine stockage fournisseur versus relais commun n'est pas départagée.
+
+### Publication et rejeux terminés — 21:30 Paris
+
+PR **668** intégrée (`8d15aaba2d665f5b260ac92051b06f5de8a26581`, code `91ca4588c27a15573cd49ecf921befcc6d4d170f`). Onze contrôles réussis, paquets Android Phone/TV et Windows compris. Matrice Android `37361697866` : les six configurations passent dès la première tentative ; téléphone = fixture WebView de reprise, TV = consentement D-pad, pas preuve du décodeur TV. Publication Cloudflare `37362509004` réussie à 19:21:15 UTC après 5 972 tests : 5 945 réussis, 27 ignorés, aucun échec. Navigateur rechargé : `WatchPage.js?v=859caf2943`, hls.js 1.7.3 conservé.
+
+Trois rejeux séquentiels, mêmes copies MAX OTT, touches de timeline à 30 %, sans relance manuelle de lecture :
+
+| Copie | Cible demandée | Départ Gateway | Préparation serveur | Demande → lecture effective | Résultat |
+|---|---:|---:|---:|---:|---|
+| Massacre | 1 441 s | 1 426 s | 22,129 s | 46,402 s | `play_started` à la cible, progression locale 15 → 34,680 s |
+| Until Dawn | 1 857 s | 1 842 s | 13,331 s | 80,582 s | `play_started` à la cible, progression locale jusqu'à 42,159 s |
+| A Breed Apart | 1 796 s | 1 781 s | 21,336 s | 41,136 s | `play_started` à la cible, progression locale 28,637 → 52,218 s |
+
+Tous ces relevés de lecture ont `paused=false`, `readyState=4`, `error=null`. Les deux premières reprises initiales ont été remplacées par le saut pendant l'attente de réserve : aucune lecture initiale réussie n'est revendiquée pour elles. La reprise initiale de Breed avait réellement démarré. Les durées demande→lecture sont calculées depuis l'événement première image et son TTFF, puis l'événement `play_started` du même flux ; elles ne sont pas les durées serveur.
+
+**Limites mesurées :** Until reste sous la cadence de démarrage rapide (1,616× observé à la préparation), donc réserve longue inchangée ; aucune accélération globale démontrée. Le pré-décodage peut ajouter du délai et son effet n'est pas isolé du transport variable dans ces trois rejeux. Sur sept segments Breed déjà produits, un intervalle entre paquets vidéo atteint **4,004 s**, audio continu (maximum 21,334 ms). Ce n'est pas un comptage d'images perdues ni une nouvelle attribution de cause. La progression du lecteur ne certifie pas une vidéo parfaitement fluide. La différence de décodage corrigée est prouvée sur l'extrait Massacre 30–60 s ; le rejeu de production valide le raccord et l'autoplay, pas une équivalence bit à bit de toutes les images matérielles.
+
+Retour navigateur à Films. À 19:30:52 UTC, six sessions UI expirées, zéro session active du compte ciblé et zéro session sur les deux Gateways à cet instant ; démarrages Gateway du 00:29 inchangés. Aucun déploiement Gateway/Edge, modèle, seuil, route ou concurrence modifié. Aucun marqueur de diagnostic rejoué. Pièce jointe PR668 refusée à la limite de 100 ; aucune pièce supprimée.

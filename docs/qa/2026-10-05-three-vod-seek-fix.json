@@ -80,5 +80,642 @@
   "residualVideoGapsSeconds": {
     "breed": 2.127,
     "massacre": 3.545
+  },
+  "matchedDecodeFollowup": {
+    "scope": "Same retained bytes and timestamp occurrences; source gaps are not repaired",
+    "breed": {
+      "at": "2026-10-05T18:49:40.937136+00:00",
+      "film": "A Breed Apart [MULTI-SUB]",
+      "mode": "cold-range",
+      "reader": "system libcurl independent of Norva media reader",
+      "gatewayRoute": "secondary HTTP CONNECT slot 1",
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "attempts": 1,
+      "rangeKind": "same cold Gateway range",
+      "curlExit": 28,
+      "boundedStop": false,
+      "bytesRetained": 15066965,
+      "seconds": 45.033,
+      "httpStatuses": [
+        200,
+        302,
+        200,
+        206
+      ],
+      "prefixSha256": "83fd5a1e6ebd6792cc2ef74d19e2c4db2c54a75fc5456820fc1304b72810b0b5",
+      "bodyKind": "matroska",
+      "mpegTsSync": false,
+      "allZeroPrefix": false,
+      "allZeroSample": false,
+      "firstNonzeroOffset": 0,
+      "structureOffsets": {
+        "ebml": 0,
+        "segment": 40,
+        "tracks": 78,
+        "cluster": 7448
+      },
+      "prefix64kSha256": "b6ccf85579a1f60bdee775598794a72f71e830ce62a016536a4ee28d74694d1d",
+      "bodySignals": {
+        "forbidden": false,
+        "expired": false,
+        "cloudflare": false,
+        "nginx": false,
+        "connectionLimit": false,
+        "proxy": false
+      },
+      "expired": true,
+      "matchedDecode": {
+        "continuous": {
+          "exit": 0,
+          "frames": 564,
+          "first": 30.03,
+          "last": 56.097708,
+          "maxGap": 2.6276249999999948,
+          "gapsOver250ms": 1,
+          "diagnostics": {
+            "ebml": 5,
+            "invalid": 5,
+            "reference": 0,
+            "corrupt": 2
+          },
+          "frameSequenceSha256": "377e17a0ddc5f7e7c1dd656e5ccfb63f52ad15043da325b8529cea75f290b586"
+        },
+        "input-seek": {
+          "exit": 0,
+          "frames": 564,
+          "first": 30.03,
+          "last": 56.097708,
+          "maxGap": 2.6276249999999948,
+          "gapsOver250ms": 1,
+          "diagnostics": {
+            "ebml": 5,
+            "invalid": 5,
+            "reference": 0,
+            "corrupt": 1
+          },
+          "frameSequenceSha256": "377e17a0ddc5f7e7c1dd656e5ccfb63f52ad15043da325b8529cea75f290b586"
+        }
+      },
+      "comparison": {
+        "commonTimestamps": 564,
+        "identicalImages": 564,
+        "differentImages": 0,
+        "onlyContinuous": 0,
+        "onlySeek": 0,
+        "scope": "same retained bytes, software decode, source seconds 30 to 60; not the live broker or GPU"
+      },
+      "zeroRunsOver64k": 5,
+      "contentRanges": [
+        "bytes 0-1976493031/1976493032"
+      ],
+      "serverSignals": {
+        "cloudflare": false,
+        "nginx": true
+      },
+      "temporaryFilesRemoved": true
+    },
+    "massacre": {
+      "at": "2026-10-05T18:52:56.799782+00:00",
+      "film": "What Happens After the Massacre? [MULTI-SUB]",
+      "mode": "cold-range",
+      "reader": "system libcurl independent of Norva media reader",
+      "gatewayRoute": "secondary HTTP CONNECT slot 1",
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "attempts": 1,
+      "rangeKind": "same cold Gateway range",
+      "curlExit": -15,
+      "boundedStop": true,
+      "bytesRetained": 41943040,
+      "seconds": 9.785,
+      "httpStatuses": [
+        200,
+        302,
+        200,
+        206
+      ],
+      "prefixSha256": "6fddd97067914efa654d9ab0903f4a1e7d16095d5daec27eccf45c3c7b8bd2b6",
+      "bodyKind": "matroska",
+      "mpegTsSync": false,
+      "allZeroPrefix": false,
+      "allZeroSample": false,
+      "firstNonzeroOffset": 0,
+      "structureOffsets": {
+        "ebml": 0,
+        "segment": 40,
+        "tracks": 78,
+        "cluster": 7215
+      },
+      "prefix64kSha256": "36df30c50213200b83e0cc620f2d874648a90e184857448a1fd695e845bcec34",
+      "bodySignals": {
+        "forbidden": false,
+        "expired": false,
+        "cloudflare": false,
+        "nginx": false,
+        "connectionLimit": false,
+        "proxy": false
+      },
+      "expired": true,
+      "matchedDecode": {
+        "continuous": {
+          "exit": 0,
+          "frames": 473,
+          "first": 31.156125,
+          "last": 57.474083,
+          "maxGap": 5.046709,
+          "gapsOver250ms": 2,
+          "diagnostics": {
+            "ebml": 7,
+            "invalid": 7,
+            "reference": 2,
+            "corrupt": 7
+          },
+          "frameSequenceSha256": "585f0fe38b3ab7a7c49ff1c3736349a56c3cb306fe0ce271cff76cbdb6824277"
+        },
+        "input-seek": {
+          "exit": 0,
+          "frames": 473,
+          "first": 31.156125,
+          "last": 57.474083,
+          "maxGap": 5.046709,
+          "gapsOver250ms": 2,
+          "diagnostics": {
+            "ebml": 8,
+            "invalid": 8,
+            "reference": 0,
+            "corrupt": 4
+          },
+          "frameSequenceSha256": "9cb33c41bf2e3df83a0941dd37ec966a3f7985d1fa34e31cb0a53ea8736884f1"
+        },
+        "preroll15": {
+          "exit": 0,
+          "frames": 473,
+          "first": 31.156125,
+          "last": 57.474083,
+          "maxGap": 5.046709,
+          "gapsOver250ms": 2,
+          "diagnostics": {
+            "ebml": 8,
+            "invalid": 8,
+            "reference": 2,
+            "corrupt": 5
+          },
+          "frameSequenceSha256": "585f0fe38b3ab7a7c49ff1c3736349a56c3cb306fe0ce271cff76cbdb6824277"
+        }
+      },
+      "comparison": {
+        "input-seek": {
+          "commonTimestampOccurrences": 473,
+          "identicalImages": 341,
+          "differentImages": 132,
+          "firstDifferent": 31.156125,
+          "lastDifferent": 36.619917,
+          "onlyContinuous": 0,
+          "onlyCandidate": 0,
+          "scope": "same retained bytes, software decode, seconds30-60; timestamp occurrence preserves duplicates"
+        },
+        "preroll15": {
+          "commonTimestampOccurrences": 473,
+          "identicalImages": 473,
+          "differentImages": 0,
+          "firstDifferent": null,
+          "lastDifferent": null,
+          "onlyContinuous": 0,
+          "onlyCandidate": 0,
+          "scope": "same retained bytes, software decode, seconds30-60; timestamp occurrence preserves duplicates"
+        }
+      },
+      "zeroRunsOver64k": 11,
+      "contentRanges": [
+        "bytes 0-1433416164/1433416165"
+      ],
+      "serverSignals": {
+        "cloudflare": false,
+        "nginx": true
+      },
+      "temporaryFilesRemoved": true
+    },
+    "candidate": {
+      "pullRequest": 668,
+      "head": "91ca4588c27a15573cd49ecf921befcc6d4d170f",
+      "merge": "8d15aaba2d665f5b260ac92051b06f5de8a26581",
+      "clientWarmupSeconds": 15,
+      "serverModified": false,
+      "testsPassed": 196,
+      "androidRun": 37361697866,
+      "androidConfigurationsPassed": 6,
+      "androidReruns": 0,
+      "cloudBuildRun": 37361671744,
+      "cloudBuildResult": "success",
+      "syntheticCanary": {
+        "exit": 0,
+        "result": "{\"cues\":\"WEBVTT\\n\\n00:14.021 --> 00:19.021\\nCrossing\\n\\n00:20.021 --> 00:24.021\\nAfter\\n\"}\n{\"functionalPassed\":true,\"frames\":240,\"identicalToContinuous\":true,\"videoStart\":1.463,\"audioStart\":1.4,\"duration\":24.958333,\"localTarget\":15,\"crossingCuePreserved\":true,\"cueTimes\":[[14.021,19.021],[20.021,24.021]],\"network\":\"none\",\"providerRequests\":0}",
+        "errorTail": null
+      },
+      "webDeploymentRun": 37362509004,
+      "webDeploymentResult": "success",
+      "productionReplay": "completed; exact target and autoplay validated, source gaps remain",
+      "webAsset": "859caf2943",
+      "fullSuite": {
+        "tests": 5972,
+        "passed": 5945,
+        "skipped": 27,
+        "failed": 0
+      }
+    },
+    "limitations": [
+      "Bounded software comparison only, no all-position guarantee",
+      "Existing missing frames remain",
+      "Initial Continue Watching resume is unchanged",
+      "TV matrix covers consent D-pad, not TV decoding"
+    ],
+    "rejectedServerCandidate": "Output trim lost crossing subtitle cue; never deployed",
+    "production": {
+      "audit": {
+        "at": "2026-10-05T19:30:51.858329+00:00",
+        "windowStartedAt": "2026-10-05T19:22:00Z",
+        "scope": "Exact selected copies of three requested films on controlled account; direct diagnostic sessions remain distinguishable from browser playbacks by mode and events.",
+        "sessions": [
+          {
+            "mode": "transcode",
+            "state": "expired",
+            "createdAt": "2026-10-05T19:22:22.683599+00:00",
+            "errorCode": null,
+            "updatedAt": "2026-10-05T19:23:38.763919+00:00",
+            "declaredContainer": "mkv",
+            "title": "What Happens After the Massacre? [MULTI-SUB]",
+            "source": "MAX OTT",
+            "events": [
+              {
+                "at": "2026-10-05T19:22:54.544249+00:00",
+                "code": null,
+                "mode": "gateway-session",
+                "event": "first_frame",
+                "ttffMs": 32159,
+                "gatewayStatus": null,
+                "gatewayDetails": null,
+                "failureCategory": null,
+                "positionSeconds": 1478,
+                "providerConcurrencySignal": null
+              }
+            ],
+            "gateways": [
+              {
+                "mode": "remux",
+                "route": "resume-cache-pilot",
+                "state": "expired",
+                "createdAt": "2026-10-05T19:22:53.199277+00:00",
+                "updatedAt": "2026-10-05T19:23:38.749098+00:00"
+              }
+            ],
+            "eventCounts": {
+              "play_requested": 0,
+              "first_frame": 1,
+              "play_started": 0,
+              "seek": 0,
+              "ended": 0,
+              "abandoned": 0,
+              "gateway_error": 0,
+              "playback_error": 0
+            },
+            "hasPlaybackEvents": true
+          },
+          {
+            "mode": "transcode",
+            "state": "expired",
+            "createdAt": "2026-10-05T19:23:39.889237+00:00",
+            "errorCode": null,
+            "updatedAt": "2026-10-05T19:25:04.2305+00:00",
+            "declaredContainer": "mkv",
+            "title": "What Happens After the Massacre? [MULTI-SUB]",
+            "source": "MAX OTT",
+            "events": [
+              {
+                "at": "2026-10-05T19:24:03.747997+00:00",
+                "code": null,
+                "mode": "gateway-session",
+                "event": "first_frame",
+                "ttffMs": 28114,
+                "gatewayStatus": null,
+                "gatewayDetails": null,
+                "failureCategory": null,
+                "positionSeconds": 1426,
+                "providerConcurrencySignal": null
+              },
+              {
+                "at": "2026-10-05T19:24:22.035736+00:00",
+                "code": null,
+                "mode": "gateway-session",
+                "event": "play_started",
+                "ttffMs": null,
+                "gatewayStatus": null,
+                "gatewayDetails": null,
+                "failureCategory": null,
+                "positionSeconds": 1441,
+                "providerConcurrencySignal": null
+              }
+            ],
+            "gateways": [
+              {
+                "mode": "remux",
+                "route": "resume-cache-pilot",
+                "state": "expired",
+                "createdAt": "2026-10-05T19:24:02.275361+00:00",
+                "updatedAt": "2026-10-05T19:25:04.212929+00:00"
+              }
+            ],
+            "eventCounts": {
+              "play_requested": 0,
+              "first_frame": 1,
+              "play_started": 1,
+              "seek": 0,
+              "ended": 0,
+              "abandoned": 0,
+              "gateway_error": 0,
+              "playback_error": 0
+            },
+            "hasPlaybackEvents": true
+          },
+          {
+            "mode": "transcode",
+            "state": "expired",
+            "createdAt": "2026-10-05T19:25:20.066739+00:00",
+            "errorCode": null,
+            "updatedAt": "2026-10-05T19:26:07.814438+00:00",
+            "declaredContainer": "mkv",
+            "title": "Until Dawn [MULTI-SUB]",
+            "source": "MAX OTT",
+            "events": [
+              {
+                "at": "2026-10-05T19:25:36.279151+00:00",
+                "code": null,
+                "mode": "gateway-session",
+                "event": "first_frame",
+                "ttffMs": 17572,
+                "gatewayStatus": null,
+                "gatewayDetails": null,
+                "failureCategory": null,
+                "positionSeconds": 1911,
+                "providerConcurrencySignal": null
+              }
+            ],
+            "gateways": [
+              {
+                "mode": "remux",
+                "route": "resume-cache-pilot",
+                "state": "expired",
+                "createdAt": "2026-10-05T19:25:35.353598+00:00",
+                "updatedAt": "2026-10-05T19:26:07.806724+00:00"
+              }
+            ],
+            "eventCounts": {
+              "play_requested": 0,
+              "first_frame": 1,
+              "play_started": 0,
+              "seek": 0,
+              "ended": 0,
+              "abandoned": 0,
+              "gateway_error": 0,
+              "playback_error": 0
+            },
+            "hasPlaybackEvents": true
+          },
+          {
+            "mode": "transcode",
+            "state": "expired",
+            "createdAt": "2026-10-05T19:26:08.932293+00:00",
+            "errorCode": null,
+            "updatedAt": "2026-10-05T19:28:03.706848+00:00",
+            "declaredContainer": "mkv",
+            "title": "Until Dawn [MULTI-SUB]",
+            "source": "MAX OTT",
+            "events": [
+              {
+                "at": "2026-10-05T19:26:23.546043+00:00",
+                "code": null,
+                "mode": "gateway-session",
+                "event": "first_frame",
+                "ttffMs": 18453,
+                "gatewayStatus": null,
+                "gatewayDetails": null,
+                "failureCategory": null,
+                "positionSeconds": 1842,
+                "providerConcurrencySignal": null
+              },
+              {
+                "at": "2026-10-05T19:27:25.675758+00:00",
+                "code": null,
+                "mode": "gateway-session",
+                "event": "play_started",
+                "ttffMs": null,
+                "gatewayStatus": null,
+                "gatewayDetails": null,
+                "failureCategory": null,
+                "positionSeconds": 1857,
+                "providerConcurrencySignal": null
+              }
+            ],
+            "gateways": [
+              {
+                "mode": "remux",
+                "route": "resume-cache-pilot",
+                "state": "expired",
+                "createdAt": "2026-10-05T19:26:22.546204+00:00",
+                "updatedAt": "2026-10-05T19:28:03.698489+00:00"
+              }
+            ],
+            "eventCounts": {
+              "play_requested": 0,
+              "first_frame": 1,
+              "play_started": 1,
+              "seek": 0,
+              "ended": 0,
+              "abandoned": 0,
+              "gateway_error": 0,
+              "playback_error": 0
+            },
+            "hasPlaybackEvents": true
+          },
+          {
+            "mode": "transcode",
+            "state": "expired",
+            "createdAt": "2026-10-05T19:28:23.410923+00:00",
+            "errorCode": null,
+            "updatedAt": "2026-10-05T19:29:13.241397+00:00",
+            "declaredContainer": "mkv",
+            "title": "A Breed Apart [MULTI-SUB]",
+            "source": "MAX OTT",
+            "events": [
+              {
+                "at": "2026-10-05T19:28:46.406835+00:00",
+                "code": null,
+                "mode": "gateway-session",
+                "event": "first_frame",
+                "ttffMs": 23290,
+                "gatewayStatus": null,
+                "gatewayDetails": null,
+                "failureCategory": null,
+                "positionSeconds": 1903,
+                "providerConcurrencySignal": null
+              },
+              {
+                "at": "2026-10-05T19:29:00.101215+00:00",
+                "code": null,
+                "mode": "gateway-session",
+                "event": "play_started",
+                "ttffMs": null,
+                "gatewayStatus": null,
+                "gatewayDetails": null,
+                "failureCategory": null,
+                "positionSeconds": 1903,
+                "providerConcurrencySignal": null
+              }
+            ],
+            "gateways": [
+              {
+                "mode": "remux",
+                "route": "resume-cache-pilot",
+                "state": "expired",
+                "createdAt": "2026-10-05T19:28:45.2495+00:00",
+                "updatedAt": "2026-10-05T19:29:13.231634+00:00"
+              }
+            ],
+            "eventCounts": {
+              "play_requested": 0,
+              "first_frame": 1,
+              "play_started": 1,
+              "seek": 0,
+              "ended": 0,
+              "abandoned": 0,
+              "gateway_error": 0,
+              "playback_error": 0
+            },
+            "hasPlaybackEvents": true
+          },
+          {
+            "mode": "transcode",
+            "state": "expired",
+            "createdAt": "2026-10-05T19:29:14.336703+00:00",
+            "errorCode": null,
+            "updatedAt": "2026-10-05T19:30:29.899347+00:00",
+            "declaredContainer": "mkv",
+            "title": "A Breed Apart [MULTI-SUB]",
+            "source": "MAX OTT",
+            "events": [
+              {
+                "at": "2026-10-05T19:29:36.665588+00:00",
+                "code": null,
+                "mode": "gateway-session",
+                "event": "first_frame",
+                "ttffMs": 26240,
+                "gatewayStatus": null,
+                "gatewayDetails": null,
+                "failureCategory": null,
+                "positionSeconds": 1781,
+                "providerConcurrencySignal": null
+              },
+              {
+                "at": "2026-10-05T19:29:51.561816+00:00",
+                "code": null,
+                "mode": "gateway-session",
+                "event": "play_started",
+                "ttffMs": null,
+                "gatewayStatus": null,
+                "gatewayDetails": null,
+                "failureCategory": null,
+                "positionSeconds": 1796,
+                "providerConcurrencySignal": null
+              }
+            ],
+            "gateways": [
+              {
+                "mode": "remux",
+                "route": "resume-cache-pilot",
+                "state": "expired",
+                "createdAt": "2026-10-05T19:29:35.958904+00:00",
+                "updatedAt": "2026-10-05T19:30:29.892853+00:00"
+              }
+            ],
+            "eventCounts": {
+              "play_requested": 0,
+              "first_frame": 1,
+              "play_started": 1,
+              "seek": 0,
+              "ended": 0,
+              "abandoned": 0,
+              "gateway_error": 0,
+              "playback_error": 0
+            },
+            "hasPlaybackEvents": true
+          }
+        ]
+      },
+      "health": {
+        "at": "2026-10-05T19:30:52.927726+00:00",
+        "ownedSource": [
+          {
+            "active": 0
+          }
+        ],
+        "gateways": [
+          {
+            "gateway": "norva-media-gateway",
+            "running": true,
+            "startedAt": "2026-10-05T00:29:18.854308998Z",
+            "active": 0,
+            "targetAccount": 0,
+            "unknownAccount": 0
+          },
+          {
+            "gateway": "norva-resume-cache-pilot-20260916",
+            "running": true,
+            "startedAt": "2026-10-05T00:29:22.563815847Z",
+            "active": 0,
+            "targetAccount": 0,
+            "unknownAccount": 0
+          }
+        ]
+      },
+      "breedPacketGaps": {
+        "at": "2026-10-05T19:30:19.694731+00:00",
+        "seekOffset": 1781,
+        "segments": 7,
+        "streams": [
+          {
+            "index": 0,
+            "packets": 194,
+            "start": 51.418333,
+            "end": 63.430333,
+            "maxGapSeconds": 4.004000000000005,
+            "gapsOver65ms": 1,
+            "gapsOver250ms": 1,
+            "medianDelta": 0.04200000000000159
+          },
+          {
+            "index": 1,
+            "packets": 565,
+            "start": 51.426667,
+            "end": 63.458667,
+            "maxGapSeconds": 0.021334000000003073,
+            "gapsOver65ms": 0,
+            "gapsOver250ms": 0,
+            "medianDelta": 0.021332999999998492
+          }
+        ]
+      },
+      "requestToPlaySeconds": {
+        "massacre": 46.402,
+        "until": 80.582,
+        "breed": 41.136
+      },
+      "serverPreparationMs": {
+        "massacre": 22129,
+        "until": 13331,
+        "breed": 21336
+      },
+      "allSixUiSessionsExpired": true,
+      "browserReturnedToMovies": true
+    }
   }
 }
