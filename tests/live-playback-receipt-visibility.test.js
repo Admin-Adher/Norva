@@ -108,6 +108,7 @@ async function liveFixture({
     itemType: 'live', episodeCoordinates: null, parentSeriesId: null, sourceId: SOURCE, userId: OWNER,
     itemId: ITEM, deviceId: 'fixture-device', playbackGeneration: { ...initialGeneration },
     requestedPlaybackHint: {}, targetUrlHash: await sha256Hex(TARGET),
+    preparedPlaybackTargetUrlHash: await sha256Hex(TARGET),
     HttpError, sourceConfigCache: new Map(),
     recordOrEmpty: value => value && typeof value === 'object' ? value : {},
     stringOrNull: value => typeof value === 'string' && value.trim() ? value : null,
