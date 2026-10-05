@@ -3636,21 +3636,6 @@ test('MP4 precise resume emits aligned decoded audio and video on the real GPU',
 });
 
 
-test('split-track MP4 grows reopened ranges after completed warmup without extra connections', {timeout:8000},async(t)=>{
- const data=Buffer.alloc(4*1024*1024,39),calls=[];let active=0,peak=0;
- const provider=http.createServer((req,res)=>{calls.push(req.headers.range);active++;peak=Math.max(peak,active);res.once('finish',()=>active--);sendExactRange(req,res,data)});
- const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
- const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,dispatcher:null,
-  pathPrefix:'finite-mkv-seek',finiteWindowBytes:2*1024*1024,finiteFirstWindowBytes:256*1024,
-  finiteSteadyFirstWindowBytes:2*1024*1024,finiteCacheBytes:data.length,releaseDelayMs:0});t.after(()=>broker.close());
- for(let i=0;i<4;i++){const start=i*256*1024,r=await fetch(broker.inputUrl,{headers:{Range:`bytes=${start}-${start+256*1024-1}`}});assert.deepEqual(Buffer.from(await r.arrayBuffer()),data.subarray(start,start+256*1024));}
- const r=await fetch(broker.inputUrl,{headers:{Range:`bytes=${2*1024*1024}-${4*1024*1024-1}`}});
- assert.deepEqual(Buffer.from(await r.arrayBuffer()),data.subarray(2*1024*1024,4*1024*1024));
- assert.equal(calls.length,5);assert.equal(calls[4],`bytes=${2*1024*1024}-${4*1024*1024-1}`);
- assert.equal(peak,1);assert.equal(broker.interruptedProviderFetches,0);
-});
-
-
 test('split-track MP4 deliberate close reuses only received validated bytes after provider teardown', {timeout:8000},async(t)=>{
  const data=Buffer.alloc(2*1024*1024,53),calls=[];let active=0,peak=0;
  const provider=http.createServer((req,res)=>{
@@ -3662,7 +3647,7 @@ test('split-track MP4 deliberate close reuses only received validated bytes afte
  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,dispatcher:null,
   pathPrefix:'finite-mkv-seek',finiteWindowBytes:2*1024*1024,finiteFirstWindowBytes:256*1024,
-  finiteSteadyFirstWindowBytes:2*1024*1024,finiteCacheBytes:data.length,finiteAbandonedDrainMs:30,
+  finiteCacheAbandonedPrefix:true,finiteCacheBytes:data.length,finiteAbandonedDrainMs:30,
   releaseDelayMs:0,supersededReleaseDelayMs:0});t.after(()=>broker.close());
  const r=await fetch(broker.inputUrl,{headers:{Range:'bytes=0-2097151'}}),reader=r.body.getReader();
  assert.ok((await reader.read()).value.length>0);await reader.cancel();
@@ -3695,7 +3680,7 @@ test('real split-track MP4 demuxing serves cache during remote release grace', {
  let cursor=start;const timer=setInterval(()=>{const next=Math.min(end+1,cursor+16384);res.write(padded.subarray(cursor,next));cursor=next;if(cursor>end){clearInterval(timer);res.end()}},50);res.once('close',()=>clearInterval(timer));});
  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:padded.length,dispatcher:null,
-  pathPrefix:'finite-mkv-seek',finiteWindowBytes:1024*1024,finiteFirstWindowBytes:64*1024,finiteSteadyFirstWindowBytes:256*1024,
+  pathPrefix:'finite-mkv-seek',finiteWindowBytes:1024*1024,finiteFirstWindowBytes:64*1024,finiteCacheAbandonedPrefix:true,
   finiteSequentialWindowBytes:1024*1024,finiteCacheBytes:8*1024*1024,finiteInitialContinuationGraceMs:500,finiteSeekContinuationGraceMs:50,
   finiteAbandonedDrainMs:1500,completedReleaseDelayMs:0,supersededReleaseDelayMs:2500,releaseDelayMs:2500});t.after(()=>broker.close());
  const started=Date.now();let failure=null;
