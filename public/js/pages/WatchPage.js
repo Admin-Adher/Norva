@@ -3018,6 +3018,7 @@ class WatchPage {
     beginPlaybackAttempt() {
         this.abortPlaybackResolution();
         this._playbackAttemptId += 1;
+        this._gatewayPendingSeekIntent = null;
         this._cloudPlaybackLaneAttemptId = null;
         if (this._privateMediaCacheFallbackSessionIds instanceof Set) {
             this._privateMediaCacheFallbackSessionIds.clear();
@@ -6226,6 +6227,9 @@ class WatchPage {
         // the playlist (never the live edge), even before EXT-X-ENDLIST exists.
         const isTranscodeSession = url.startsWith('/api/transcode/');
         const isGatewaySession = this.isGatewayPlaybackUrl(url);
+        if (isGatewaySession) {
+            this._gatewayPendingSeekIntent = { attemptId: playbackAttemptId, autoplay };
+        }
         const gatewayAudioContext = this._gatewayAudioRenditionRequired
             || this.currentPlaybackMode === 'gateway-session';
         if (gatewayAudioContext) {
@@ -7144,6 +7148,18 @@ class WatchPage {
         };
     }
 
+    captureGatewaySeekAutoplayIntent() {
+        // Media pause during teardown/buffering is not a viewer pause. Keep
+        // intent across successive targets until the replacement really plays.
+        const pending = this._gatewayPendingSeekIntent;
+        const autoplay = this._gatewayUserPaused !== true
+            && (pending?.attemptId === this._playbackAttemptId
+                ? pending.autoplay === true
+                : this._gatewayAutomaticRebuffering === true || !this.video?.paused);
+        this._gatewayPendingSeekIntent = { attemptId: this._playbackAttemptId, autoplay };
+        return autoplay;
+    }
+
     async restartCloudGatewayStreamAt(targetTime, options = {}) {
         // Freeze the exact episode/movie identity before releasing the old lane.
         // Teardown and provider cooldown both yield, so reading mutable page state
@@ -7168,7 +7184,7 @@ class WatchPage {
                 && this.isStaleSubtitleSwitch(subtitleSwitchRequestId));
         const seekPlan = this.getGatewaySeekPlan(targetTime, options.preRollSeconds ?? 0);
         const { target, preRoll, sessionStart } = seekPlan;
-        const autoplay = !this.video?.paused;
+        const autoplay = this.captureGatewaySeekAutoplayIntent();
         const { itemType, container } = playbackIdentity;
         const requestedPlaybackPreferences = this.normalizePlaybackPreferences(
             options.playbackPreferences ?? options.playback_preferences
@@ -7836,6 +7852,7 @@ class WatchPage {
         // A queued event from a torn-down element must not report a successful
         // start for a failed replacement session.
         if (this.video?.paused || this.video?.error) return;
+        this._gatewayPendingSeekIntent = null;
         // Update play/pause button icons
         this.playPauseBtn?.querySelector('.icon-play')?.classList.add('hidden');
         this.playPauseBtn?.querySelector('.icon-pause')?.classList.remove('hidden');

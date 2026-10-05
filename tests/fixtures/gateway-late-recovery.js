@@ -59,6 +59,19 @@ async function verifyGatewayLateRecovery(WatchPage, Hls, tick) {
         await tick();
         check(plays === (userPaused ? 1 : 2), 'an obsolete pipeline cannot resume');
     }
+    const seeks = Object.create(WatchPage.prototype);
+    Object.assign(seeks, { _playbackAttemptId: 10, video: { paused: false } });
+    if (!seeks.captureGatewaySeekAutoplayIntent()) throw Error('playing seek lost intent');
+    seeks.video.paused = true; // release of the old lane, not a viewer action
+    if (!seeks.captureGatewaySeekAutoplayIntent()) throw Error('successive seek lost play intent');
+    seeks._gatewayUserPaused = true;
+    if (seeks.captureGatewaySeekAutoplayIntent()) throw Error('seek overrode viewer pause');
+    seeks._gatewayUserPaused = false;
+    seeks._playbackAttemptId++;
+    if (seeks.captureGatewaySeekAutoplayIntent()) throw Error('new title inherited old play intent');
+    seeks._gatewayPendingSeekIntent = null;
+    seeks._gatewayAutomaticRebuffering = true;
+    if (!seeks.captureGatewaySeekAutoplayIntent()) throw Error('buffer recovery seek lost intent');
     return 'ok';
 }
 if (typeof module !== 'undefined') module.exports = verifyGatewayLateRecovery;
