@@ -206,3 +206,10 @@ indisponible**, avec le délai existant, et non une analyse complète indétermi
 Aucune nouvelle capture ni langue identifiée n'est revendiquée ici. Le correctif
 ne restaure pas les secondes manquantes et ne répare pas le fichier média.
 La maintenance globale reste permanente.
+
+À **00:35:49 UTC**, une nouvelle lecture seule constate que le worker a
+réexaminé Lost à **00:35:01** et l'a reporté pour `PROVIDER_ACCOUNT_BUSY`.
+Les cinq reçus, le curseur, le passage, le profil et les neuf tentatives
+fournisseur sont inchangés. La nouvelle classification de fenêtre n'a donc
+toujours pas été exercée sur ce travail. Les quotas restent occupés ; aucun
+POST pour Bolt ou Mars n'est envoyé.

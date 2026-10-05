@@ -87,6 +87,12 @@ Cette absence ne constitue pas une validation de la transition réelle ; le
 suivi attend la prochaine exécution ordinaire. Les anciens logs et incidents
 restent conservés. Reçus `postdeploy-*.safe.json`, aucune mutation de ces audits.
 
+Dernier contrôle à 00:35:49 UTC : le worker a repris Lost à 00:35:01 et l'a
+reporté pour `PROVIDER_ACCOUNT_BUSY`. Les cinq reçus et neuf tentatives
+fournisseur sont conservés ; aucun nouveau code de fenêtre constaté. Les
+quotas restent à deux travaux manuels et quatre du compte fournisseur.
+Aucun POST supplémentaire n'est envoyé.
+
 ## CI et publication Android
 
 L'ancien paquet Phone de PR 649 a finalement échoué pendant son **envoi d'artefact
