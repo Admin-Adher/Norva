@@ -1,0 +1,1163 @@
+{
+  "schema": 1,
+  "heartbeatAtUtc": "2026-10-05T00:06:57.265Z",
+  "auditReceiptDirectory": ".codex-artifacts/language-heartbeat-0207",
+  "permanentMaintenanceActive": true,
+  "initialManifest": {
+    "scope": "Immutable initial account, four source catalogues only; not all Norva accounts",
+    "initialVariants": 56751,
+    "initialTitles": 43125,
+    "at": "2026-10-05T02:08:00.149025+02:00",
+    "uniqueTechnicalChecks": 22038,
+    "identifiedHistorical": 7629,
+    "unknownVariants": 49122,
+    "unknownTitles": 38688,
+    "allManifestVariantsStillVisible": true,
+    "humanBadgesExcluded": true,
+    "deltaSince2309": {
+      "uniqueTechnicalChecks": 918,
+      "identifiedHistorical": 126
+    },
+    "sources": [
+      {
+        "source": "Strng IPTV 8K",
+        "uniqueTechnicalChecks": 8673,
+        "identifiedHistorical": 142,
+        "unknownVariants": 30052,
+        "visible": 30194,
+        "uniqueChecksLast15Minutes": 174
+      },
+      {
+        "source": "Norva Selection",
+        "uniqueTechnicalChecks": 85,
+        "identifiedHistorical": 9,
+        "unknownVariants": 174,
+        "visible": 183,
+        "uniqueChecksLast15Minutes": 0
+      },
+      {
+        "source": "Dino",
+        "uniqueTechnicalChecks": 7452,
+        "identifiedHistorical": 4011,
+        "unknownVariants": 4858,
+        "visible": 8869,
+        "uniqueChecksLast15Minutes": 106
+      },
+      {
+        "source": "MAX OTT",
+        "uniqueTechnicalChecks": 5828,
+        "identifiedHistorical": 3467,
+        "unknownVariants": 14038,
+        "visible": 17505,
+        "uniqueChecksLast15Minutes": 4
+      }
+    ],
+    "strict": {
+      "completeVerified": 38,
+      "completeInconclusiveMatchingCurrentProfile": 78,
+      "unchanged": true,
+      "overlapOtherCounters": true
+    }
+  },
+  "global": {
+    "at": "2026-10-05T02:08:00.162928+02:00",
+    "discovered": {
+      "sources": 54,
+      "owners": 47
+    },
+    "outsideInitialManifest": {
+      "sourcesInState": 50,
+      "sourcesCalled": 50,
+      "ownersCalled": 46,
+      "attempted": 4092,
+      "identifiedReceipts": 1825,
+      "deferredReceipts": 1680
+    },
+    "cumulativeReceiptsNotUniqueFiles": true,
+    "deltaOutsideSince2324": {
+      "attempted": 274,
+      "identifiedReceipts": 127
+    },
+    "newAccountOrImportProven": false,
+    "priorityHints": {
+      "owners": 3,
+      "titles": 670,
+      "virtualTitles": 0,
+      "physicalMovies": 394,
+      "physicalSeries": 276
+    },
+    "featuredVisibleVariants": 7136,
+    "visibleMovieIdentified": 383,
+    "priorityScopeChanged": true,
+    "notComparableIdentificationGain": true,
+    "strictProgressSince2309": 9,
+    "lastStrictVerified": "2026-10-05T01:00:30.682749+02:00",
+    "lastStrictProviderProgress": "2026-10-05T02:08:13.369589+02:00",
+    "dispatcherWindow": {
+      "at": "2026-10-05T02:09:02.636864+02:00",
+      "since": "2026-10-04T23:09:00Z",
+      "firstEventAt": "2026-10-04T23:09:07.854Z",
+      "lastEventAt": "2026-10-05T00:08:51.051Z",
+      "dispatchEvents": 514,
+      "batchesWithAttempts": 97,
+      "attemptReceipts": 1222,
+      "identificationReceipts": 269,
+      "failedReceipts": 23,
+      "httpErrors": [],
+      "sourceDiscoverySamples": 11,
+      "sourceDiscoveryFirst": {
+        "at": "2026-10-04T23:13:46.915Z",
+        "sources": 54,
+        "owners": 47
+      },
+      "sourceDiscoveryLast": {
+        "at": "2026-10-05T00:05:42.155Z",
+        "sources": 54,
+        "owners": 47
+      },
+      "outcomes": [
+        {
+          "lane": "provider-metadata",
+          "skipped": "server-capacity",
+          "code": null,
+          "httpError": null,
+          "events": 109
+        },
+        {
+          "lane": "provider-metadata",
+          "skipped": null,
+          "code": null,
+          "httpError": null,
+          "events": 56
+        },
+        {
+          "lane": "exact-profile",
+          "skipped": null,
+          "code": "provider-account-busy",
+          "httpError": null,
+          "events": 68
+        },
+        {
+          "lane": "exact-profile",
+          "skipped": "sweep-resting",
+          "code": null,
+          "httpError": null,
+          "events": 13
+        },
+        {
+          "lane": "exact-profile",
+          "skipped": "server-capacity",
+          "code": null,
+          "httpError": null,
+          "events": 119
+        },
+        {
+          "lane": "exact-profile",
+          "skipped": null,
+          "code": "strict-analysis-deferred",
+          "httpError": null,
+          "events": 10
+        },
+        {
+          "lane": "provider-metadata",
+          "skipped": "provider-account-busy",
+          "code": null,
+          "httpError": null,
+          "events": 15
+        },
+        {
+          "lane": "provider-metadata",
+          "skipped": "provider_probe_circuit_open",
+          "code": null,
+          "httpError": null,
+          "events": 54
+        },
+        {
+          "lane": "exact-profile",
+          "skipped": null,
+          "code": "intake-request-failed",
+          "httpError": null,
+          "events": 2
+        },
+        {
+          "lane": "provider-metadata",
+          "skipped": "metadata-sweep-resting",
+          "code": null,
+          "httpError": null,
+          "events": 6
+        },
+        {
+          "lane": "exact-profile",
+          "skipped": null,
+          "code": "incomplete_codec_profile",
+          "httpError": null,
+          "events": 3
+        },
+        {
+          "lane": "provider-metadata",
+          "skipped": "metadata-busy",
+          "code": null,
+          "httpError": null,
+          "events": 1
+        },
+        {
+          "lane": "provider-metadata",
+          "skipped": "metadata-capacity",
+          "code": null,
+          "httpError": null,
+          "events": 13
+        },
+        {
+          "lane": "provider-metadata",
+          "skipped": "background_busy",
+          "code": null,
+          "httpError": null,
+          "events": 3
+        },
+        {
+          "lane": "provider-metadata",
+          "skipped": "provider_request_failed",
+          "code": null,
+          "httpError": null,
+          "events": 1
+        },
+        {
+          "lane": "exact-profile",
+          "skipped": "metadata-capacity",
+          "code": null,
+          "httpError": null,
+          "events": 29
+        },
+        {
+          "lane": "exact-profile",
+          "skipped": null,
+          "code": "declared-track-languages",
+          "httpError": null,
+          "events": 1
+        },
+        {
+          "lane": "provider-metadata",
+          "skipped": "provider-lease-busy",
+          "code": null,
+          "httpError": null,
+          "events": 2
+        },
+        {
+          "lane": "exact-profile",
+          "skipped": null,
+          "code": "provider-lease-busy",
+          "httpError": null,
+          "events": 1
+        },
+        {
+          "lane": "exact-profile",
+          "skipped": null,
+          "code": null,
+          "httpError": null,
+          "events": 1
+        },
+        {
+          "lane": "exact-profile",
+          "skipped": null,
+          "code": "provider_probe_circuit_open",
+          "httpError": null,
+          "events": 6
+        },
+        {
+          "lane": "exact-profile",
+          "skipped": null,
+          "code": "codec_probe_failed",
+          "httpError": null,
+          "events": 1
+        }
+      ],
+      "scope": "Global dispatcher receipt counts, not distinct files or strict vocal completions."
+    }
+  },
+  "initialHealth": {
+    "at": "2026-10-05T02:08:00.162928+02:00",
+    "edgeHealthy": true,
+    "gatewayHttp200Ok": true,
+    "startTimesUnchangedAtInitialAudit": true,
+    "finalization": {
+      "at": "2026-10-05T02:08:00.200258+02:00",
+      "replicas": [
+        {
+          "replica": "norva-edge-functions",
+          "startedAt": "2026-10-04T21:38:12.394506881Z",
+          "running": true,
+          "sha256": "ece2defa63857cbd710194a44441d7675911186e336742e74ca77deb5c0b6265",
+          "diagnosticPresent": true,
+          "finalizationErrors": [],
+          "databaseTimeoutDiagnostics": 0
+        },
+        {
+          "replica": "norva-edge-functions-2",
+          "startedAt": "2026-10-04T21:38:16.439338002Z",
+          "running": true,
+          "sha256": "ece2defa63857cbd710194a44441d7675911186e336742e74ca77deb5c0b6265",
+          "diagnosticPresent": true,
+          "finalizationErrors": [],
+          "databaseTimeoutDiagnostics": 0
+        }
+      ]
+    },
+    "capacity": {
+      "at": "2026-10-05T02:09:02.591097+02:00",
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "httpStatus": 200,
+          "ok": true,
+          "time": "2026-10-05T00:09:02.616Z",
+          "activeSessions": 0,
+          "totalSessions": 0,
+          "viewerPlaybackActiveLocally": false,
+          "backgroundCpuProcessCount": 0,
+          "whisperInferenceActive": 0,
+          "backgroundWhisperInferenceActive": 0,
+          "activeStrictLidBrokers": 1,
+          "argosInferenceActive": 0,
+          "lidBenchmarkBusy": false,
+          "languageBackgroundCapacity": {
+            "protocol": 1,
+            "maxWorkers": 2,
+            "reason": "capacity-available",
+            "observedAt": "2026-10-05T00:09:02.616Z"
+          },
+          "languageMetadataCapacity": {
+            "protocol": 1,
+            "maxWorkers": 2,
+            "reason": "capacity-available",
+            "observedAt": "2026-10-05T00:09:02.616Z"
+          },
+          "languageForegroundWork": {
+            "protocol": 1,
+            "busy": false,
+            "activeOperations": 0,
+            "admissionChecks": 0,
+            "pendingPriorityJobs": 0,
+            "deferredBackgroundJobs": 5
+          },
+          "languageCaptureBuffer": {
+            "protocol": 1,
+            "ready": true,
+            "entries": 1,
+            "bytes": 1631610,
+            "reservations": 1,
+            "computations": 1,
+            "maxEntries": 16,
+            "maxBytes": 33554432,
+            "ttlMs": 1800000
+          },
+          "languageSelectionAdmission": {
+            "protocol": 1,
+            "configuredHosts": 17,
+            "limitedHosts": 10,
+            "coolingHosts": 0
+          },
+          "viewerSessionStartupAdmissions": 0,
+          "activeViewerSubtitleOperations": 0
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "httpStatus": 200,
+          "ok": true,
+          "time": "2026-10-05T00:09:02.631Z",
+          "activeSessions": 0,
+          "totalSessions": 0,
+          "viewerPlaybackActiveLocally": false,
+          "backgroundCpuProcessCount": 0,
+          "whisperInferenceActive": 0,
+          "backgroundWhisperInferenceActive": 0,
+          "activeStrictLidBrokers": 0,
+          "argosInferenceActive": 0,
+          "lidBenchmarkBusy": false,
+          "languageBackgroundCapacity": {
+            "protocol": 1,
+            "maxWorkers": 2,
+            "reason": "capacity-available",
+            "observedAt": "2026-10-05T00:09:02.63Z"
+          },
+          "languageMetadataCapacity": {
+            "protocol": 1,
+            "maxWorkers": 2,
+            "reason": "capacity-available",
+            "observedAt": "2026-10-05T00:09:02.63Z"
+          },
+          "languageForegroundWork": {
+            "protocol": 1,
+            "busy": false,
+            "activeOperations": 0,
+            "admissionChecks": 0,
+            "pendingPriorityJobs": 0,
+            "deferredBackgroundJobs": 0
+          },
+          "languageCaptureBuffer": {
+            "protocol": 1,
+            "ready": true,
+            "entries": 0,
+            "bytes": 0,
+            "reservations": 0,
+            "computations": 0,
+            "maxEntries": 16,
+            "maxBytes": 33554432,
+            "ttlMs": 1800000
+          },
+          "languageSelectionAdmission": {
+            "protocol": 1,
+            "configuredHosts": 0,
+            "limitedHosts": 0,
+            "coolingHosts": 0
+          },
+          "viewerSessionStartupAdmissions": 0,
+          "activeViewerSubtitleOperations": 0
+        }
+      ],
+      "db": {
+        "at": "2026-10-05T02:09:02.696098+02:00",
+        "cron": [
+          {
+            "active": true,
+            "status": "succeeded",
+            "jobname": "norva-dynamic-enrichment-fleet",
+            "end_time": "2026-10-05T02:09:00.298315+02:00",
+            "start_time": "2026-10-05T02:09:00.234197+02:00"
+          },
+          {
+            "active": true,
+            "status": "succeeded",
+            "jobname": "norva-playback-language-validation-worker",
+            "end_time": "2026-10-05T02:09:00.230661+02:00",
+            "start_time": "2026-10-05T02:09:00.166659+02:00"
+          }
+        ],
+        "flags": {
+          "enrichment_paused": false,
+          "language_metadata_lane_enabled": false,
+          "adaptive_language_admission_enabled": true
+        },
+        "capacity": {
+          "reason": "capacity-available",
+          "singleton": true,
+          "expires_at": "2026-10-05T02:09:10.271+02:00",
+          "max_workers": 2,
+          "observed_at": "2026-10-05T02:09:00.271+02:00"
+        },
+        "selected": [
+          {
+            "state": "retry_wait",
+            "retry_at": "2026-10-04T23:54:08.28+02:00",
+            "error_code": "PROVIDER_ACCOUNT_BUSY",
+            "request_origin": "manual",
+            "lease_expires_at": null,
+            "last_provider_progress_at": null
+          },
+          {
+            "state": "retry_wait",
+            "retry_at": "2026-10-04T20:09:15.687+02:00",
+            "error_code": "PROVIDER_ACCOUNT_BUSY",
+            "request_origin": "automatic",
+            "lease_expires_at": null,
+            "last_provider_progress_at": null
+          }
+        ],
+        "globalStrict": {
+          "activeLeases": 1,
+          "lastVerified": "2026-10-05T01:00:30.682749+02:00",
+          "expiredLeases": 0,
+          "progressedSince2309": 9,
+          "lastProviderProgress": "2026-10-05T02:08:13.369589+02:00",
+          "progressedSince232414": 7
+        },
+        "metadataCapacity": {
+          "reason": "capacity-available",
+          "singleton": true,
+          "expires_at": "2026-10-05T02:09:11.033+02:00",
+          "max_workers": 2,
+          "observed_at": "2026-10-05T02:09:01.033+02:00"
+        }
+      },
+      "dispatcherStateKeys": [
+        "schema",
+        "startedAt",
+        "sources"
+      ],
+      "sourceStateKeys": [
+        "blockedUntil",
+        "calls",
+        "failures",
+        "inFlight",
+        "inFlightLane",
+        "label",
+        "lanes",
+        "lastAt",
+        "lastResult",
+        "nextAt",
+        "totals",
+        "turn",
+        "userId"
+      ],
+      "dispatcherHealth": {
+        "at": 1791158934906,
+        "inFlight": 1,
+        "stopping": false,
+        "discoveryOk": true,
+        "sourceCount": 54,
+        "ownerCount": 47
+      }
+    },
+    "historicalIncidentsRetained": true
+  },
+  "humanConfirmations": {
+    "at": "2026-10-05T00:08:26.393634Z",
+    "registered": 5,
+    "projectable": 5,
+    "languages": {
+      "en": 4,
+      "es": 1
+    },
+    "newConfirmationRows": 0
+  },
+  "targets": {
+    "postDeploymentAudit": {
+      "at": "2026-10-05T02:30:06.402036+02:00",
+      "mode": "read-only-comparison",
+      "baselineAt": "2026-10-05T02:23:49.549652+02:00",
+      "providerRequests": 0,
+      "items": [
+        {
+          "title": "Lost on a Mountain in Maine",
+          "identified": false,
+          "profileComplete": true,
+          "manualActive": 2,
+          "manualStarts24h": 12,
+          "providerActiveJobs": 4,
+          "ownerActiveSessions": 0,
+          "variantGenerationUnchanged": true,
+          "profileUnchanged": true,
+          "jobs": [
+            {
+              "created_at": "2026-10-04T15:27:49.852622+02:00",
+              "updated_at": "2026-10-04T15:43:46.330484+02:00",
+              "state": "expired",
+              "error_code": "LANGUAGE_VALIDATION_QUEUE_EXPIRED",
+              "retry_at": "2026-10-04T15:43:46.330484+02:00",
+              "purge_after": "2026-10-11T15:43:46.330484+02:00",
+              "sampling_pass": 0,
+              "strict_lid_window_position": 1,
+              "strict_lid_window_count": 6,
+              "provider_attempt_count": 1,
+              "attempt_count": 1,
+              "last_provider_progress_at": "2026-10-04T15:28:41.183804+02:00",
+              "verified_at": null,
+              "next_track_position": 0,
+              "quarantined_at": null,
+              "queue_expires_at": null,
+              "lease_expires_at": null,
+              "receiptCount": 1,
+              "receiptSequenceSHA256": "de154fafd2df488ca1aa65a13690e9d2e2a5d299370c99ddaa0cf40a0f74a3b7"
+            },
+            {
+              "created_at": "2026-10-04T23:53:43.849225+02:00",
+              "updated_at": "2026-10-05T02:22:00.751063+02:00",
+              "state": "retry_wait",
+              "error_code": "LANGUAGE_CAPTURE_INFERENCE_DEFERRED",
+              "retry_at": "2026-10-05T02:22:30.749+02:00",
+              "purge_after": "2026-10-11T23:53:43.849223+02:00",
+              "sampling_pass": 0,
+              "strict_lid_window_position": 5,
+              "strict_lid_window_count": 6,
+              "provider_attempt_count": 9,
+              "attempt_count": 87,
+              "last_provider_progress_at": "2026-10-05T00:27:38.011108+02:00",
+              "verified_at": null,
+              "next_track_position": 0,
+              "quarantined_at": null,
+              "queue_expires_at": null,
+              "lease_expires_at": null,
+              "receiptCount": 5,
+              "receiptSequenceSHA256": "e896672d59dd5ad06fd8e1b6b43bd1d3922d61beb381ca1be2f018f6a359dbcd"
+            }
+          ],
+          "baselineJobComparison": {
+            "receiptSequenceUnchanged": true,
+            "windowCursorUnchanged": true,
+            "samplingPassUnchanged": true,
+            "expectedAudioIndicesUnchanged": true,
+            "profileFingerprintUnchanged": true,
+            "priorProviderAttempts": 9,
+            "currentProviderAttempts": 9,
+            "targetTerminalCodeObserved": false,
+            "noVerifiedTimestamp": true,
+            "noQuarantine": true,
+            "retryDelaySecondsFromUpdate": 29.997937
+          }
+        },
+        {
+          "title": "The Legend of Ochi",
+          "identified": false,
+          "profileComplete": true,
+          "manualActive": 2,
+          "manualStarts24h": 12,
+          "providerActiveJobs": 4,
+          "ownerActiveSessions": 0,
+          "variantGenerationUnchanged": true,
+          "profileUnchanged": true,
+          "jobs": [
+            {
+              "created_at": "2026-10-04T17:58:37.681863+02:00",
+              "updated_at": "2026-10-04T20:57:40.118916+02:00",
+              "state": "expired",
+              "error_code": "LANGUAGE_VALIDATION_QUEUE_EXPIRED",
+              "retry_at": "2026-10-04T20:57:40.118916+02:00",
+              "purge_after": "2026-10-11T20:57:40.118916+02:00",
+              "sampling_pass": 0,
+              "strict_lid_window_position": 0,
+              "strict_lid_window_count": 6,
+              "provider_attempt_count": 1,
+              "attempt_count": 29,
+              "last_provider_progress_at": null,
+              "verified_at": null,
+              "next_track_position": 0,
+              "quarantined_at": null,
+              "queue_expires_at": null,
+              "lease_expires_at": null,
+              "receiptCount": 0,
+              "receiptSequenceSHA256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+            },
+            {
+              "created_at": "2026-10-04T23:53:52.603305+02:00",
+              "updated_at": "2026-10-04T23:53:53.280892+02:00",
+              "state": "retry_wait",
+              "error_code": "PROVIDER_ACCOUNT_BUSY",
+              "retry_at": "2026-10-04T23:54:08.28+02:00",
+              "purge_after": "2026-10-11T23:53:52.603303+02:00",
+              "sampling_pass": 0,
+              "strict_lid_window_position": 0,
+              "strict_lid_window_count": 6,
+              "provider_attempt_count": 0,
+              "attempt_count": 1,
+              "last_provider_progress_at": null,
+              "verified_at": null,
+              "next_track_position": 0,
+              "quarantined_at": null,
+              "queue_expires_at": null,
+              "lease_expires_at": null,
+              "receiptCount": 0,
+              "receiptSequenceSHA256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+            }
+          ]
+        },
+        {
+          "title": "Bolt from the Blue",
+          "identified": false,
+          "profileComplete": true,
+          "manualActive": 2,
+          "manualStarts24h": 12,
+          "providerActiveJobs": 4,
+          "ownerActiveSessions": 0,
+          "variantGenerationUnchanged": true,
+          "profileUnchanged": true,
+          "jobs": [
+            {
+              "created_at": "2026-10-04T15:43:46.341225+02:00",
+              "updated_at": "2026-10-04T16:04:24.642313+02:00",
+              "state": "failed",
+              "error_code": "PROFILE_CHANGED",
+              "retry_at": null,
+              "purge_after": "2026-10-11T16:04:24.642313+02:00",
+              "sampling_pass": 0,
+              "strict_lid_window_position": 0,
+              "strict_lid_window_count": 6,
+              "provider_attempt_count": 0,
+              "attempt_count": 1,
+              "last_provider_progress_at": null,
+              "verified_at": null,
+              "next_track_position": 0,
+              "quarantined_at": null,
+              "queue_expires_at": null,
+              "lease_expires_at": null,
+              "receiptCount": 0,
+              "receiptSequenceSHA256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+            }
+          ]
+        },
+        {
+          "title": "I Want to Live on Mars",
+          "identified": false,
+          "profileComplete": false,
+          "manualActive": 2,
+          "manualStarts24h": 12,
+          "providerActiveJobs": 4,
+          "ownerActiveSessions": 0,
+          "variantGenerationUnchanged": true,
+          "profileUnchanged": true,
+          "jobs": []
+        }
+      ]
+    },
+    "noNewLanguage": true,
+    "operatorProviderRequests": 0,
+    "operatorAdmissions": 0,
+    "lostHasExpiredReceipts": true,
+    "lostAnalysisIncomplete": true,
+    "correctionReport": "2026-10-05-language-capture-unusable-window.md"
+  },
+  "postDeploymentGuards": {
+    "capacity": {
+      "at": "2026-10-05T02:30:49.74743+02:00",
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "httpStatus": 200,
+          "ok": true,
+          "time": "2026-10-05T00:30:49.772Z",
+          "activeSessions": 0,
+          "totalSessions": 0,
+          "viewerPlaybackActiveLocally": false,
+          "backgroundCpuProcessCount": 0,
+          "whisperInferenceActive": 0,
+          "backgroundWhisperInferenceActive": 0,
+          "activeStrictLidBrokers": 0,
+          "argosInferenceActive": 0,
+          "lidBenchmarkBusy": false,
+          "languageBackgroundCapacity": {
+            "protocol": 1,
+            "maxWorkers": 0,
+            "reason": "foreground-work",
+            "observedAt": "2026-10-05T00:30:49.772Z"
+          },
+          "languageMetadataCapacity": {
+            "protocol": 1,
+            "maxWorkers": 0,
+            "reason": "foreground-work",
+            "observedAt": "2026-10-05T00:30:49.772Z"
+          },
+          "languageForegroundWork": {
+            "protocol": 1,
+            "busy": true,
+            "activeOperations": 1,
+            "admissionChecks": 0,
+            "pendingPriorityJobs": 4,
+            "deferredBackgroundJobs": 0
+          },
+          "languageCaptureBuffer": {
+            "protocol": 1,
+            "ready": true,
+            "entries": 0,
+            "bytes": 0,
+            "reservations": 0,
+            "computations": 0,
+            "maxEntries": 16,
+            "maxBytes": 33554432,
+            "ttlMs": 1800000
+          },
+          "languageSelectionAdmission": {
+            "protocol": 1,
+            "configuredHosts": 0,
+            "limitedHosts": 0,
+            "coolingHosts": 0
+          },
+          "viewerSessionStartupAdmissions": 0,
+          "activeViewerSubtitleOperations": 0
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "httpStatus": 200,
+          "ok": true,
+          "time": "2026-10-05T00:30:49.788Z",
+          "activeSessions": 0,
+          "totalSessions": 0,
+          "viewerPlaybackActiveLocally": false,
+          "backgroundCpuProcessCount": 0,
+          "whisperInferenceActive": 0,
+          "backgroundWhisperInferenceActive": 0,
+          "activeStrictLidBrokers": 0,
+          "argosInferenceActive": 0,
+          "lidBenchmarkBusy": false,
+          "languageBackgroundCapacity": {
+            "protocol": 1,
+            "maxWorkers": 2,
+            "reason": "capacity-available",
+            "observedAt": "2026-10-05T00:30:49.787Z"
+          },
+          "languageMetadataCapacity": {
+            "protocol": 1,
+            "maxWorkers": 2,
+            "reason": "capacity-available",
+            "observedAt": "2026-10-05T00:30:49.787Z"
+          },
+          "languageForegroundWork": {
+            "protocol": 1,
+            "busy": false,
+            "activeOperations": 0,
+            "admissionChecks": 0,
+            "pendingPriorityJobs": 0,
+            "deferredBackgroundJobs": 0
+          },
+          "languageCaptureBuffer": {
+            "protocol": 1,
+            "ready": true,
+            "entries": 0,
+            "bytes": 0,
+            "reservations": 0,
+            "computations": 0,
+            "maxEntries": 16,
+            "maxBytes": 33554432,
+            "ttlMs": 1800000
+          },
+          "languageSelectionAdmission": {
+            "protocol": 1,
+            "configuredHosts": 0,
+            "limitedHosts": 0,
+            "coolingHosts": 0
+          },
+          "viewerSessionStartupAdmissions": 0,
+          "activeViewerSubtitleOperations": 0
+        }
+      ],
+      "db": {
+        "at": "2026-10-05T02:30:49.857777+02:00",
+        "cron": [
+          {
+            "active": true,
+            "status": "succeeded",
+            "jobname": "norva-dynamic-enrichment-fleet",
+            "end_time": "2026-10-05T02:30:00.455566+02:00",
+            "start_time": "2026-10-05T02:30:00.388861+02:00"
+          },
+          {
+            "active": true,
+            "status": "succeeded",
+            "jobname": "norva-playback-language-validation-worker",
+            "end_time": "2026-10-05T02:30:00.448138+02:00",
+            "start_time": "2026-10-05T02:30:00.371506+02:00"
+          }
+        ],
+        "flags": {
+          "enrichment_paused": false,
+          "language_metadata_lane_enabled": false,
+          "adaptive_language_admission_enabled": true
+        },
+        "capacity": {
+          "reason": "foreground-work",
+          "singleton": true,
+          "expires_at": "2026-10-05T02:30:12.057+02:00",
+          "max_workers": 0,
+          "observed_at": "2026-10-05T02:30:02.057+02:00"
+        },
+        "selected": [
+          {
+            "state": "retry_wait",
+            "retry_at": "2026-10-05T02:22:30.749+02:00",
+            "error_code": "LANGUAGE_CAPTURE_INFERENCE_DEFERRED",
+            "request_origin": "manual",
+            "lease_expires_at": null,
+            "last_provider_progress_at": "2026-10-05T00:27:38.011108+02:00"
+          },
+          {
+            "state": "queued",
+            "retry_at": null,
+            "error_code": null,
+            "request_origin": "automatic",
+            "lease_expires_at": null,
+            "last_provider_progress_at": "2026-10-05T02:22:14.204174+02:00"
+          }
+        ],
+        "globalStrict": {
+          "activeLeases": 0,
+          "lastVerified": "2026-10-05T01:00:30.682749+02:00",
+          "expiredLeases": 0,
+          "progressedSince2309": 10,
+          "lastProviderProgress": "2026-10-05T02:22:14.204174+02:00",
+          "progressedSince232414": 8
+        },
+        "metadataCapacity": {
+          "reason": "foreground-work",
+          "singleton": true,
+          "expires_at": "2026-10-05T02:30:59.649+02:00",
+          "max_workers": 0,
+          "observed_at": "2026-10-05T02:30:49.649+02:00"
+        }
+      },
+      "dispatcherStateKeys": [
+        "schema",
+        "startedAt",
+        "sources"
+      ],
+      "sourceStateKeys": [
+        "blockedUntil",
+        "calls",
+        "failures",
+        "label",
+        "lanes",
+        "lastAt",
+        "lastResult",
+        "nextAt",
+        "totals",
+        "turn",
+        "userId"
+      ],
+      "dispatcherHealth": {
+        "at": 1791160244959,
+        "inFlight": 0,
+        "stopping": false,
+        "discoveryOk": true,
+        "sourceCount": 54,
+        "ownerCount": 47
+      }
+    },
+    "account": {
+      "at": "2026-10-05T02:30:51.020329+02:00",
+      "activity": [
+        {
+          "kind": "gateway",
+          "lastSeenAt": "2026-10-05T02:30:43.21644+02:00",
+          "insideFiveMinutes": true,
+          "naturalFiveMinuteExpiry": "2026-10-05T02:35:43.21644+02:00"
+        }
+      ],
+      "busyForForegroundValidation": true,
+      "activeAccountSessions": 0,
+      "activeOwnerSessions": 0,
+      "activeAccountLanguageLeases": 0,
+      "activeAccountExactProbeLeases": 0,
+      "activeIdentityProbeLeases": 0
+    },
+    "storyboards": {
+      "at": "2026-10-05T02:31:34.956409+02:00",
+      "scope": "MAX OTT current exact account affinity only; opaque IDs stay in process memory",
+      "windowStart": "2026-10-05T00:29:00Z",
+      "storyboardRows": 19,
+      "storyboardStates": {
+        "failed": 4,
+        "processing": 6,
+        "ready": 9
+      },
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "health": {
+            "time": "2026-10-05T00:31:34.981Z",
+            "activeSessions": 0,
+            "totalSessions": 0,
+            "viewerPlaybackActiveLocally": false,
+            "rawPumpCount": 0,
+            "transcribeBusy": true,
+            "transcribeQueueDepth": 4,
+            "ocrBusy": false,
+            "ocrQueueDepth": 0,
+            "translateBusy": false,
+            "translateQueueDepth": 0,
+            "languageForegroundWork": {
+              "protocol": 1,
+              "busy": true,
+              "activeOperations": 1,
+              "admissionChecks": 0,
+              "pendingPriorityJobs": 4,
+              "deferredBackgroundJobs": 0
+            },
+            "languageBackgroundCapacity": {
+              "protocol": 1,
+              "maxWorkers": 0,
+              "reason": "foreground-work",
+              "observedAt": "2026-10-05T00:31:34.981Z"
+            },
+            "activeStrictLidBrokers": 0,
+            "backgroundCpuProcessCount": 0
+          },
+          "checkpointedJobs": [
+            {
+              "status": "processing",
+              "createdAt": "2026-10-04T20:01:38.600251+02:00",
+              "tileCount": null,
+              "updatedAt": "2026-10-05T02:29:37.31+02:00",
+              "firstCheckpointAt": "2026-10-05T00:29:37.288340257Z",
+              "firstTiles": 161,
+              "lastCheckpointAt": "2026-10-05T00:29:37.288340257Z",
+              "lastTiles": 161,
+              "checkpoints": 1,
+              "tilesIncreased": false
+            },
+            {
+              "status": "processing",
+              "createdAt": "2026-10-04T19:58:35.289142+02:00",
+              "tileCount": null,
+              "updatedAt": "2026-10-05T02:29:45.368+02:00",
+              "firstCheckpointAt": "2026-10-05T00:29:45.354818746Z",
+              "firstTiles": 160,
+              "lastCheckpointAt": "2026-10-05T00:29:45.354818746Z",
+              "lastTiles": 160,
+              "checkpoints": 1,
+              "tilesIncreased": false
+            },
+            {
+              "status": "processing",
+              "createdAt": "2026-10-04T19:55:47.350478+02:00",
+              "tileCount": null,
+              "updatedAt": "2026-10-05T02:29:54.9+02:00",
+              "firstCheckpointAt": "2026-10-05T00:29:54.893512976Z",
+              "firstTiles": 134,
+              "lastCheckpointAt": "2026-10-05T00:29:54.893512976Z",
+              "lastTiles": 134,
+              "checkpoints": 1,
+              "tilesIncreased": false
+            },
+            {
+              "status": "processing",
+              "createdAt": "2026-10-04T20:04:21.007593+02:00",
+              "tileCount": null,
+              "updatedAt": "2026-10-05T02:30:43.103+02:00",
+              "firstCheckpointAt": "2026-10-05T00:30:43.059329076Z",
+              "firstTiles": 160,
+              "lastCheckpointAt": "2026-10-05T00:30:43.059329076Z",
+              "lastTiles": 160,
+              "checkpoints": 1,
+              "tilesIncreased": false
+            }
+          ],
+          "otherMatchingEvents": {}
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "health": {
+            "time": "2026-10-05T00:31:35.007Z",
+            "activeSessions": 0,
+            "totalSessions": 0,
+            "viewerPlaybackActiveLocally": false,
+            "rawPumpCount": 0,
+            "transcribeBusy": false,
+            "transcribeQueueDepth": 0,
+            "ocrBusy": false,
+            "ocrQueueDepth": 0,
+            "translateBusy": false,
+            "translateQueueDepth": 0,
+            "languageForegroundWork": {
+              "protocol": 1,
+              "busy": false,
+              "activeOperations": 0,
+              "admissionChecks": 0,
+              "pendingPriorityJobs": 0,
+              "deferredBackgroundJobs": 0
+            },
+            "languageBackgroundCapacity": {
+              "protocol": 1,
+              "maxWorkers": 2,
+              "reason": "capacity-available",
+              "observedAt": "2026-10-05T00:31:35.007Z"
+            },
+            "activeStrictLidBrokers": 0,
+            "backgroundCpuProcessCount": 0
+          },
+          "checkpointedJobs": [],
+          "otherMatchingEvents": {}
+        }
+      ]
+    },
+    "newLogWindow": {
+      "at": "2026-10-05T02:31:12.002084+02:00",
+      "since": "2026-10-05T00:29:00Z",
+      "containers": [
+        {
+          "name": "norva-media-gateway",
+          "codes": {},
+          "matches": [],
+          "storyboardEvents": {
+            "checkpointed": 4
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "codes": {},
+          "matches": [],
+          "storyboardEvents": {}
+        },
+        {
+          "name": "norva-edge-functions",
+          "codes": {},
+          "matches": [],
+          "storyboardEvents": {}
+        },
+        {
+          "name": "norva-edge-functions-2",
+          "codes": {},
+          "matches": [],
+          "storyboardEvents": {}
+        }
+      ]
+    },
+    "naturalTypedFailureNotYetObserved": true,
+    "noGuardForced": true
+  },
+  "ci": {
+    "pr649": {
+      "code": "6cf07a35814e99f2d668185c0d1402bf5e2b40e1",
+      "initialFailure": "GitHub artifact upload CreateArtifact request timeout after successful Gradle tests, lint and build",
+      "initialFailedJob": 111556676809,
+      "oneTargetedRerunAtUtc": "2026-10-05T00:11:08Z",
+      "rerunJobs": [
+        {
+          "id": 111565332621,
+          "name": "Build Android Phone APK",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 2,
+          "completed_at": "2026-10-05T00:12:57Z"
+        },
+        {
+          "id": 111565333562,
+          "name": "Build Windows Portable",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 2,
+          "completed_at": "2026-10-04T23:26:13Z"
+        },
+        {
+          "id": 111565334271,
+          "name": "Build Android TV APK",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 2,
+          "completed_at": "2026-10-04T23:23:22Z"
+        },
+        {
+          "id": 111565366804,
+          "name": "Verify cloud contracts",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 2,
+          "completed_at": "2026-10-04T23:21:50Z"
+        }
+      ],
+      "closed": true,
+      "historicalFailureRetained": true
+    },
+    "pr650": {
+      "allFourChecksSucceeded": true
+    }
+  },
+  "googlePlay": {
+    "method": "existing Google Play Console browser tab, refreshed UI",
+    "mobile": {
+      "versionCode": 46,
+      "available": false,
+      "version": "1.3.32",
+      "state": "in_review",
+      "actionRequired": false
+    },
+    "tv": {
+      "versionCode": 38,
+      "available": false,
+      "version": "3.8.25-hybrid",
+      "state": "in_review",
+      "actionRequired": false
+    },
+    "managedPublishingChanged": false,
+    "uploads": 0,
+    "reviewRestart": 0,
+    "recordedAtUtc": "2026-10-05T00:10:50.0072265Z",
+    "observationWindow": "During the heartbeat started 2026-10-05 00:06:57 UTC, before recordedAtUtc"
+  },
+  "noMediaAccessOrProductionMutationByAudits": true
+}
