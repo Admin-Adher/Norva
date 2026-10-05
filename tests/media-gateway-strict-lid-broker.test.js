@@ -3662,6 +3662,26 @@ test('split-track MP4 deliberate close reuses only received validated bytes afte
  assert.deepEqual(Buffer.from(await uncached.arrayBuffer()),data.subarray(524288,532480));assert.equal(calls.length,2);
 });
 
+test('MP4 atomic first window drains before demuxer packet cancellation and reuses exact bytes', {timeout:10000}, async(t)=>{
+ const data=Buffer.alloc(2*1024*1024,71);let active=0,peak=0,calls=0,finished=0;
+ const provider=http.createServer((req,res)=>{
+  calls++;active++;peak=Math.max(peak,active);const {start,end}=exactRange(req,data.length);
+  res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1,ETag:'"atomic-v1"'});
+  let cursor=start;const timer=setInterval(()=>{const next=Math.min(end+1,cursor+16384);res.write(data.subarray(cursor,next));cursor=next;if(cursor>end){finished++;clearInterval(timer);res.end()}},5);
+  res.once('close',()=>{clearInterval(timer);active--});
+ });
+ const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+ const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,dispatcher:null,
+  pathPrefix:'finite-mkv-seek',finiteWindowBytes:2*1024*1024,finiteFirstWindowBytes:1024*1024,
+  finiteAtomicWindowBytes:1024*1024,finiteCacheBytes:data.length,finiteInitialContinuationGraceMs:500,
+  releaseDelayMs:0,supersededReleaseDelayMs:2500});t.after(()=>broker.close());
+ const r=await fetch(broker.inputUrl,{headers:{Range:'bytes=0-2097151'}}),reader=r.body.getReader();
+ const first=await reader.read();assert.ok(first.value.length>0);assert.equal(finished,1);await reader.cancel();
+ const cached=await fetch(broker.inputUrl,{headers:{Range:'bytes=524288-1048575'}});
+ assert.deepEqual(Buffer.from(await cached.arrayBuffer()),data.subarray(524288,1048576));
+ assert.equal(calls,1);assert.equal(peak,1);assert.equal(broker.completedProviderFetches,1);assert.equal(broker.interruptedProviderFetches,0);
+});
+
 test('real split-track MP4 demuxing serves cache during remote release grace', {timeout:60000,skip:process.env.NORVA_MP4_HEADER_PROOF !== '1'},async(t)=>{
  const {execFileSync,execFile}=require('node:child_process'),{promisify}=require('node:util');
  const dir=fs.mkdtempSync('/tmp/split-demux-');t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));

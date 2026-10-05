@@ -6646,11 +6646,13 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         // Keep materialising the bounded window for the cache
                         // and mono-slot guarantee, but defer local backpressure
                         // only until that provider window is fully drained.
-                        if (localChunk.length && !responseStarted) {
+                        const atomicWindow = context.finiteAtomicWindowBytes > 0
+                            && finiteProviderRange.end - finiteProviderRange.start + 1 <= context.finiteAtomicWindowBytes;
+                        if (!atomicWindow && localChunk.length && !responseStarted) {
                             startFiniteMkvSeekResponse(context, res, range);
                             responseStarted = true;
                         }
-                        if (localChunk.length && !res.write(localChunk)) finiteLocalBackpressured = true;
+                        if (!atomicWindow && localChunk.length && !res.write(localChunk)) finiteLocalBackpressured = true;
                     } else if (!res.write(chunk)) {
                         await waitForStrictLidDrain(res, controller.signal);
                     }
@@ -6736,6 +6738,20 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     if (attempt.localClosed) {
                         attempt.localClosed = true;
                         break;
+                    }
+                    // A small split-track window is received and released in
+                    // full before libav sees its first packet. Otherwise libav
+                    // closes after that packet, repeatedly abandoning the rest
+                    // and paying the remote teardown delay. Broad windows still
+                    // stream progress; user cancellation and deadlines still
+                    // abort this bounded read normally.
+                    if (context.finiteAtomicWindowBytes > 0 && windowLength <= context.finiteAtomicWindowBytes) {
+                        if (!responseStarted) {
+                            startFiniteMkvSeekResponse(context, res, range);
+                            responseStarted = true;
+                        }
+                        const localPayload = payload.subarray(Math.max(0, range.start - finiteProviderRange.start));
+                        if (localPayload.length && !res.write(localPayload)) finiteLocalBackpressured = true;
                     }
                     if (
                         finiteLocalBackpressured
@@ -7220,6 +7236,9 @@ async function createStrictLidBroker(options = {}) {
         ? Math.max(64 * 1024, Math.min(context.finiteWindowBytes, options.finiteFirstWindowBytes)) : 0;
     context.finiteCacheAbandonedPrefix = pathPrefix === 'finite-mkv-seek'
         && options.finiteCacheAbandonedPrefix === true;
+    context.finiteAtomicWindowBytes = pathPrefix === 'finite-mkv-seek'
+        && Number.isSafeInteger(options.finiteAtomicWindowBytes) && options.finiteAtomicWindowBytes > 0
+        ? Math.min(1024 * 1024, options.finiteAtomicWindowBytes) : 0;
     context.finiteResumePrefixTargetBytes = Math.min(
         context.fileSizeBytes,
         context.finiteWindowBytes,
@@ -15578,7 +15597,8 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         finiteWarmupCueGraceMs: finiteTs ? 0 : FINITE_MKV_RESUME_CUE_GRACE_MS,
         finiteWarmupWindowBytes: warmupWindowBytes,
         finiteSequentialWindowBytes: sequentialWindowBytes,
-        finiteFirstWindowBytes: finiteMp4 ? 256 * 1024 : 0,
+        finiteFirstWindowBytes: finiteMp4 ? 1024 * 1024 : 0,
+        finiteAtomicWindowBytes: finiteMp4 ? 1024 * 1024 : 0,
         finiteCacheAbandonedPrefix: finiteMp4,
         finiteCacheBytes: FINITE_MKV_SEEK_CACHE_BYTES,
         finiteResumePrefixTargetBytes: finiteTs ? 0 : Math.min(effectiveWindowBytes, INBAND_HEADER_BYTES),
