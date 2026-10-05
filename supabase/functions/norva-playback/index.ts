@@ -2353,7 +2353,12 @@ async function createPlaybackSessionCore(
       sourceId, itemType, container: authoritativeVodContainer,
       enabled: Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_ENABLED") !== "false",
     });
+  // An observed container correction proves MP4 bytes, not efficient native
+  // audio/video range delivery. Keep the same Gateway adaptation as the cold
+  // correction; warming its codec profile must not silently switch this file
+  // to a different transport. Explicit native recovery retains its own proof.
   const nativeMp4Proof = serverPromotedProviderMp4 && !serverSelectionVodRelay && !serverDirectPublicHls
+    && canonicalVodContainer(resolvedContainerObservation.container) !== "mp4"
     ? browserNativeMp4Proof(resolved.playbackHint, requestedPlaybackHint)
     : null;
   const serverNativeProviderMp4 = Boolean(nativeMp4Proof);
