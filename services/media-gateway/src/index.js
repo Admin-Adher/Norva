@@ -4281,7 +4281,8 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 // A TS decoder may still request its longer keyframe pre-roll
                 // after reading the first body. Finish this bounded transfer
                 // before growing steady playback to the normal 8 MiB windows.
-                finiteInitialSequentialWindowBytes: claims.nativeContainer === 'ts' ? 2 * 1024 * 1024 : 0,
+                finiteInitialSequentialWindowBytes: claims.nativeContainer === 'ts' ? 2 * 1024 * 1024 : 256 * 1024,
+                finiteSequentialGrowthBytes: 2 * 1024 * 1024,
                 // Native extractors read the header, then tail/index, then the
                 // resume position. Complete a bounded header before the first
                 // seek so its prefix can be reused without a second provider
@@ -6214,7 +6215,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         ? context.finiteFirstWindowBytes
                     : (regularProviderWindowsCompleted > 0 || forwarded >= context.finiteWindowBytes
                         ? context.finiteInitialSequentialWindowBytes > 0
-                            && forwarded < context.finiteInitialSequentialWindowBytes
+                            && forwarded < (context.finiteSequentialGrowthBytes || context.finiteInitialSequentialWindowBytes)
                             ? context.finiteInitialSequentialWindowBytes : context.finiteSequentialWindowBytes
                         : context.finiteWindowBytes);
                 finiteWindowRange = finiteMkvSeekWindowRange({
@@ -7127,6 +7128,8 @@ async function createStrictLidBroker(options = {}) {
         finiteWarmupWindowConsumed: false,
         finiteWarmupProviderWindows: 0,
         finiteSequentialWindowBytes: 0,
+        finiteSequentialGrowthBytes: pathPrefix === 'finite-mkv-seek' && Number.isSafeInteger(options.finiteSequentialGrowthBytes)
+            ? Math.max(0, Math.min(8 * 1024 * 1024, options.finiteSequentialGrowthBytes)) : 0,
         finiteCacheMaxBytes: 0,
         setTimer: typeof options.setTimer === 'function' ? options.setTimer : setTimeout,
         clearTimer: typeof options.clearTimer === 'function' ? options.clearTimer : clearTimeout,
@@ -7187,7 +7190,7 @@ async function createStrictLidBroker(options = {}) {
         : 0;
     context.finiteInitialSequentialWindowBytes = Number.isSafeInteger(options.finiteInitialSequentialWindowBytes)
         && options.finiteInitialSequentialWindowBytes > 0
-        ? Math.max(context.finiteWindowBytes,
+        ? Math.max(context.finiteSequentialGrowthBytes > 0 ? 64 * 1024 : context.finiteWindowBytes,
             Math.min(context.finiteSequentialWindowBytes, options.finiteInitialSequentialWindowBytes)) : 0;
     // Disjoint MP4 tracks can alternate after just one packet. Complete a
     // small first range so the next visit can reuse validated bytes instead

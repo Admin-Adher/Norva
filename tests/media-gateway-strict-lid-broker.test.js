@@ -3596,3 +3596,18 @@ test('small MP4 first range grows for sustained sequential delivery',async t=>{
  assert.deepEqual(Buffer.from(await response.arrayBuffer()),data);assert.equal(ranges[0],'bytes=0-262143');
  assert.equal(ranges[1],'bytes=262144-1310719');assert.equal(broker.interruptedProviderFetches,0);
 });
+
+
+test('native MP4 packet bursts remain bounded until sustained delivery is demonstrated',async t=>{
+ const data=Buffer.alloc(3*1024*1024,0x46),ranges=[];
+ const provider=http.createServer((req,res)=>{ranges.push(req.headers.range);sendExactRange(req,res,data);});
+ const sourceUrl=await listen(provider);const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,
+  pathPrefix:'finite-mkv-seek',finiteWindowBytes:1024*1024,finiteSequentialWindowBytes:1024*1024,
+  finiteFirstWindowBytes:256*1024,finiteInitialSequentialWindowBytes:256*1024,finiteSequentialGrowthBytes:1024*1024,
+  releaseDelayMs:0,completedReleaseDelayMs:0});
+ t.after(async()=>{await broker.close();await closeServer(provider);});
+ const response=await fetch(broker.inputUrl,{headers:{Range:`bytes=0-${data.length-1}`}});
+ assert.deepEqual(Buffer.from(await response.arrayBuffer()),data);
+ assert.deepEqual(ranges.slice(0,5),['bytes=0-262143','bytes=262144-524287','bytes=524288-786431','bytes=786432-1048575','bytes=1048576-2097151']);
+ assert.equal(broker.interruptedProviderFetches,0);
+});
