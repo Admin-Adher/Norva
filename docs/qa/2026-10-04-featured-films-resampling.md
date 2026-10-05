@@ -157,3 +157,24 @@ LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE (01:17:43), one insufficient receipt
 and two provider attempts, with the ordinary delay until 6 October 01:17:43.
 Bolt now has two receipts and three provider attempts, deferred for account
 occupancy. No additional language is published; Mars remains without a profile.
+
+### Bolt automatically verified and published, 5 October 01:40 UTC
+
+The exact requested Bolt copy reached `verified` at 01:40:27.654948 UTC
+(03:40 Paris), with one expected/completed audio track and one complete final
+track proof for English. Seven provider attempts were recorded. Consumed window
+receipts are cleared during successful finalization; the complete track proof
+remains present. Profile, observation date, file size, track indices and cache
+all matched in the read-only follow-up at 02:11:03 UTC.
+
+The authenticated catalogue API returned HTTP 200, one exact target match and
+`audioLanguages: ["en"]` on the card and its exact variant, scoped to the file.
+No operator playback or new admission was used for this verification. This
+confirms the language publication, not a repair of the separately observed
+media corruption. Do not propagate this result to other Bolt variants.
+
+Three of the six requested copies now have established and published languages:
+Innocent Voices (`es`) and Prey (`en`) from owner listening, and Bolt (`en`) from
+automatic validation. Lost/Ochi remain incomplete under their existing failure
+delays; Mars remains without a profile. See the
+[04:12 Paris follow-up](2026-10-05-language-campaign-heartbeat-0412.md).

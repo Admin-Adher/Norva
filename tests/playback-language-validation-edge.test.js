@@ -148,7 +148,7 @@ test('foreground playback preempts background validation and requires an atteste
       && jobLeaseSeconds < providerLeaseSeconds,
     'fetch, cleanup reserve, task, durable claim and provider lease must remain strictly nested',
   );
-  assert.match(worker, /const taskDeadlineAt = Date\.now\(\) \+ LANGUAGE_VALIDATION_TASK_BUDGET_MS/);
+  assert.match(worker, /taskDeadlineAt = Date\.now\(\) \+ LANGUAGE_VALIDATION_TASK_BUDGET_MS/);
   assert.match(worker, /languageValidationFetchBudgetMs\(taskDeadlineAt\)/);
   assert.equal(
     (worker.match(/"claim_catalog_file_audio_validation_job"/g) || []).length,
@@ -717,6 +717,7 @@ test('in-process scheduling coalesces concurrent polls for the same durable job'
   const registered = [];
   const context = {
     languageValidationTasks: new Map(),
+    LANGUAGE_VALIDATION_TASK_BUDGET_MS: 270000,
     processOneLanguageValidationTrack: async () => {
       workerCalls += 1;
       await gate;

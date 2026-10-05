@@ -17,14 +17,23 @@ const drain = { providerDrained: true, providerDrainProtocol: 1 };
 const hash = 'a'.repeat(64);
 
 function edgeFixture(options = {}) {
-    const events = []; const failures = []; let account = false; let identity = false;
+    const events = []; const failures = []; const jobOwners = []; const providerOwners = [];
+    let account = false; let identity = false; let position = 0; let capacityChecks = 0;
     const claim = { jobId: uuid, trackIndex: 1, identityKey: 'fixture', profileFingerprint: hash };
     const current = { identityKey: 'fixture', fingerprint: hash, userId: 'test-owner', itemType: 'movie', sourceId: 'source', itemId: 'item',
         expectedAudioIndices: options.indices || [1], exactProfile: { fileSizeBytes: 1000000, profile: { durationSeconds: 3600 } } };
     const captured = { captureProtocol: 1, captured: true, expiresAt: Date.now() + 1800000, sha256: hash, ...drain };
     const db = { rpc: async (name, args = {}) => {
         events.push('rpc:' + name);
-        if (name === 'claim_catalog_file_audio_validation_job') return { data: claim };
+        if (name === 'claim_catalog_file_audio_validation_job') {
+            jobOwners.push(args.p_lease_owner);
+            return { data: options.claimDeniedOnSecond && position > 0 ? null : claim };
+        }
+        if (name === 'list_due_catalog_file_audio_validation_jobs') {
+            if (!options.releaseFails) assert.equal(account, false, 'previous provider lease must be released before another selection');
+            assert.equal(identity, false, 'previous file lease must be released before another selection');
+            return { data: [{ job_id: options.otherJobFirst ? 'different-job' : uuid }] };
+        }
         if (name === 'catalog_language_capture_pipeline_enabled_for_job') {
             assert.equal(args.p_job_id, uuid, 'capture approval must be resolved for the claimed job');
             return options.captureFlagError ? { data: null, error: true } : { data: options.enabled !== false };
@@ -40,7 +49,10 @@ function edgeFixture(options = {}) {
             assert.ok(args.p_account_key);
             return options.yieldError ? { error: true } : { data: options.yieldMissing ? null : !options.yieldCooldown };
         }
-        if (name === 'claim_provider_account_language_validation') { account = true; return { data: true }; }
+        if (name === 'claim_provider_account_language_validation') {
+            if (account) return { data: false };
+            providerOwners.push(args.p_lease_owner); account = true; return { data: true };
+        }
         if (name === 'claim_provider_file_probe') { identity = true; return { data: true }; }
         if (name === 'claim_provider_exact_file_probe_for_source') {
             assert.equal(args.p_user, current.userId); assert.equal(args.p_source, current.sourceId);
@@ -58,10 +70,15 @@ function edgeFixture(options = {}) {
             account = false; identity = false; return { data: uuid };
         }
         if (name === 'checkpoint_catalog_file_audio_validation_window') {
-            assert.equal(account, false, 'account release must precede evidence checkpoint');
-            return options.evidenceFails ? { error: true } : { data: { complete: false } };
+            if (!options.legacySuccess) assert.equal(account, false, 'account release must precede evidence checkpoint');
+            if (options.evidenceFails) return { error: true };
+            position++;
+            return { data: options.unknownCheckpoint ? {} : { complete: false } };
         }
-        if (name === 'release_provider_account_language_validation') { account = false; return { data: true }; }
+        if (name === 'release_provider_account_language_validation') {
+            if (options.releaseFails) return { error: true };
+            account = false; return { data: true };
+        }
         if (name === 'release_provider_exact_file_probe') {
             assert.equal(args.p_identity_key, current.identityKey); assert.equal(args.p_external_id, current.itemId);
             assert.equal(args.p_item_type, current.itemType); identity = false; return { data: true };
@@ -70,22 +87,29 @@ function edgeFixture(options = {}) {
         throw Error('unexpected fixture RPC ' + name);
     } };
     const context = vm.createContext({ crypto, HttpError, Date, AbortSignal, DOMException,
-        console: { warn() {} }, PLAYBACK_SESSION_UUID_PATTERN: /^[a-f0-9-]{36}$/,
-        LANGUAGE_VALIDATION_TASK_BUDGET_MS: 240000, LANGUAGE_VALIDATION_JOB_LEASE_SECONDS: 300,
+        console: { warn() {}, info() {} }, PLAYBACK_SESSION_UUID_PATTERN: /^[a-f0-9-]{36}$/,
+        LANGUAGE_VALIDATION_TASK_BUDGET_MS: 270000, LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS: 240000,
+        LANGUAGE_VALIDATION_JOB_LEASE_SECONDS: 300, languageValidationTasks: new Map(),
         LANGUAGE_VALIDATION_LEASE_SECONDS: 300, LANGUAGE_VALIDATION_ACCOUNT_LEASE_SECONDS: 300,
         LANGUAGE_VALIDATION_SCOPE: 'lid', LANGUAGE_VALIDATION_WINDOW_CHECKPOINT_PROTOCOL: 1,
         LANGUAGE_VALIDATION_SAMPLE_DURATION_SECONDS: 20, LANGUAGE_VALIDATION_MAX_CONSECUTIVE_PROVIDER_NO_PROGRESS: 4,
         LANGUAGE_VALIDATION_GATEWAY_FAILURE_RETRY_MS: 300000,
-        refreshLanguageBackgroundCapacity: async () => true,
+        refreshLanguageBackgroundCapacity: async () => {
+            events.push('capacity'); capacityChecks++;
+            return !(options.capacityLostOnSecond && capacityChecks > 1);
+        },
         recordOrEmpty: x => x || {}, stringOr: (x, fallback) => x ?? fallback, stringOrNull: x => x || null,
         boundedNullableInt: x => Number.isInteger(x) ? x : null,
         revalidateLanguageValidationClaim: async () => current, requireStrictLidWindowCount: () => 6,
-        strictLidWindowStateFromClaim: () => ({ position: 0, count: 6, protocol: 1, tokens: [] }),
+        strictLidWindowStateFromClaim: () => ({ position, count: 6, protocol: 1, tokens: Array.from({ length: position }, (_, i) => 'opaque-' + (i + 1)) }),
         sameStrictLidWindowState: () => true, strictLidWindowCountForDuration: () => 6,
         resolvePlaybackTarget: async () => ({ targetUrl: 'https://fixture.invalid/file' }), assertHttpUrl() {},
         providerAccountHashFromUrl: async () => hash, providerAccountKeyFromUrl: () => 'fixture', sha256Hex: async () => hash,
         assertProviderCircuitClosed: async () => events.push('provider-circuit'),
-        assertLanguageValidationIdle: async () => events.push('provider-idle'), languageValidationFetchBudgetMs: () => 230000,
+        assertLanguageValidationIdle: async () => {
+            events.push('provider-idle');
+            if (options.viewerOnSecond && position > 0) throw new HttpError(409, '', { code: 'PROVIDER_ACCOUNT_BUSY' });
+        }, languageValidationFetchBudgetMs: () => 230000,
         createBytePipeCapability: async (...args) => ({ gatewayUrl: 'https://gateway.invalid', serviceToken: 'fixture', capability: JSON.stringify(args[9]) }),
         fetch: async (url, request) => {
             const action = url.includes('/capture/') ? url.split('/capture/')[1].split('?')[0] : 'legacy';
@@ -101,10 +125,12 @@ function edgeFixture(options = {}) {
                 assert.equal(account, false); assert.equal(identity, false); assert.equal(claims.captureRelease, uuid);
                 if (options.inferResponse) return options.inferResponse;
                 return options.inferFails ? { ok: false, status: 409, payload: { code: 'preempted', ...drain } }
-                    : { ok: true, status: 200, payload: { windowOrdinal: 1, windowCount: 6, receipt: 'opaque', ...drain } };
+                    : { ok: true, status: 200, payload: { windowOrdinal: claims.windowOrdinal, windowCount: 6, receipt: 'opaque-' + claims.windowOrdinal, ...drain } };
             }
             if (action === 'ack') { if (options.ackFails) throw Error('lost ACK'); return { ok: true, payload: { acknowledged: true, ...drain } }; }
             if (action === 'legacy' && (options.enabled === false || options.captureFlagError)) {
+                if (options.legacySuccess) return { ok: true, status: 200,
+                    payload: { windowOrdinal: claims.windowOrdinal, windowCount: 6, receipt: 'legacy-' + claims.windowOrdinal, ...drain } };
                 return { ok: false, status: 503, payload: { code: 'fixture-legacy-boundary', ...drain } };
             }
             throw Error('unexpected fixture fetch');
@@ -122,9 +148,58 @@ function edgeFixture(options = {}) {
     });
     vm.runInContext(stripTypeScriptTypes(section(edge, 'async function exactFileProbeAdmissionEnabled(', 'async function runAutomaticVodLanguageMetadataBatch('), { mode: 'transform' }), context);
     vm.runInContext(stripTypeScriptTypes(section(edge, 'async function processOneLanguageValidationTrack(', 'async function finalizeLanguageValidationTrackWindows('), { mode: 'transform' }), context);
+    vm.runInContext(stripTypeScriptTypes(section(edge, 'function scheduleLanguageValidationJob(', 'function languageValidationJobScheduleDue('), { mode: 'transform' }), context);
     if (options.realFailurePolicy) vm.runInContext(stripTypeScriptTypes(section(edge,
         'function languageValidationTaskErrorCode(', 'function languageValidationPendingResponse('), { mode: 'transform' }), context);
-    return { events, failures, run: () => context.processOneLanguageValidationTrack(db, uuid), slots: () => ({ account, identity }) };
+    return { events, failures, jobOwners, providerOwners,
+        run: () => context.processOneLanguageValidationTrack(db, uuid),
+        runScheduled: async () => {
+            let pending;
+            assert.equal(context.scheduleLanguageValidationJob(task => { pending = task; }, db, uuid), true);
+            await pending;
+        },
+        slots: () => ({ account, identity }) };
+}
+
+test('scheduled capture continuation uses a new claim and both provider guards after the durable handoff', async () => {
+    const f = edgeFixture(); await f.runScheduled();
+    assert.deepEqual(f.failures, []);
+    assert.equal(f.events.filter(e => e === 'fetch:capture').length, 2);
+    assert.equal(f.events.filter(e => e === 'fetch:infer').length, 2);
+    assert.equal(f.events.filter(e => e === 'capacity').length, 2);
+    assert.equal(f.events.filter(e => e === 'provider-idle').length, 4);
+    assert.equal(f.events.filter(e => e === 'provider-circuit').length, 4);
+    assert.equal(new Set(f.jobOwners).size, 2, 'each stage claims afresh, then renews its own owner');
+    assert.equal(new Set(f.providerOwners).size, 2);
+    assert.ok(f.events.indexOf('fetch:ack') < f.events.indexOf('rpc:list_due_catalog_file_audio_validation_jobs'));
+    assert.deepEqual(f.slots(), { account: false, identity: false });
+});
+
+test('cached local inference can continue after a durable receipt without obtaining a provider connection', async () => {
+    const f = edgeFixture({ cached: true }); await f.runScheduled();
+    assert.equal(f.events.filter(e => e === 'fetch:infer').length, 2);
+    assert.equal(f.events.filter(e => e === 'fetch:capture').length, 0);
+    assert.equal(f.providerOwners.length, 0);
+    assert.equal(new Set(f.jobOwners).size, 2);
+});
+
+test('failed legacy account release keeps its lease and prevents a second provider read', async () => {
+    const f = edgeFixture({ enabled: false, legacySuccess: true, releaseFails: true }); await f.runScheduled();
+    assert.equal(f.events.filter(e => e === 'fetch:legacy').length, 1);
+    assert.equal(f.events.filter(e => e === 'rpc:claim_provider_account_language_validation').length, 2);
+    assert.equal(f.providerOwners.length, 1, 'the second account claim cannot steal the retained first lease');
+    assert.equal(f.failures.length, 1);
+    assert.equal(f.failures[0].errorCode, 'LANGUAGE_VALIDATION_PROVIDER_LEASE_BUSY');
+    assert.deepEqual(f.slots(), { account: true, identity: false });
+});
+
+for (const flag of ['capacityLostOnSecond', 'claimDeniedOnSecond', 'viewerOnSecond', 'otherJobFirst', 'unknownCheckpoint', 'evidenceFails']) {
+    test(`scheduled continuation stops for ${flag} without another capture`, async () => {
+        const f = edgeFixture({ [flag]: true }); await f.runScheduled();
+        assert.equal(f.events.filter(e => e === 'fetch:capture').length, 1);
+        assert.equal(f.providerOwners.length, 1);
+        assert.deepEqual(f.slots(), { account: false, identity: false });
+    });
 }
 
 test('actual Edge worker persists capture and releases both leases BEFORE calling local inference', async () => {
