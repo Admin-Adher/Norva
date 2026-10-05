@@ -11,6 +11,33 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const gatewayPath = path.join(root, 'services/media-gateway/src/index.js');
 const gatewaySource = fs.readFileSync(gatewayPath, 'utf8');
+test('MP4 copied header filter preserves decoded frames and timestamps', { skip: process.env.NORVA_MP4_HEADER_PROOF !== '1' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'norva-mp4-headers-'));
+  const run = args => {
+    const result = spawnSync('ffmpeg', ['-hide_banner', '-v', 'error', '-nostdin', '-y', ...args], { encoding: 'utf8', timeout: 15000 });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, '');
+    return result.stdout.split('\n').filter(line => line && !line.startsWith('#')).join('\n');
+  };
+  try {
+    const input = path.join(dir, 'input.mp4');
+    run(['-f', 'lavfi', '-i', 'testsrc2=size=160x128:rate=25:duration=2', '-c:v', 'libx264', '-threads', '1', '-g', '25', '-pix_fmt', 'yuv420p', input]);
+    const start = gatewaySource.indexOf('function finiteMp4CopyVideoBitstreamArgs(session) {');
+    const end = gatewaySource.indexOf('function videoModeForSession(session) {', start);
+    const argsFor = vm.runInNewContext(`(${gatewaySource.slice(start, end)})`, {
+      asRecord: value => value || {}, normalizeCodecToken: value => value,
+      videoModeForSession: () => 'copy',
+    });
+    for (const label of ['baseline', 'headers']) run(['-i', input, '-c:v', 'copy',
+      ...(label === 'headers' ? Array.from(argsFor({ finiteMp4SeekBroker: true, videoCodec: 'h264' })) : []),
+      '-f', 'mpegts', path.join(dir, label + '.ts')]);
+    const proof = label => run(['-xerror', '-err_detect', 'explode', '-threads', '1', '-i', path.join(dir, label + '.ts'), '-map', '0:v:0', '-f', 'framehash', '-']);
+    const baseline = proof('baseline');
+    assert.equal(baseline.split('\n').length, 50);
+    assert.equal(proof('headers'), baseline);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
 const { StrictLidRangeReuse, createStrictRangeCollector } = require('../services/media-gateway/src/strict-lid-range-reuse');
 
 function brokerHarness(diagnosticLogs = null) {

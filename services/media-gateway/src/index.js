@@ -17070,6 +17070,7 @@ function startFfmpeg(session) {
     } else {
         args.push(
             '-c:v', 'copy',
+            ...finiteMp4CopyVideoBitstreamArgs(session),
             ...audioArgs
         );
     }
@@ -20598,6 +20599,18 @@ function audioArgsForSession(session, copyAudio = shouldCopyAudio(session)) {
 function audioModeForSession(session) {
     if (session?.assetSource === 'complete-hls-cache') return 'copy';
     return shouldCopyAudio(session) ? 'copy' : 'transcode';
+}
+
+function finiteMp4CopyVideoBitstreamArgs(session) {
+    const profile = asRecord(session.codecProfile);
+    const codec = normalizeCodecToken(session.videoCodec || profile.videoCodec || profile.video_codec || profile.video);
+    if (session.finiteMp4SeekBroker !== true || videoModeForSession(session) !== 'copy'
+        || !['h264', 'avc', 'avc1'].includes(codec)) return [];
+    // MP4 carries SPS/PPS out of band. Auto Annex-B conversion can leave SEI
+    // and non-IDR packets ahead of the first parameter sets in a TS segment.
+    // Preserve every frame and timestamp; prepend the actual demuxer extradata
+    // after converting it to Annex B. The normal output decode proof still runs.
+    return ['-bsf:v', 'h264_mp4toannexb,dump_extra=freq=all'];
 }
 
 function videoModeForSession(session) {

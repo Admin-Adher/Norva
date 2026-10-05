@@ -5,6 +5,19 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { retainedVodStartupPolicy } = require('../services/media-gateway/src/finite-vod-startup');
 const source = fs.readFileSync(require('node:path').join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
+const bitstreamStart=source.indexOf('function finiteMp4CopyVideoBitstreamArgs(session) {');
+const bitstreamEnd=source.indexOf('function videoModeForSession(session) {',bitstreamStart);
+const bitstreamArgs=vm.runInNewContext(`(${source.slice(bitstreamStart,bitstreamEnd)})`,{
+ asRecord:value=>value||{},normalizeCodecToken:value=>String(value||'').toLowerCase(),
+ videoModeForSession:session=>session.videoMode||'copy',
+});
+test('only admitted finite H264 MP4 copy receives demuxer headers before TS packet payloads',()=>{
+ const session={finiteMp4SeekBroker:true,codecProfile:{videoCodec:'h264'}};
+ assert.deepEqual(Array.from(bitstreamArgs(session)),['-bsf:v','h264_mp4toannexb,dump_extra=freq=all']);
+ for(const change of [{finiteMp4SeekBroker:false},{videoMode:'encode'},{codecProfile:{videoCodec:'hevc'}},{codecProfile:{}}])
+  assert.deepEqual(Array.from(bitstreamArgs({...session,...change})),[]);
+ assert.match(source,/'-c:v', 'copy',\s*\.\.\.finiteMp4CopyVideoBitstreamArgs\(session\)/);
+});
 const start = source.indexOf('        if (!session.retainedVodStartupFormat && (windowedMp4Transport');
 const end = source.indexOf('        applyVaapiVodStartupReadiness(session);',start);
 assert.ok(start>0 && end>start);
