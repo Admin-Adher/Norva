@@ -6775,6 +6775,22 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     if (!context.terminalError && !timeoutKind
                         && (attempt.localClosed || attempt.stopReason === 'superseded' || attempt.stopReason === 'broker_closed')) {
                         strictRangeCollector?.commit(rangeReuse);
+                        // A split-track demuxer deliberately closes the current
+                        // range after obtaining its packet. Preserve only the
+                        // received, header/identity-validated prefix in this
+                        // session's bounded cache after the provider is drained.
+                        // Never mark it as a completed range or persist it across
+                        // sessions, and never retain timeout/transport failures.
+                        if (finiteSeek && context.finiteSteadyFirstWindowBytes > 0
+                            && attempt.stopReason === 'superseded'
+                            && !context.closed && diagnosticStage === 'body'
+                            && context.validator?.kind === 'etag'
+                            && finiteProviderRange && finiteBufferedBytes > 0
+                            && finiteBufferedBytes <= finiteProviderRange.end - finiteProviderRange.start + 1) {
+                            const prefix = Buffer.concat(bufferedChunks, finiteBufferedBytes);
+                            finiteMkvSeekCacheStore(context, { start: finiteProviderRange.start,
+                                end: finiteProviderRange.start + prefix.length - 1 }, prefix);
+                        }
                     }
                     throw error;
                 }

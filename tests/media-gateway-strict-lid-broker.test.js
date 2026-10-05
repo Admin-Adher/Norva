@@ -3649,3 +3649,30 @@ test('split-track MP4 grows reopened ranges after completed warmup without extra
  assert.equal(calls.length,5);assert.equal(calls[4],`bytes=${2*1024*1024}-${4*1024*1024-1}`);
  assert.equal(peak,1);assert.equal(broker.interruptedProviderFetches,0);
 });
+
+
+test('split-track MP4 deliberate close reuses only received validated bytes after provider teardown', {timeout:8000},async(t)=>{
+ const data=Buffer.alloc(2*1024*1024,53),calls=[];let active=0,peak=0;
+ const provider=http.createServer((req,res)=>{
+  calls.push(req.headers.range);active++;peak=Math.max(peak,active);const {start,end}=exactRange(req,data.length);
+  res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1,ETag:'"partial-v1"'});
+  let cursor=start;const timer=setInterval(()=>{const next=Math.min(end+1,cursor+16384);res.write(data.subarray(cursor,next));cursor=next;if(cursor>end){clearInterval(timer);res.end()}},20);
+  res.once('close',()=>{clearInterval(timer);active--});
+ });
+ const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+ const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,dispatcher:null,
+  pathPrefix:'finite-mkv-seek',finiteWindowBytes:2*1024*1024,finiteFirstWindowBytes:256*1024,
+  finiteSteadyFirstWindowBytes:2*1024*1024,finiteCacheBytes:data.length,finiteAbandonedDrainMs:30,
+  releaseDelayMs:0,supersededReleaseDelayMs:0});t.after(()=>broker.close());
+ const r=await fetch(broker.inputUrl,{headers:{Range:'bytes=0-2097151'}}),reader=r.body.getReader();
+ assert.ok((await reader.read()).value.length>0);await reader.cancel();
+ // The following read queues on the same provider mutex until teardown and
+ // prefix publication; it must never open a second provider connection.
+ await new Promise(resolve=>setTimeout(resolve,100));
+ const copy=await fetch(broker.inputUrl,{headers:{Range:'bytes=0-8191'}});
+ assert.deepEqual(Buffer.from(await copy.arrayBuffer()),data.subarray(0,8192));
+ assert.equal(calls.length,1);assert.equal(peak,1);assert.equal(broker.completedProviderFetches,0);
+ assert.equal(broker.interruptedProviderFetches,1);assert.ok(broker.cacheHits>0);
+ const uncached=await fetch(broker.inputUrl,{headers:{Range:'bytes=524288-532479'}});
+ assert.deepEqual(Buffer.from(await uncached.arrayBuffer()),data.subarray(524288,532480));assert.equal(calls.length,2);
+});
