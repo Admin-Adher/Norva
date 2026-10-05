@@ -1,0 +1,426 @@
+{
+  "scope": "Rust exact original MAX OTT; diagnosis and safe recovery, not a repair of source bytes",
+  "diagnostics": [
+    {
+      "at": "2026-10-05T06:37:07.199803+00:00",
+      "film": "Rust [MULTI-SUB]",
+      "mode": "cold-range",
+      "reader": "system libcurl independent of Norva media reader",
+      "gatewayRoute": "secondary HTTP CONNECT slot 1",
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "attempts": 1,
+      "rangeKind": "same cold Gateway range",
+      "curlExit": -15,
+      "boundedStop": true,
+      "bytesRetained": 65536,
+      "seconds": 1.799,
+      "httpStatuses": [
+        200,
+        302,
+        200,
+        206
+      ],
+      "prefixSha256": "de2f256064a0af797747c2b97505dc0b9f3df0de4f489eac731c23ae9ca9cc31",
+      "bodyKind": "other",
+      "mpegTsSync": false,
+      "allZeroPrefix": true,
+      "bodySignals": {
+        "forbidden": false,
+        "expired": false,
+        "cloudflare": false,
+        "nginx": false,
+        "connectionLimit": false,
+        "proxy": false
+      },
+      "contentRanges": [
+        "bytes 0-2767471611/2767471612"
+      ],
+      "serverSignals": {
+        "cloudflare": false,
+        "nginx": true
+      },
+      "expired": true,
+      "temporaryFilesRemoved": true
+    },
+    {
+      "at": "2026-10-05T06:40:46.000406+00:00",
+      "film": "Rust [MULTI-SUB]",
+      "mode": "cold-range",
+      "reader": "system libcurl independent of Norva media reader",
+      "gatewayRoute": "secondary HTTP CONNECT slot 1",
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "attempts": 1,
+      "rangeKind": "exact header bytes 0-262143",
+      "curlExit": -15,
+      "boundedStop": true,
+      "bytesRetained": 262144,
+      "seconds": 1.584,
+      "httpStatuses": [
+        200,
+        302,
+        200,
+        206
+      ],
+      "prefixSha256": "8a39d2abd3999ab73c34db2476849cddf303ce389b35826850f9a700589b4a90",
+      "bodyKind": "other",
+      "mpegTsSync": false,
+      "allZeroPrefix": true,
+      "allZeroSample": true,
+      "firstNonzeroOffset": null,
+      "structureOffsets": {
+        "ebml": -1,
+        "segment": -1,
+        "tracks": -1,
+        "cluster": -1
+      },
+      "prefix64kSha256": "de2f256064a0af797747c2b97505dc0b9f3df0de4f489eac731c23ae9ca9cc31",
+      "bodySignals": {
+        "forbidden": false,
+        "expired": false,
+        "cloudflare": false,
+        "nginx": false,
+        "connectionLimit": false,
+        "proxy": false
+      },
+      "contentRanges": [
+        "bytes 0-262143/2767471612"
+      ],
+      "serverSignals": {
+        "cloudflare": false,
+        "nginx": true
+      },
+      "expired": true,
+      "temporaryFilesRemoved": true
+    },
+    {
+      "at": "2026-10-05T06:39:25.669400+00:00",
+      "film": "Rust [MULTI-SUB]",
+      "mode": "plain-get",
+      "reader": "system libcurl independent of Norva media reader",
+      "gatewayRoute": "secondary HTTP CONNECT slot 1",
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "attempts": 1,
+      "rangeKind": "no Range header",
+      "curlExit": -15,
+      "boundedStop": true,
+      "bytesRetained": 8388608,
+      "seconds": 2.941,
+      "httpStatuses": [
+        200,
+        302,
+        200,
+        200
+      ],
+      "prefixSha256": "18b504a6f9a5d6b0b1b8220955bdd3e70d0bcd07c9b47d4f6f34fcdd4f75e7aa",
+      "bodyKind": "other",
+      "mpegTsSync": false,
+      "allZeroPrefix": true,
+      "allZeroSample": false,
+      "firstNonzeroOffset": 262144,
+      "structureOffsets": {
+        "ebml": -1,
+        "segment": -1,
+        "tracks": -1,
+        "cluster": 1106016
+      },
+      "prefix64kSha256": "de2f256064a0af797747c2b97505dc0b9f3df0de4f489eac731c23ae9ca9cc31",
+      "bodySignals": {
+        "forbidden": false,
+        "expired": false,
+        "cloudflare": false,
+        "nginx": false,
+        "connectionLimit": false,
+        "proxy": false
+      },
+      "contentRanges": [
+        "bytes 0-2767471611/2767471612"
+      ],
+      "serverSignals": {
+        "cloudflare": false,
+        "nginx": true
+      },
+      "expired": true,
+      "temporaryFilesRemoved": true
+    }
+  ],
+  "deployment": {
+    "revision": "dac0f030635d5b306925db30295bff1c3d3938e5",
+    "startedAt": "2026-10-05T06:52:34.630497+00:00",
+    "leasesForced": false,
+    "changedFiles": 1,
+    "preservedFiles": 193,
+    "pausedAt": "2026-10-05T06:52:34.711469+00:00",
+    "replicas": [
+      {
+        "name": "norva-edge-functions",
+        "healthy": true,
+        "helperSha256": "9fcabd100118c9344f60373f10920a338affe8ece9841d72a5fd2f2c646e6333"
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "healthy": true,
+        "helperSha256": "9fcabd100118c9344f60373f10920a338affe8ece9841d72a5fd2f2c646e6333"
+      }
+    ],
+    "gatewaysUnchanged": true,
+    "completedAt": "2026-10-05T06:53:14.976835+00:00",
+    "restoredAt": "2026-10-05T06:53:15.297448+00:00",
+    "admissionsRestored": true,
+    "workerRestored": true,
+    "dispatcherPreserved": true
+  },
+  "health": {
+    "at": "2026-10-05T06:53:46.918218+00:00",
+    "revision": "dac0f030635d5b306925db30295bff1c3d3938e5",
+    "replicas": [
+      {
+        "name": "norva-edge-functions",
+        "startedAt": "2026-10-05T06:53:07.407217862Z",
+        "healthy": true,
+        "helperSha256": "9fcabd100118c9344f60373f10920a338affe8ece9841d72a5fd2f2c646e6333",
+        "all194SourceHashesMatch": true
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "startedAt": "2026-10-05T06:53:11.263739712Z",
+        "healthy": true,
+        "helperSha256": "9fcabd100118c9344f60373f10920a338affe8ece9841d72a5fd2f2c646e6333",
+        "all194SourceHashesMatch": true
+      }
+    ],
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "healthy": true,
+        "image": "sha256:d378abf26bbbe0f2ec25af3eec7f75c24a9b4fc459109786d532892c9c5170dc"
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "healthy": true,
+        "image": "sha256:d378abf26bbbe0f2ec25af3eec7f75c24a9b4fc459109786d532892c9c5170dc"
+      }
+    ],
+    "admissions": {
+      "cron": {
+        "id": 159,
+        "active": true
+      },
+      "paused": false
+    },
+    "stopAbsent": true,
+    "dispatcherRunning": true,
+    "workerRunning": true
+  },
+  "canary": {
+    "at": "2026-10-05T06:47:38.667683+00:00",
+    "revision": "dac0f030635d5b306925db30295bff1c3d3938e5",
+    "helperSha256": "9fcabd100118c9344f60373f10920a338affe8ece9841d72a5fd2f2c646e6333",
+    "healthy": true,
+    "isolated": {
+      "isolatedSanitizerPassed": true,
+      "firstAndSecondPass": true,
+      "network": "none"
+    },
+    "edgeCanaryRequests": [
+      "norva-playback/health"
+    ],
+    "edgeCanaryStopped": true,
+    "sourceHashesMatch": true,
+    "productionChanged": false
+  },
+  "tests": {
+    "focused": {
+      "passed": 98,
+      "failed": 0
+    },
+    "gatewayRegression": {
+      "passed": 123,
+      "skipped": 1,
+      "failed": 0
+    },
+    "initialFocusedOverlap": 108
+  },
+  "originalRepaired": false,
+  "underlyingStorageVersusProxyCauseEstablished": false,
+  "externalMessageSent": false,
+  "accountLimitsChanged": false,
+  "hourlyCodexAutomationRecreated": false,
+  "productionVerification": {
+    "cloudflareRun": 37275042943,
+    "publishedAt": "2026-10-05T06:59:05Z",
+    "observedVersions": 11,
+    "message": "Les données reçues pour cette copie sont illisibles. Vous pouvez choisir une autre version.",
+    "actions": [
+      "Autres versions",
+      "Réessayer cette version",
+      "Retour à la fiche"
+    ],
+    "explicitAlternativeRequired": true,
+    "alternativePlayed": false,
+    "originalRepaired": false,
+    "replay": {
+      "at": "2026-10-05T07:04:38.020140+00:00",
+      "films": [
+        {
+          "tier": "remux",
+          "title": "Rust [MULTI-SUB]",
+          "source": "MAX OTT",
+          "profile": {
+            "complete": null,
+            "duration": null,
+            "container": null,
+            "audioCodec": null,
+            "videoCodec": null
+          },
+          "lastTTFF": null,
+          "sessions": [
+            {
+              "mode": "transcode",
+              "events": [
+                {
+                  "at": "2026-10-05T07:00:30.787012+00:00",
+                  "code": "gateway_502",
+                  "mode": "transcode",
+                  "ttff": null,
+                  "event": "gateway_error",
+                  "metaKeys": [
+                    "appMode",
+                    "clientSurface",
+                    "gatewayStatus",
+                    "playbackEntry",
+                    "viewportClass",
+                    "gatewayDetails",
+                    "failureCategory",
+                    "providerConcurrencySignal"
+                  ],
+                  "position": 0
+                }
+              ],
+              "status": "failed",
+              "gateway": null,
+              "created_at": "2026-10-05T07:00:28.67133+00:00",
+              "error_code": "gateway_502",
+              "updated_at": "2026-10-05T07:00:30.779023+00:00"
+            },
+            {
+              "mode": "direct",
+              "events": null,
+              "status": "expired",
+              "gateway": null,
+              "created_at": "2026-10-05T06:40:46.136061+00:00",
+              "error_code": null,
+              "updated_at": "2026-10-05T06:40:48.109163+00:00"
+            },
+            {
+              "mode": "direct",
+              "events": null,
+              "status": "expired",
+              "gateway": null,
+              "created_at": "2026-10-05T06:39:25.776822+00:00",
+              "error_code": null,
+              "updated_at": "2026-10-05T06:39:29.181161+00:00"
+            },
+            {
+              "mode": "direct",
+              "events": null,
+              "status": "expired",
+              "gateway": null,
+              "created_at": "2026-10-05T06:37:07.315741+00:00",
+              "error_code": null,
+              "updated_at": "2026-10-05T06:37:09.560706+00:00"
+            },
+            {
+              "mode": "transcode",
+              "events": [
+                {
+                  "at": "2026-10-05T06:31:10.308246+00:00",
+                  "code": "gateway_502",
+                  "mode": "transcode",
+                  "ttff": null,
+                  "event": "gateway_error",
+                  "metaKeys": [
+                    "appMode",
+                    "clientSurface",
+                    "gatewayStatus",
+                    "playbackEntry",
+                    "viewportClass",
+                    "gatewayDetails",
+                    "failureCategory",
+                    "providerConcurrencySignal"
+                  ],
+                  "position": 0
+                }
+              ],
+              "status": "failed",
+              "gateway": null,
+              "created_at": "2026-10-05T06:31:08.222055+00:00",
+              "error_code": "gateway_502",
+              "updated_at": "2026-10-05T06:31:10.293979+00:00"
+            },
+            {
+              "mode": "transcode",
+              "events": [
+                {
+                  "at": "2026-10-05T06:31:05.212921+00:00",
+                  "code": "gateway_502",
+                  "mode": "transcode",
+                  "ttff": null,
+                  "event": "gateway_error",
+                  "metaKeys": [
+                    "appMode",
+                    "clientSurface",
+                    "gatewayStatus",
+                    "playbackEntry",
+                    "viewportClass",
+                    "gatewayDetails",
+                    "failureCategory",
+                    "providerConcurrencySignal"
+                  ],
+                  "position": 0
+                }
+              ],
+              "status": "failed",
+              "gateway": null,
+              "created_at": "2026-10-05T06:31:03.549467+00:00",
+              "error_code": "gateway_502",
+              "updated_at": "2026-10-05T06:31:05.203782+00:00"
+            },
+            {
+              "mode": "transcode",
+              "events": [
+                {
+                  "at": "2026-10-05T06:31:00.822265+00:00",
+                  "code": "gateway_502",
+                  "mode": "transcode",
+                  "ttff": null,
+                  "event": "gateway_error",
+                  "metaKeys": [
+                    "appMode",
+                    "clientSurface",
+                    "gatewayStatus",
+                    "playbackEntry",
+                    "viewportClass",
+                    "gatewayDetails",
+                    "failureCategory",
+                    "providerConcurrencySignal"
+                  ],
+                  "position": 0
+                }
+              ],
+              "status": "failed",
+              "gateway": null,
+              "created_at": "2026-10-05T06:30:58.008887+00:00",
+              "error_code": "gateway_502",
+              "updated_at": "2026-10-05T06:31:00.815143+00:00"
+            }
+          ],
+          "container": "mkv",
+          "profileKeys": null
+        }
+      ]
+    }
+  }
+}
