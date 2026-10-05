@@ -12,6 +12,10 @@ Le classement ne change ni version sélectionnée, ni piste, ni langue, ni preuv
 - Le classement porte sur les candidats déjà autorisés et reçus. La pagination serveur, ses limites, les sources visibles et les contrôles de génération restent identiques. Il ne constitue pas un tri global de tous les fichiers non chargés et ne déclenche pas de scan supplémentaire ou d'appel fournisseur.
 
 ## Vérification
-102 tests Node ciblés réussis : classement, inconnus, provenance humaine/fournisseur, absence de mutation, maintien des tris et recherche, rendu des rayons et filtres existants. La fixture Android catalogue utilise les véritables modules et vérifie aussi l'ordre des cartes après reclassement.
+103 tests Node ciblés réussis : classement, inconnus, provenance humaine/fournisseur, absence de mutation, maintien des tris et recherche, rendu des rayons et filtres existants. La fixture Android catalogue utilise les véritables modules et vérifie aussi l'ordre des cartes après reclassement.
 
-Une exécution locale du générateur général de hashes a modifié des références i18n non concernées ; contrôle i18n a détecté les références périmées. Toutes les modifications HTML de ce générateur ont été restaurées avant commit. La publication normale recalcule ses hashes. Aucun changement de traduction ou de backend.
+Une exécution locale du générateur général de hashes a modifié des références i18n non concernées ; contrôle i18n a détecté les références périmées. Toutes les modifications HTML de ce générateur ont été restaurées avant commit. La publication normale recalcule ses hashes. Le manifeste i18n des cinq fichiers applicatifs a ensuite été régénéré ; build et --check réussissent. Aucun changement de traduction ou de backend.
+
+Navigateur local : véritable rendu GenreRails, ordre des langues connues, association carte/clic et dix badges vérifiés. Un ancien contrôle de fixture utilisait la position2 pour identifier le fichier arabe/français ; il utilise désormais son identité stable après tri. Ce défaut de test a été intercepté localement.
+
+Deux matrices préparatoires ont été annulées :37276800767 (nom de méthode portrait incorrect dans la demande),37276849082 (fixture à corriger pour la nouvelle position). Matrice de référence37277001232, code applicatif inchangé, fixture corrigée078fcc9e5. Aucun échec produit n'est déduit de ces annulations.

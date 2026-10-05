@@ -46,3 +46,16 @@ test('genre rendering uses ranked data and retains incomplete fallback',()=>{
  context.window.GenreRails.render(container,[{items:[{title:'Missing'}, {...complete,title:'Complete'}]}]);
  assert.ok(html.indexOf('alt="Complete"')<html.indexOf('alt="Missing"'));
 });
+test('home billboard finds complete candidates beyond the first six while keeping resume first',()=>{
+ const hero={dataset:{heroHoverBound:'1'},classList:{add(){},remove(){}},querySelector:()=>null,querySelectorAll:()=>[]};
+ context.document.getElementById=()=>hero;context.clearInterval=()=>{};
+ const home=Object.create(context.window.HomePage.prototype);
+ Object.assign(home,{posterFromItem:x=>x.poster_url,hasUsefulDisplayTitle:()=>true,backdropFromItem:()=>'/backdrop.jpg',
+ getResumeOffset:()=>10,showHeroSlide(){},_startHeroRotation(){},escapeAttr:x=>x});
+ const partial=Array.from({length:8},(_,i)=>({id:'partial'+i,poster_url:'/p.jpg'}));
+ const resume={id:'resume',poster_url:'/p.jpg',progress:10,duration:100};
+ home.renderHero([resume],[{id:'popular-movies',items:partial},{id:'genre',items:[complete]}]);
+ assert.equal(home._heroSlides[0].item.id,'resume');
+ assert.equal(home._heroSlides[1].item.id,'complete');
+ assert.equal(home._heroSlides.length,7);
+});
