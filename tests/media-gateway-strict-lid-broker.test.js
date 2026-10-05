@@ -3530,3 +3530,42 @@ for (const initialGrace of [0, 500]) test(`native MP4 tail then cached prefix re
   } else assert.equal(calls.some(range => range.startsWith('bytes=8-')), true);
 });
 
+
+test('disjoint MP4 packet reads reuse complete small ranges without provider overlap', {timeout:10000}, async t => {
+  const data=Buffer.alloc(20*1024*1024,0x35);const ranges=[];let active=0,maxActive=0;
+  const provider=http.createServer((req,res)=>{
+    const m=/^bytes=(\d+)-(\d+)$/.exec(req.headers.range);const start=Number(m[1]),end=Number(m[2]);
+    ranges.push([start,end]);active++;maxActive=Math.max(maxActive,active);
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1,ETag:'"disjoint-v1"'});
+    let ended=false;const finished=()=>{if(!ended){ended=true;active--;}};
+    let cursor=start;const timer=setInterval(()=>{const next=Math.min(end+1,cursor+64*1024);res.write(data.subarray(cursor,next));cursor=next;if(cursor>end){clearInterval(timer);finished();res.end();}},10);
+    res.once('close',()=>{clearInterval(timer);finished();});
+  });
+  const sourceUrl=await listen(provider);
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,pathPrefix:'finite-mkv-seek',
+    finiteWindowBytes:8*1024*1024,finiteSequentialWindowBytes:8*1024*1024,finiteFirstWindowBytes:256*1024,finiteSeekContinuationGraceMs:50,
+    finiteCacheBytes:16*1024*1024,finiteAbandonedDrainMs:100,releaseDelayMs:0,completedReleaseDelayMs:0,supersededReleaseDelayMs:0});
+  t.after(async()=>{await broker.close();await closeServer(provider);});
+  const packet=start=>new Promise((resolve,reject)=>{
+    const request=http.get(broker.inputUrl,{headers:{Range:`bytes=${start}-${data.length-1}`}},response=>{
+      response.once('data',chunk=>{assert.deepEqual(chunk.subarray(0,608),data.subarray(start,start+608));request.destroy();resolve();});
+      response.on('error',()=>{});
+    });request.on('error',reject);
+  });
+  for(let i=0;i<5;i++){await packet(1024+i*608);await packet(12*1024*1024+1024+i*608);}
+
+  assert.equal(maxActive,1);assert.equal(ranges.length,2,'each remote track window must finish once and then be reused');
+  assert.ok(ranges.every(([start,end])=>end-start+1<=256*1024));
+  assert.equal(broker.terminalError,null);
+});
+
+test('small MP4 first range grows for sustained sequential delivery',async t=>{
+ const data=Buffer.alloc(2*1024*1024,0x45),ranges=[];
+ const provider=http.createServer((req,res)=>{ranges.push(req.headers.range);sendExactRange(req,res,data);});
+ const sourceUrl=await listen(provider);const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,
+  pathPrefix:'finite-mkv-seek',finiteWindowBytes:1024*1024,finiteSequentialWindowBytes:1024*1024,finiteFirstWindowBytes:256*1024,releaseDelayMs:0,completedReleaseDelayMs:0});
+ t.after(async()=>{await broker.close();await closeServer(provider);});
+ const response=await fetch(broker.inputUrl,{headers:{Range:`bytes=0-${data.length-1}`}});
+ assert.deepEqual(Buffer.from(await response.arrayBuffer()),data);assert.equal(ranges[0],'bytes=0-262143');
+ assert.equal(ranges[1],'bytes=262144-1310719');assert.equal(broker.interruptedProviderFetches,0);
+});
