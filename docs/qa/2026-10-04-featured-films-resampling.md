@@ -134,3 +134,26 @@ last provider progress at 21:57:50. This demonstrates actual capture progress,
 not complete language validation. Ochi remains deferred with zero attempts.
 The earlier Lost job's single receipt is preserved separately; it is not added
 to the new job's two receipts as a fabricated three-window completion.
+
+### Guarded follow-up, 5 October 01:16 UTC
+
+Lost's deterministic capture-preparation loop has now terminated naturally
+with the deployed `LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE` classification
+at 01:14:10 UTC. The ordinary failure delay ends on 6 October at 01:14:10 UTC.
+Its five historical receipts, cursor and sampling pass are preserved, but all
+five receipts have expired. This is incomplete/unavailable, with no language
+published and no complete inconclusive analysis claimed.
+
+Ochi completed its first capture at 01:16:18; the evidence is insufficient.
+The released quota allowed one ordinary Bolt admission at 01:15:04, passage 0;
+it remains queued with no capture at 01:16:39. The earlier PROFILE_CHANGED job
+is preserved separately. Mars still has no exact profile; active account leases
+prevented a new operator request. Human confirmations remain separate and intact.
+See the [03:08 Paris heartbeat](2026-10-05-language-campaign-heartbeat-0308.md)
+and [natural correction proof](2026-10-05-language-capture-unusable-window.md).
+
+At the 01:25 follow-up, Ochi has also terminated incomplete with
+LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE (01:17:43), one insufficient receipt
+and two provider attempts, with the ordinary delay until 6 October 01:17:43.
+Bolt now has two receipts and three provider attempts, deferred for account
+occupancy. No additional language is published; Mars remains without a profile.
