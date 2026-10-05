@@ -6083,6 +6083,13 @@ class WatchPage {
         while (Date.now() < deadline) {
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== hls) return false;
             const startupVideo = this.video;
+            // The decoded lead-in is internal. Never admit playback before the
+            // requested local position has been applied, even if earlier bytes
+            // already satisfy the reserve at zero.
+            if (Number(this._pendingLocalSeekTarget) > 0 || startupVideo?.seeking) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                continue;
+            }
             const levels = Array.isArray(hls?.levels) ? hls.levels : [];
             const currentLevel = Number.isInteger(hls?.currentLevel) && hls.currentLevel >= 0
                 ? hls.currentLevel : 0;
@@ -7127,12 +7134,9 @@ class WatchPage {
         const safeTarget = Math.max(0, Math.floor(Number(target) || 0));
         if (safeTarget <= 5) return 0;
         const requested = Math.max(0, Math.floor(Number(requestedPreRoll) || 0));
-        // The gateway now emits clean frames at the exact requested offset
-        // (accurate two-stage seek), so the default pre-roll is 0: no seek-ahead
-        // that stalls the player while the transcoder grinds up to the target
-        // (the old 90s pre-roll was the main cause of the slow/"buffering"
-        // Resume). A non-zero value is only passed as a fallback when a provider
-        // range-seek failure is actually detected.
+        // The caller explicitly scopes any decoder warmup to its frozen file
+        // identity. Keep the requested viewing point separate from the earlier
+        // Gateway start; the existing local seek skips this internal warmup.
         return Math.min(safeTarget, requested);
     }
 
@@ -7182,7 +7186,11 @@ class WatchPage {
             || playbackResolveSignal?.aborted
             || (subtitleSwitchRequestId !== null
                 && this.isStaleSubtitleSwitch(subtitleSwitchRequestId));
-        const seekPlan = this.getGatewaySeekPlan(targetTime, options.preRollSeconds ?? 0);
+        // A bounded MKV warmup restores decoder references before the viewing
+        // point. Keep the whole A/V/subtitle graph intact and use its existing
+        // local seek instead of output-trimming subtitle cues that cross it.
+        const decoderPreRoll = String(playbackIdentity.container || '').toLowerCase() === 'mkv' ? 15 : 0;
+        const seekPlan = this.getGatewaySeekPlan(targetTime, options.preRollSeconds ?? decoderPreRoll);
         const { target, preRoll, sessionStart } = seekPlan;
         const autoplay = this.captureGatewaySeekAutoplayIntent();
         const { itemType, container } = playbackIdentity;

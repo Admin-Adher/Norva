@@ -24,6 +24,19 @@ async function verifyGatewayLateRecovery(WatchPage, Hls, tick) {
         || startup.video.currentTime !== 3.569333) {
         throw Error('attested first-fragment origin did not unblock the full reserve');
     }
+    // Internal MKV warmup must never appear before the requested local target.
+    startup.video.currentTime = 0;
+    startup.video.buffered = { length: 1, start: () => 0, end: () => 24 };
+    startup._pendingLocalSeekTarget = 15;
+    let admitted = false;
+    const warmupGate = startup.waitForGatewayStartupBuffer(1, startupHls,
+        { minimumSeconds: 6, timeoutMs: 1000 }).then(value => { admitted = value; return value; });
+    await tick();
+    if (admitted) throw Error('warmup was admitted before the requested position');
+    startup.video.currentTime = 15;
+    startup._pendingLocalSeekTarget = null;
+    if (!await warmupGate || startup.video.currentTime !== 15) throw Error('local warmup target did not retain its reserve');
+
     for (const userPaused of [false, true]) {
         let plays = 0, waits = 0;
         const page = Object.create(WatchPage.prototype);
