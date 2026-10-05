@@ -12582,10 +12582,11 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             session.finiteMp4SeekBroker = true;
             session.finiteMp4BufferObservation = windowedMp4Transport;
             await prepareFiniteMkvSeekBroker(session, sessionRequestAbortController.signal);
+            applyFiniteMp4AccurateResume(session);
             // A resumed MP4 can earn the same decoded output proof as a cold
             // retained MP4. This opts into verification, not eligibility:
             // finalized segments, continuity and sustained rate still decide.
-            if (videoModeForSession(session) === 'copy'
+            if ((videoModeForSession(session) === 'copy' || session.finiteMp4ResumeAligned === true)
                 && !multiAudioHlsEnabled(session) && !exactSubtitleHlsEnabled(session)) {
                 session.finiteVodOutputStartupFormat = 'mp4';
             }
@@ -16987,7 +16988,7 @@ function startFfmpeg(session) {
     const forceAlignedHlsVideoEncode = (
         session.forceExactMatroskaH264Reencode === true ||
         session.forceAlignedMultiAudioVideoEncode === true ||
-        session.finiteTsResumeAligned === true
+        session.finiteTsResumeAligned === true || session.finiteMp4ResumeAligned === true
     );
     const localSpoolInput = session.authoritativeSpool?.path || null;
     const seekableMkvInput = !localSpoolInput && usesFiniteMkvSeekBroker(session);
@@ -17500,6 +17501,7 @@ function inputProbeArgsForSession(session) {
     session.startupTimings.finiteTsFastInput = session.finiteTsFastInput;
     session.startupTimings.finiteTsDurationScanSkipped = finiteTsKnownDuration;
     session.startupTimings.finiteTsResumeAligned = session.finiteTsResumeAligned === true;
+    session.startupTimings.finiteMp4ResumeAligned = session.finiteMp4ResumeAligned === true;
     if (session.finiteTsFastInput) {
         // Two long (e.g. 12-second) segments already cover this reserve.
         // Short segments still need enough finalized media and rate evidence.
@@ -19452,6 +19454,25 @@ function freezeMkvH264FastStart(session) {
     return assessment;
 }
 
+function applyFiniteMp4AccurateResume(session) {
+    if (session?.finiteMp4SeekBroker !== true || !(Number(session.seekOffset) > 0)
+        || !knownVodInputProbeEligible(session) || privateResumeFormat(session) !== 'mp4'
+        || multiAudioHlsEnabled(session) || exactSubtitleHlsEnabled(session)
+        || VIDEO_ENCODER_CONFIG.backend !== 'vaapi' || VIDEO_ENCODER_PREFLIGHT.ready !== true) return false;
+    const profile = asRecord(session.codecProfile);
+    const width = Number(profile.videoWidth ?? profile.video_width ?? profile.width);
+    const height = Number(profile.videoHeight ?? profile.video_height ?? profile.height);
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0
+        || width > 1920 || height > 1080) return false;
+    // Indexed input seeking decodes the preceding keyframe and discards preroll
+    // up to the requested timestamp. Copy cannot do this: it can leave seconds
+    // of leading audio before the next IDR. Encode both streams at the same seek.
+    session.videoMode = 'encode';
+    session.videoModeReason = 'finite_mp4_accurate_resume';
+    session.finiteMp4ResumeAligned = true;
+    return true;
+}
+
 function applyVaapiVodStartupReadiness(session) {
     if (
         (!isFiniteMkvVodSession(session) && !session.finiteVodOutputStartupFormat) ||
@@ -20680,7 +20701,7 @@ function mappedSubtitleStreamIndexForSession(session) {
 
 function shouldCopyAudio(session) {
     if (session?.privateResumeLease) return false;
-    if (session?.finiteTsResumeAligned === true) return false;
+    if (session?.finiteTsResumeAligned === true || session?.finiteMp4ResumeAligned === true) return false;
     // Input seeking trims decoded video to the requested frame, but copied
     // AAC can retain packets from the preceding MKV cue. Decode audio too so
     // both streams start together; origin and all-copy graphs stay unchanged.
@@ -22023,7 +22044,7 @@ async function waitForPlaylist(session, timeoutMs, abortSignal = null) {
                 session.startupTimings.sustainedMediaProductionRateX = video.sustainedMediaProductionRateX;
                 if ((session.finiteTsFastInput === true || session.finiteVodOutputStartupFormat) && FINITE_TS_FAST_START_ENABLED
                     && !multiAudioHlsEnabled(session) && !exactSubtitleHlsEnabled(session)
-                    && (videoModeForSession(session) === 'copy' || session.finiteTsResumeAligned === true)
+                    && (videoModeForSession(session) === 'copy' || session.finiteTsResumeAligned === true || session.finiteMp4ResumeAligned === true)
                     && !session.finiteTsStartupEvidence) {
                     const proofStartedAt = Date.now();
                     session.finiteTsStartupEvidence = video.inspection.discontinuityCount === 0

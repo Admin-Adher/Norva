@@ -3611,3 +3611,26 @@ test('native MP4 packet bursts remain bounded until sustained delivery is demons
  assert.deepEqual(ranges.slice(0,5),['bytes=0-262143','bytes=262144-524287','bytes=524288-786431','bytes=786432-1048575','bytes=1048576-2097151']);
  assert.equal(broker.interruptedProviderFetches,0);
 });
+
+
+test('MP4 precise resume emits aligned decoded audio and video on the real GPU', { skip: process.env.NORVA_MP4_HEADER_PROOF !== '1' }, () => {
+    const {execFileSync}=require('node:child_process');
+    const os=require('node:os'),path=require('node:path'),fs=require('node:fs'),vm=require('node:vm');
+    const root=fs.mkdtempSync(path.join(os.tmpdir(),'norva-mp4-resume-'));
+    const gateway=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
+    const begin=gateway.indexOf('function seekArgsForSession('),end=gateway.indexOf('\nfunction ',begin+1);
+    const seek=vm.runInNewContext(`(${gateway.slice(begin,end)})`,{
+        isFiniteMkvVodSession:()=>false,usesFiniteMkvSeekBroker:()=>true,exactSubtitleHlsEnabled:()=>false,
+    })({seekOffset:1.37,finiteMp4SeekBroker:true,finiteMp4ResumeAligned:true},true);
+    const ff=args=>execFileSync('ffmpeg',['-hide_banner','-loglevel','error','-y',...args],{timeout:20000});
+    try {
+        ff(['-f','lavfi','-i','testsrc2=size=320x180:rate=25:duration=8','-f','lavfi','-i','sine=frequency=440:duration=8',
+            '-c:v','libx264','-threads','1','-g','100','-keyint_min','100','-sc_threshold','0','-c:a','aac',root+'/input.mp4']);
+        ff(['-vaapi_device','/dev/dri/renderD128',...seek.preInputSeek,'-i',root+'/input.mp4',...seek.postInputSeek,
+            '-t','4','-vf','format=nv12,hwupload','-c:v','h264_vaapi','-g','50','-bf','0','-c:a','aac','-f','mpegts',root+'/output.ts']);
+        const streams=JSON.parse(execFileSync('ffprobe',['-v','error','-show_entries','stream=codec_type,start_time','-of','json',root+'/output.ts'],{timeout:10000})).streams;
+        const video=Number(streams.find(s=>s.codec_type==='video').start_time),audio=Number(streams.find(s=>s.codec_type==='audio').start_time);
+        assert.ok(Number.isFinite(video)&&Number.isFinite(audio));assert.ok(Math.abs(video-audio)<0.1,`track offset ${video-audio}`);
+        ff(['-xerror','-i',root+'/output.ts','-t','4','-f','null','-']);
+    } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

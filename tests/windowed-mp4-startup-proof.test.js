@@ -24,7 +24,7 @@ assert.ok(start>0 && end>start);
 async function prepare({ admitted=true, format='mp4', mode='copy', multi=false, subs=false, failure=false }={}) {
  const session={};let calls=0;
  const run=vm.runInNewContext(`async()=>{${source.slice(start,end)}}`,{
-  session,windowedMp4Transport:admitted,privateResumeHlsBindingForSession:()=>false,
+  applyFiniteMp4AccurateResume:()=>false,session,windowedMp4Transport:admitted,privateResumeHlsBindingForSession:()=>false,
   privateResumeFormat:()=>format,sessionRequestAbortController:new AbortController(),
   prepareFiniteMkvSeekBroker:async()=>{calls++;if(failure)throw Error('identity changed');},
   videoModeForSession:()=>mode,multiAudioHlsEnabled:()=>multi,exactSubtitleHlsEnabled:()=>subs,
@@ -49,4 +49,33 @@ test('MP4 admission alone never grants a shorter buffer; exact decoded segments 
   assert.equal(retainedVodStartupPolicy({...session,finiteTsStartupEvidence:proof},'audio-transcode').eligible,false);
  }
  assert.equal(retainedVodStartupPolicy({...session,startupTimings:{...session.startupTimings,sustainedMediaProductionRateX:1}},'audio-transcode').eligible,false);
+});
+
+const alignmentStart=source.indexOf('function applyFiniteMp4AccurateResume(session) {');
+const alignmentEnd=source.indexOf('function applyVaapiVodStartupReadiness(session) {',alignmentStart);
+function align(session, {known=true, format='mp4', multi=false, subs=false, ready=true, backend='vaapi'}={}) {
+ return vm.runInNewContext(`(${source.slice(alignmentStart,alignmentEnd)})`,{
+  asRecord:v=>v||{},knownVodInputProbeEligible:()=>known,privateResumeFormat:()=>format,
+  multiAudioHlsEnabled:()=>multi,exactSubtitleHlsEnabled:()=>subs,
+  VIDEO_ENCODER_CONFIG:{backend},VIDEO_ENCODER_PREFLIGHT:{ready},
+ })(session);
+}
+test('indexed MP4 resumes encode both streams at the exact requested boundary under existing encoder admission',()=>{
+ const base={finiteMp4SeekBroker:true,seekOffset:60.143,codecProfile:{videoWidth:720,videoHeight:480}};
+ const session=structuredClone(base);assert.equal(align(session),true);
+ assert.equal(session.videoMode,'encode');assert.equal(session.finiteMp4ResumeAligned,true);
+ assert.equal(session.seekOffset,60.143);
+ for(const options of [{known:false},{format:'mkv'},{multi:true},{subs:true},{ready:false},{backend:'software'}]) {
+  const rejected=structuredClone(base);assert.equal(align(rejected,options),false);assert.equal(rejected.videoMode,undefined);
+ }
+ for(const change of [{seekOffset:0},{finiteMp4SeekBroker:false},{codecProfile:{videoWidth:3840,videoHeight:2160}}])
+  assert.equal(align({...base,...change}),false);
+ const seekStart=source.indexOf('function seekArgsForSession('),seekEnd=source.indexOf('\nfunction ',seekStart+1);
+ const seek=vm.runInNewContext(`(${source.slice(seekStart,seekEnd)})`,{
+  isFiniteMkvVodSession:()=>false,usesFiniteMkvSeekBroker:()=>true,exactSubtitleHlsEnabled:()=>false,
+ });
+ assert.deepEqual(JSON.parse(JSON.stringify(seek(session,true))),{preInputSeek:['-ss','60.143'],postInputSeek:[]});
+ const audioStart=source.indexOf('function shouldCopyAudio(session) {'),audioEnd=source.indexOf('\nfunction ',audioStart+1);
+ const audio=vm.runInNewContext(`(${source.slice(audioStart,audioEnd)})`,{});
+ assert.equal(audio(session),false);
 });
