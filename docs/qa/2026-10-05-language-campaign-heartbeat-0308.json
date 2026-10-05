@@ -12,10 +12,34 @@
     "allVariantsStillVisible": true,
     "humanBadgesExcluded": true,
     "sources": [
-      {"name": "Strng IPTV 8K", "uniqueTechnicalChecks": 8897, "historicalIdentifiedVariants": 142, "unknownVariants": 30052, "last15MinuteUniqueChecks": 42},
-      {"name": "Norva Selection", "uniqueTechnicalChecks": 85, "historicalIdentifiedVariants": 9, "unknownVariants": 174, "last15MinuteUniqueChecks": 0},
-      {"name": "Dino", "uniqueTechnicalChecks": 7711, "historicalIdentifiedVariants": 4152, "unknownVariants": 4717, "last15MinuteUniqueChecks": 65},
-      {"name": "MAX OTT", "uniqueTechnicalChecks": 5847, "historicalIdentifiedVariants": 3478, "unknownVariants": 14027, "last15MinuteUniqueChecks": 0}
+      {
+        "name": "Strng IPTV 8K",
+        "uniqueTechnicalChecks": 8897,
+        "historicalIdentifiedVariants": 142,
+        "unknownVariants": 30052,
+        "last15MinuteUniqueChecks": 42
+      },
+      {
+        "name": "Norva Selection",
+        "uniqueTechnicalChecks": 85,
+        "historicalIdentifiedVariants": 9,
+        "unknownVariants": 174,
+        "last15MinuteUniqueChecks": 0
+      },
+      {
+        "name": "Dino",
+        "uniqueTechnicalChecks": 7711,
+        "historicalIdentifiedVariants": 4152,
+        "unknownVariants": 4717,
+        "last15MinuteUniqueChecks": 65
+      },
+      {
+        "name": "MAX OTT",
+        "uniqueTechnicalChecks": 5847,
+        "historicalIdentifiedVariants": 3478,
+        "unknownVariants": 14027,
+        "last15MinuteUniqueChecks": 0
+      }
     ],
     "uniqueTechnicalChecks": 22540,
     "historicalIdentifiedVariants": 7781,
@@ -76,8 +100,14 @@
     "atUtc": "2026-10-05T01:08:35Z",
     "bothEdgesHealthy": true,
     "bothGatewayHttp200AndOk": true,
-    "edgeStartedAtUtc": ["2026-10-05T00:28:36.286340173Z", "2026-10-05T00:28:40.379378525Z"],
-    "gatewayStartedAtUtc": ["2026-10-05T00:29:18.854308998Z", "2026-10-05T00:29:22.563815847Z"],
+    "edgeStartedAtUtc": [
+      "2026-10-05T00:28:36.286340173Z",
+      "2026-10-05T00:28:40.379378525Z"
+    ],
+    "gatewayStartedAtUtc": [
+      "2026-10-05T00:29:18.854308998Z",
+      "2026-10-05T00:29:22.563815847Z"
+    ],
     "admissionPaused": false,
     "cronsActive": true,
     "dispatcherActive": true,
@@ -85,7 +115,10 @@
     "maximumDispatcherInFlight": 1,
     "restartsDuringAudit": 0,
     "capacitySnapshotAtUtc": "2026-10-05T01:09:24Z",
-    "capacityPlacesPerGateway": [2, 2],
+    "capacityPlacesPerGateway": [
+      2,
+      2
+    ],
     "activeViewersAtSnapshot": 0,
     "strictBrokersAtSnapshot": 0,
     "whisperCpuAtSnapshot": 0,
@@ -119,7 +152,13 @@
     "marsProfilePostSent": false
   },
   "targets": {
-    "humanConfirmations": {"projectable": 5, "english": 4, "spanish": 1, "newListening": false, "republished": false},
+    "humanConfirmations": {
+      "projectable": 5,
+      "english": 4,
+      "spanish": 1,
+      "newListening": false,
+      "republished": false
+    },
     "lost": {
       "identified": false,
       "stateAt0108": "retry_wait",
@@ -150,7 +189,12 @@
       "automaticRestartAtDeadlinePromised": false,
       "newOperatorPost": false
     },
-    "ochiAt0114": {"receipts": 0, "providerAttempts": 0, "identified": false, "newOperatorPost": false},
+    "ochiAt0114": {
+      "receipts": 0,
+      "providerAttempts": 0,
+      "identified": false,
+      "newOperatorPost": false
+    },
     "ochiAt0116": {
       "firstProviderProgressAtUtc": "2026-10-05T01:16:18.091236Z",
       "state": "queued",
@@ -168,7 +212,9 @@
       "preflightAtUtc": "2026-10-05T01:14:45.276661Z",
       "preflightBlockers": [],
       "profileAndCacheMatch": true,
-      "audioIndices": [1],
+      "audioIndices": [
+        1
+      ],
       "identityLinked": true,
       "humanConfirmation": false,
       "activeViewers": 0,
@@ -188,8 +234,15 @@
       "admissionIsNotCapture": true,
       "oldProfileChangedJobPreserved": true
     },
-    "mars": {"hasExactProfile": false, "newProfilePost": false},
-    "finalQuotas": {"manualActive": 2, "providerActive": 4, "manualStarts24h": 13}
+    "mars": {
+      "hasExactProfile": false,
+      "newProfilePost": false
+    },
+    "finalQuotas": {
+      "manualActive": 2,
+      "providerActive": 4,
+      "manualStarts24h": 13
+    }
   },
   "sqlTimeout": {
     "observedOn": "second-edge",
@@ -217,15 +270,39 @@
   "ci": {
     "observedAtUtc": "2026-10-05T01:09:09.1709482Z",
     "pullRequests": [
-      {"number": 651, "mergeSha": "f1f2699b01c9da6b327de6c8209c99a521b0b3ee", "checksSucceeded": 5, "checksFailed": 0, "checksPending": 0},
-      {"number": 652, "mergeSha": "81948a703f186230345cce3ee8e66f0c54286543", "checksSucceeded": 4, "checksFailed": 0, "checksPending": 0}
+      {
+        "number": 651,
+        "mergeSha": "f1f2699b01c9da6b327de6c8209c99a521b0b3ee",
+        "checksSucceeded": 5,
+        "checksFailed": 0,
+        "checksPending": 0
+      },
+      {
+        "number": 652,
+        "mergeSha": "81948a703f186230345cce3ee8e66f0c54286543",
+        "checksSucceeded": 4,
+        "checksFailed": 0,
+        "checksPending": 0
+      }
     ],
     "rerunsDuringThisHeartbeat": 0
   },
   "play": {
     "observedAtUtc": "2026-10-05T01:09:46.3902277Z",
-    "mobile": {"version": "1.3.32", "versionCode": 46, "state": "in_review", "availabilityProven": false, "actionRequired": false},
-    "tv": {"version": "3.8.25-hybrid", "versionCode": 38, "state": "in_review", "availabilityProven": false, "actionRequired": false},
+    "mobile": {
+      "version": "1.3.32",
+      "versionCode": 46,
+      "state": "in_review",
+      "availabilityProven": false,
+      "actionRequired": false
+    },
+    "tv": {
+      "version": "3.8.25-hybrid",
+      "versionCode": 38,
+      "state": "in_review",
+      "availabilityProven": false,
+      "actionRequired": false
+    },
     "uploads": 0,
     "reviewRestarts": 0,
     "settingsChanged": false,
@@ -266,6 +343,114 @@
     "max-before-mars-review.safe.json",
     "storyboard-local-correlation.safe.json",
     "ci-merge-status.safe.json",
-    "play-review.safe.json"
-  ]
+    "play-review.safe.json",
+    "targets-closeout.safe.json"
+  ],
+  "closeoutFollowup": {
+    "atUtc": "2026-10-05T01:25:16.885474+00:00",
+    "providerRequests": 0,
+    "allTargetsRemainUnidentified": true,
+    "items": [
+      {
+        "title": "Lost on a Mountain in Maine",
+        "identified": false,
+        "profileComplete": true,
+        "manualActive": 1,
+        "providerActiveJobs": 3,
+        "variantGenerationUnchanged": true,
+        "profileUnchanged": true,
+        "latestJob": {
+          "created_at": "2026-10-04T21:53:43.849225+00:00",
+          "updated_at": "2026-10-05T01:14:10.45585+00:00",
+          "state": "failed",
+          "error_code": "LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE",
+          "retry_at": "2026-10-06T01:14:10.451+00:00",
+          "purge_after": "2026-10-12T01:14:10.45585+00:00",
+          "sampling_pass": 0,
+          "strict_lid_window_position": 5,
+          "strict_lid_window_count": 6,
+          "provider_attempt_count": 10,
+          "attempt_count": 107,
+          "last_provider_progress_at": "2026-10-04T22:27:38.011108+00:00",
+          "verified_at": null,
+          "next_track_position": 0,
+          "quarantined_at": null,
+          "queue_expires_at": null,
+          "lease_expires_at": null,
+          "receiptCount": 5,
+          "receiptSequenceSHA256": "e896672d59dd5ad06fd8e1b6b43bd1d3922d61beb381ca1be2f018f6a359dbcd"
+        }
+      },
+      {
+        "title": "The Legend of Ochi",
+        "identified": false,
+        "profileComplete": true,
+        "manualActive": 1,
+        "providerActiveJobs": 3,
+        "variantGenerationUnchanged": true,
+        "profileUnchanged": true,
+        "latestJob": {
+          "created_at": "2026-10-04T21:53:52.603305+00:00",
+          "updated_at": "2026-10-05T01:17:43.008109+00:00",
+          "state": "failed",
+          "error_code": "LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE",
+          "retry_at": "2026-10-06T01:17:43.005+00:00",
+          "purge_after": "2026-10-12T01:17:43.008109+00:00",
+          "sampling_pass": 0,
+          "strict_lid_window_position": 1,
+          "strict_lid_window_count": 6,
+          "provider_attempt_count": 2,
+          "attempt_count": 3,
+          "last_provider_progress_at": "2026-10-05T01:16:18.091236+00:00",
+          "verified_at": null,
+          "next_track_position": 0,
+          "quarantined_at": null,
+          "queue_expires_at": null,
+          "lease_expires_at": null,
+          "receiptCount": 1,
+          "receiptSequenceSHA256": "b3468706a616cfe37c200022d7be1c751d0df4537734cffe87d2f1cb14763710"
+        }
+      },
+      {
+        "title": "Bolt from the Blue",
+        "identified": false,
+        "profileComplete": true,
+        "manualActive": 1,
+        "providerActiveJobs": 3,
+        "variantGenerationUnchanged": true,
+        "profileUnchanged": true,
+        "latestJob": {
+          "created_at": "2026-10-05T01:15:03.994731+00:00",
+          "updated_at": "2026-10-05T01:25:00.683048+00:00",
+          "state": "retry_wait",
+          "error_code": "PROVIDER_ACCOUNT_BUSY",
+          "retry_at": "2026-10-05T01:25:15.68+00:00",
+          "purge_after": "2026-10-12T01:15:03.994729+00:00",
+          "sampling_pass": 0,
+          "strict_lid_window_position": 2,
+          "strict_lid_window_count": 6,
+          "provider_attempt_count": 3,
+          "attempt_count": 7,
+          "last_provider_progress_at": "2026-10-05T01:20:22.367831+00:00",
+          "verified_at": null,
+          "next_track_position": 0,
+          "quarantined_at": null,
+          "queue_expires_at": null,
+          "lease_expires_at": null,
+          "receiptCount": 2,
+          "receiptSequenceSHA256": "617f04d7e95ab2cdb485bd6610b52f82804350833d096fe6d64e5e5b99092c0f"
+        }
+      },
+      {
+        "title": "I Want to Live on Mars",
+        "identified": false,
+        "profileComplete": false,
+        "manualActive": 1,
+        "providerActiveJobs": 3,
+        "variantGenerationUnchanged": true,
+        "profileUnchanged": true,
+        "latestJob": null
+      }
+    ]
+  }
 }

@@ -157,3 +157,21 @@ traitements sous les gardes existantes. Aucune langue supplémentaire, réparati
 de HIT ou réparation des octets corrompus n'est revendiquée. Les anciens
 reports Strng et quarantaines Dino restent conservés. La maintenance globale
 et le suivi des publications Play restent actifs.
+
+
+## Suivi de clôture du relevé, 01:25 UTC
+
+Le relevé de 01:25:16 retrouve Ochi à `failed` depuis **01:17:43.008**, avec
+le même code `LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE`. Deux tentatives
+fournisseur ont produit un seul reçu insuffisant, conservé avec le curseur
+1/6, passage 0. Le délai normal va jusqu'au **6 octobre 01:17:43.005 UTC**.
+Son analyse est donc incomplète ; aucune langue ni analyse complète
+indéterminée n'est revendiquée. Aucun opérateur ne relance ce travail terminal.
+
+Bolt a maintenant deux reçus, curseur 2/6, pour trois tentatives fournisseur.
+Sa dernière progression de reçu est datée de 01:20:22.367 ; il est reporté
+`PROVIDER_ACCOUNT_BUSY` à 01:25:00.683. Il reste non identifié. Ces nombres
+ne constituent ni quatre preuves qualifiées ni une analyse terminée.
+Lost est inchangé et Mars reste sans profil. Les quotas sont redescendus à
+un travail manuel et trois fournisseur ; cela ne démontre pas à lui seul
+la disponibilité du compte. Reçu : `targets-closeout.safe.json`.

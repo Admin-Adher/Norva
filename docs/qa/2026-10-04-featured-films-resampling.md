@@ -151,3 +151,9 @@ is preserved separately. Mars still has no exact profile; active account leases
 prevented a new operator request. Human confirmations remain separate and intact.
 See the [03:08 Paris heartbeat](2026-10-05-language-campaign-heartbeat-0308.md)
 and [natural correction proof](2026-10-05-language-capture-unusable-window.md).
+
+At the 01:25 follow-up, Ochi has also terminated incomplete with
+LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE (01:17:43), one insufficient receipt
+and two provider attempts, with the ordinary delay until 6 October 01:17:43.
+Bolt now has two receipts and three provider attempts, deferred for account
+occupancy. No additional language is published; Mars remains without a profile.
