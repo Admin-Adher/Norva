@@ -885,5 +885,82 @@
         "jobs": []
       }
     ]
+  },
+  "naturalAcceptanceFollowup": {
+    "at": "2026-10-05T01:16:39.933894+00:00",
+    "providerRequestsByAudit": 0,
+    "naturalTypedTerminalTransitionVerified": true,
+    "newProviderAttemptCount": 1,
+    "newLanguagePublished": false,
+    "allFiveHistoricalReceiptsExpired": true,
+    "lost": {
+      "title": "Lost on a Mountain in Maine",
+      "identified": false,
+      "profileComplete": true,
+      "manualActive": 2,
+      "manualStarts24h": 13,
+      "providerActiveJobs": 4,
+      "ownerActiveSessions": 0,
+      "variantGenerationUnchanged": true,
+      "profileUnchanged": true,
+      "jobs": [
+        {
+          "created_at": "2026-10-04T13:27:49.852622+00:00",
+          "updated_at": "2026-10-04T13:43:46.330484+00:00",
+          "state": "expired",
+          "error_code": "LANGUAGE_VALIDATION_QUEUE_EXPIRED",
+          "retry_at": "2026-10-04T13:43:46.330484+00:00",
+          "purge_after": "2026-10-11T13:43:46.330484+00:00",
+          "sampling_pass": 0,
+          "strict_lid_window_position": 1,
+          "strict_lid_window_count": 6,
+          "provider_attempt_count": 1,
+          "attempt_count": 1,
+          "last_provider_progress_at": "2026-10-04T13:28:41.183804+00:00",
+          "verified_at": null,
+          "next_track_position": 0,
+          "quarantined_at": null,
+          "queue_expires_at": null,
+          "lease_expires_at": null,
+          "receiptCount": 1,
+          "receiptSequenceSHA256": "de154fafd2df488ca1aa65a13690e9d2e2a5d299370c99ddaa0cf40a0f74a3b7"
+        },
+        {
+          "created_at": "2026-10-04T21:53:43.849225+00:00",
+          "updated_at": "2026-10-05T01:14:10.45585+00:00",
+          "state": "failed",
+          "error_code": "LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE",
+          "retry_at": "2026-10-06T01:14:10.451+00:00",
+          "purge_after": "2026-10-12T01:14:10.45585+00:00",
+          "sampling_pass": 0,
+          "strict_lid_window_position": 5,
+          "strict_lid_window_count": 6,
+          "provider_attempt_count": 10,
+          "attempt_count": 107,
+          "last_provider_progress_at": "2026-10-04T22:27:38.011108+00:00",
+          "verified_at": null,
+          "next_track_position": 0,
+          "quarantined_at": null,
+          "queue_expires_at": null,
+          "lease_expires_at": null,
+          "receiptCount": 5,
+          "receiptSequenceSHA256": "e896672d59dd5ad06fd8e1b6b43bd1d3922d61beb381ca1be2f018f6a359dbcd"
+        }
+      ],
+      "baselineJobComparison": {
+        "receiptSequenceUnchanged": true,
+        "windowCursorUnchanged": true,
+        "samplingPassUnchanged": true,
+        "expectedAudioIndicesUnchanged": true,
+        "profileFingerprintUnchanged": true,
+        "priorProviderAttempts": 9,
+        "currentProviderAttempts": 10,
+        "targetTerminalCodeObserved": true,
+        "noVerifiedTimestamp": true,
+        "noQuarantine": true,
+        "retryDelaySecondsFromUpdate": 86399.99515
+      }
+    },
+    "sourceReceipt": ".codex-artifacts/language-heartbeat-0308/targets-final-postdeploy.safe.json"
   }
 }

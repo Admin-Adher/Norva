@@ -213,3 +213,30 @@ Les cinq reçus, le curseur, le passage, le profil et les neuf tentatives
 fournisseur sont inchangés. La nouvelle classification de fenêtre n'a donc
 toujours pas été exercée sur ce travail. Les quotas restent occupés ; aucun
 POST pour Bolt ou Mars n'est envoyé.
+
+## Validation du correctif sur le traitement ordinaire, 01:13–01:16 UTC
+
+La garde d'activité du compte s'est libérée naturellement. Lost est passé à
+`running` à 01:13:01 avec sa dixième tentative fournisseur, puis à `failed`
+à **01:14:10.455 UTC**, code **`LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE`**.
+C'est une nouvelle acquisition ordinaire ; le buffer ancien avait expiré avant
+le déploiement. Aucun opérateur n'a relancé Lost ni forcé un bail.
+
+Le relevé final de 01:16:39 confirme les cinq reçus historiques, leur empreinte
+et leur ordre, le curseur 5/6, le passage 0, la piste, le profil et la génération
+inchangés. Ces cinq reçus ont tous dépassé leur validité de deux heures et ne
+sont pas cinq preuves courantes. Aucun reçu supplémentaire, aucune langue
+validée et aucune quarantaine nouvelle. Le délai normal d'échec va jusqu'au
+**6 octobre 01:14:10.451 UTC**, soit vingt-quatre heures ; il n'annonce pas une
+relance automatique après cette date.
+
+La branche corrigée est donc désormais vérifiée sur un travail réel : la boucle
+de préparation s'arrête avec un motif précis et les preuves sont conservées.
+L'analyse reste incomplète. Ce constat ne répare pas le média et n'identifie
+toujours pas sa langue.
+
+La place libérée a permis l'admission ordinaire de Bolt à 01:15:04 après
+prélecture complète des gardes et vérification du marqueur exclusif inutilisé.
+Le travail est en file, passage 0, sans capture à 01:16:39. Ochi a terminé une
+première capture insuffisante à 01:16:18. Voir le
+[suivi de campagne](2026-10-05-language-campaign-heartbeat-0308.md).
