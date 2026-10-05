@@ -85,3 +85,19 @@ Limite résiduelle : sept segments fermés relus18:41:39 sans nouveau média fou
 Retour Films18:41:55 environ, audit18:42 : les trois sessions de ce rejeu sont expired. Aucune session de test laissée active. Reçus `breed-intent-final.safe.json`, `breed-intent-packets.safe.json`, `breed-intent-closeout.safe.json` et `fix-summary.safe.json`. Aucune écriture de langue, relance de campagne, nouvel échantillon fournisseur indépendant ni contournement des gardes.
 
 **Bilan : deux défauts client corrigés et déployés, reprises vérifiées. Préparation parfois longue et corruption vidéo résiduelle non résolues ; ne pas annoncer les trois fichiers entièrement réparés.**
+
+## 5 octobre — comparaison du même extrait et pré-décodage MKV borné
+
+Comparaisons hors réseau, à partir d'une acquisition bornée par copie sous claim direct ordinaire, heartbeat indépendant, drainage puis expiration avant décodage. Une lecture active sur un autre compte a été préservée. Aucun média diagnostique conservé.
+
+- **A Breed Apart** : 15 066 965 octets acquis en 45 s (limite atteinte), intervalle disponible 30,030–56,097708 s. Les 564 images sont identiques en lecture continue et après saut ; même trou de 2,627625 s. Ce contrôle ne couvre pas tout le film.
+- **Massacre** : 40 Mio, empreinte identique aux acquisitions précédentes. 473 occurrences d'images entre 31,156125 et 57,474083 s, dont sept horodatages dupliqués. Saut direct : 132 occurrences différentes de la lecture continue, concentrées jusqu'à 36,619917 s. Le premier compteur de 131 différences utilisait une table par horodatage et écrasait les doublons ; il est remplacé par la comparaison `(horodatage, occurrence)`.
+- Décodage commencé 15 s avant la cible : **473/473 occurrences identiques** à la lecture continue. Les trous préexistants restent présents, maximum 5,046709 s. Le résultat est une preuve logicielle sur cet intervalle, pas une certification de toutes les positions ou du décodeur matériel.
+
+Une première candidate serveur avec découpage de sortie a été rejetée avant intégration : elle supprimait un sous-titre chevauchant la reprise. Aucun Gateway ni runtime serveur n'a été modifié. La candidate retenue utilise le mécanisme client existant : pour un saut MKV, le flux commence au plus 15 s avant la cible et le lecteur effectue le saut local correspondant, avant l'admission de lecture. Les réserves restent inchangées. MP4 et format inconnu gardent leur comportement ; les appels avec pré-décodage explicite conservent leur valeur, notamment zéro pour le changement de piste audio. La reprise initiale reste hors périmètre de cette modification.
+
+Vérifications locales : **196 tests WatchPage réussis**. Canary synthétique sur l'image Gateway courante, UID1000, GPU réel, réseau `none`, stockage temporaire séparé : 240 images logicielles identiques à la lecture continue, sortie VAAPI de 24,958333 s, écart de début audio/vidéo 63 ms, sous-titre chevauchant la cible conservé (14,021–19,021 s pour une cible locale 15 s). Deux erreurs de parseur de temps WebVTT du script de preuve ont précédé sa correction (format MM:SS au lieu de HH:MM:SS), sans changement de produit. Conteneur et données synthétiques supprimés.
+
+Reçus locaux : `breed-matched-decode.safe.json`, `massacre-matched-decode.safe.json`, `massacre-preroll-decode.safe.json`, `client-preroll-canary.safe.json` sous `.codex-artifacts/three-vod-seek-20261005/`. Ces fichiers sont des preuves locales ; les marqueurs d'acquisition ont été consommés et ne doivent pas être rejoués.
+
+**État au commit candidat :** tests Android, publication et rejeu navigateur encore à effectuer. Le coût supplémentaire de préparation doit être mesuré ; aucun gain de délai n'est revendiqué. Les données manquantes restent non réparées et leur origine stockage fournisseur versus relais commun n'est pas départagée.
