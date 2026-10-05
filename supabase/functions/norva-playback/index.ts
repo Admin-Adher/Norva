@@ -2,6 +2,7 @@ import { resolveDiscoveryTarget } from "../_shared/discovery-sources.mjs";
 import { attachOwnedHumanPlaybackLanguages } from "../_shared/owned-human-language-confirmations.mjs";
 import { processAutomaticVodLanguageFile, processAutomaticVodLanguageBatch } from "../_shared/automatic-vod-language-fleet.mjs";
 import { runProviderAudioMetadataBatch } from "../_shared/provider-audio-metadata-batch.mjs";
+import { sourceAccountPregenActive } from "../_shared/source-account-pregen-guard.mjs";
 import { isDiscoverySourceId } from "../_shared/discovery-catalog.mjs";
 import { bindSharedSelectionFile } from "../_shared/selection-shared-catalog.mjs";
 import { resolveSelectionVodDelivery, shouldUseSelectionVodRelay } from "../_shared/selection-vod.mjs";
@@ -4013,7 +4014,45 @@ function scheduleLanguageValidationJob(
   if (existing) return false;
   let task: Promise<void>;
   task = Promise.resolve()
-    .then(() => processOneLanguageValidationTrack(db, jobId))
+    .then(async () => {
+      // Keep one isolate deadline across at most two sequential windows. Only
+      // a durable, incomplete window checkpoint can request a continuation;
+      // returning from the worker also waits for its provider cleanup finally.
+      const taskDeadlineAt = Date.now() + LANGUAGE_VALIDATION_TASK_BUDGET_MS;
+      const progress = await processOneLanguageValidationTrack(db, jobId, taskDeadlineAt);
+      if (progress !== "window-incomplete") return;
+      // With 240 s total left, the existing fetch-budget helper still retains
+      // its 30 s cleanup reserve and permits up to 210 s for the next fetch.
+      // Slow extraction/inference keeps the existing bounded defer behavior.
+      if (taskDeadlineAt - Date.now() < LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS) {
+        console.info("[norva-playback:language-continuation]", { event: "deferred", reason: "budget" });
+        return;
+      }
+      console.info("[norva-playback:language-continuation]", { event: "eligible" });
+      // Re-enter the ordinary global ordering before reclaiming this job. A
+      // newly due manual/finalization/featured job must retain its priority.
+      const { data: due, error: dueError } = await db.rpc(
+        "list_due_catalog_file_audio_validation_jobs", { p_limit: 1 },
+      );
+      if (dueError || !Array.isArray(due) || stringOr(recordOrEmpty(due[0]).job_id, "") !== jobId) {
+        console.info("[norva-playback:language-continuation]", { event: "deferred", reason: "selection" });
+        return;
+      }
+      if (taskDeadlineAt - Date.now() < LANGUAGE_VALIDATION_FETCH_TIMEOUT_MS) {
+        console.info("[norva-playback:language-continuation]", { event: "deferred", reason: "budget" });
+        return;
+      }
+      console.info("[norva-playback:language-continuation]", { event: "started" });
+      // This is a fresh ordinary claim: capacity, owner/profile, viewer,
+      // circuits and provider leases are all checked again by the worker.
+      const continuationStartedAt = Date.now();
+      const continued = await processOneLanguageValidationTrack(db, jobId, taskDeadlineAt);
+      console.info("[norva-playback:language-continuation]", {
+        event: continued === "window-incomplete" || continued === "window-complete" ? "completed" : "deferred",
+        reason: continued === "window-incomplete" || continued === "window-complete" ? "checkpoint" : "worker-stopped",
+        elapsedMs: Math.max(0, Date.now() - continuationStartedAt),
+      });
+    })
     .catch(() => {
       // The durable job lease is the recovery signal. Never log the exception:
       // provider failures can carry a URL, capability or upstream response text.
@@ -4466,13 +4505,16 @@ async function refreshLanguageBackgroundCapacity(db: SupabaseClient, lane: "anal
   } catch (_) { return false; }
 }
 
-async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: string) {
+async function processOneLanguageValidationTrack(
+  db: SupabaseClient,
+  jobId: string,
+  taskDeadlineAt = Date.now() + LANGUAGE_VALIDATION_TASK_BUDGET_MS,
+) {
   // Backpressure does not claim a job, consume an attempt or reset receipts.
   if (!await refreshLanguageBackgroundCapacity(db)) return;
   // edge-runtime v1.74 may retire a per-worker isolate halfway through its
   // configured lifetime. Bound the complete task, not only the fetch, so DB
   // checkpoint/finalization and provider cleanup retain a deterministic margin.
-  const taskDeadlineAt = Date.now() + LANGUAGE_VALIDATION_TASK_BUDGET_MS;
   const leaseOwner = `language-validation-job:${crypto.randomUUID()}`;
   const { data: claimed, error: claimError } = await db.rpc(
     "claim_catalog_file_audio_validation_job",
@@ -4586,8 +4628,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       }
       if (cached.payload.captured === true) {
         const release = await checkpointLanguageCapture(captureOptions, cached.payload);
-        await computeCapturedLanguageWindow(captureOptions, release);
-        return;
+        return await computeCapturedLanguageWindow(captureOptions, release);
       }
     }
     const providerAccountScope = "providerAccountScope" in resolved
@@ -4927,8 +4968,7 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
       providerAttemptToken = null;
       providerAccountLeaseClaimed = false;
       providerLeaseClaimed = false;
-      await computeCapturedLanguageWindow(captureOptions, release);
-      return;
+      return await computeCapturedLanguageWindow(captureOptions, release);
     }
     const receipt = strictLidWindowCheckpointFromGateway(
       payload,
@@ -4985,6 +5025,8 @@ async function processOneLanguageValidationTrack(db: SupabaseClient, jobId: stri
         taskDeadlineAt,
       });
     }
+    if (recordOrEmpty(checkpoint).complete === true) return "window-complete";
+    if (recordOrEmpty(checkpoint).complete === false) return "window-incomplete";
   } catch (error) {
     await settleProviderAttempt("no_progress");
     await failLanguageValidationJob(db, {
@@ -5116,6 +5158,8 @@ async function computeCapturedLanguageWindow(options: LanguageCaptureWindowOptio
       current: await revalidateLanguageValidationClaim(db, claim), targetUrl, trackIndex, taskDeadlineAt,
       windowState: { ...windowState, position: windowState.count, tokens: [...windowState.tokens, receipt] } });
   }
+  if (recordOrEmpty(checkpoint).complete === true) return "window-complete" as const;
+  if (recordOrEmpty(checkpoint).complete === false) return "window-incomplete" as const;
 }
 
 async function finalizeLanguageValidationTrackWindows(options: {
@@ -12428,7 +12472,7 @@ async function runAutomaticVodLanguageIntake(db: SupabaseClient, userId: string,
       return await runCodecProfileBackfill(new Request("http://internal/codec-profile-backfill", {
         method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ userId, variantIds: [variantId], allowSourceLocal: true }),
-      }), db);
+      }), db, sourceId);
     },
     enqueue: async (file: { profile: unknown }) => await enqueueAutomaticStrictLanguageValidation({
       db, userId, sourceId, identityKey, itemType: "movie", itemId, variantId, profile: file.profile,
@@ -12485,7 +12529,7 @@ async function runOwnedMovieLanguageMetadata(db: SupabaseClient, userId: string,
   const targetUrl = stringOrNull(target?.targetUrl);
   if (!targetUrl) return { stopped: "provider-target-unavailable", attempted: 0 };
   const accountHash = await providerAccountHashFromUrl(targetUrl);
-  const blocked = await codecProfileBackgroundBlockReason(db, userId, targetUrl);
+  const blocked = await codecProfileBackgroundBlockReason(db, userId, targetUrl, sourceId);
   if (blocked) return { stopped: blocked, attempted: 0 };
   const providerBlock = await ownedMetadataProviderBlockReason(db, accountHash, identityKey);
   if (providerBlock) return { stopped: providerBlock, attempted: 0 };
@@ -12497,7 +12541,7 @@ async function runOwnedMovieLanguageMetadata(db: SupabaseClient, userId: string,
     await assertActiveCatalogGenerationCurrent(db, sourceId, userId, snapshot);
     await requireAutomaticLanguageEnrichmentAccess(userId, db);
     if (await loadLanguageValidationIdentity(db, userId, sourceId, true) !== identityKey) return { stopped: "source-changed", attempted: 0 };
-    const race = await codecProfileBackgroundBlockReason(db, userId, targetUrl);
+    const race = await codecProfileBackgroundBlockReason(db, userId, targetUrl, sourceId);
     if (race) return { stopped: race, attempted: 0 };
     const providerRace = await ownedMetadataProviderBlockReason(db, accountHash, identityKey);
     if (providerRace) return { stopped: providerRace, attempted: 0 };
@@ -14801,11 +14845,13 @@ async function userHasLiveSession(db: SupabaseClient, userId: string): Promise<b
 //  (b) the gateway polls /pregen-gate before opening a job's provider connection and defers while
 //      a tick ran in the last ENRICH_TICK_DEFER_MS or a viewer is live — the reverse collision
 //      (job landing mid-tick), proven second-exact in the audit.
-// Both fail-open: coordination must never wedge enrichment or the gateway queue.
+// Legacy coordination remains fail-open. Automatic source-scoped audio/profile
+// maintenance instead requires the read-only account guard to explicitly allow it.
 const ENRICH_TICK_DEFER_MS = 150 * 1000;        // ticks run ≤ ~110 s (cron timeout) + margin
 const PREGEN_ACTIVE_TTL_MS = 2 * 3600 * 1000;   // matches the stale-processing reaper threshold
 
-async function accountPregenActive(db: SupabaseClient, userId: string): Promise<boolean> {
+async function accountPregenActive(db: SupabaseClient, userId: string, sourceId = ""): Promise<boolean> {
+  if (sourceId) return await sourceAccountPregenActive(db, userId, sourceId);
   if (!userId) return false;
   try {
     const sinceIso = new Date(Date.now() - PREGEN_ACTIVE_TTL_MS).toISOString();
@@ -17010,6 +17056,7 @@ async function assertProviderProbeCircuitClosedStrict(
 async function runCodecProfileBackfill(
   req: Request,
   db: SupabaseClient,
+  pregenSourceId = "",
 ): Promise<JsonRecord> {
   let diagnosticStage = "request-validation";
   let diagnosticProfileReason: string | null = null;
@@ -17043,7 +17090,7 @@ async function runCodecProfileBackfill(
   const variantIds = uniqueVariantIds.slice(0, 10);
 
   diagnosticStage = "initial-idle-gate";
-  const initialBlock = await codecProfileBackgroundBlockReason(db, userId);
+  const initialBlock = await codecProfileBackgroundBlockReason(db, userId, "", pregenSourceId);
   if (initialBlock) {
     return {
       protocol: 1,
@@ -17072,6 +17119,11 @@ async function runCodecProfileBackfill(
   const variants = (rawVariants ?? []).map((value) => value as JsonRecord);
   if (variants.length !== variantIds.length) {
     throw new HttpError(404, "One or more exact movie variants were not found");
+  }
+  // Only the automatic internal caller supplies this scope; the public body
+  // cannot narrow a multi-source maintenance request's existing owner gate.
+  if (pregenSourceId && variants.some((variant) => stringOr(variant.source_id, "") !== pregenSourceId)) {
+    throw new HttpError(409, "Automatic profile source changed");
   }
   const variantsById = new Map(
     variants.map((variant) => [stringOr(variant.id, "").toLowerCase(), variant]),
@@ -17136,7 +17188,7 @@ async function runCodecProfileBackfill(
     };
 
     diagnosticStage = "provider-idle-gate";
-    const beforeClaimBlock = await codecProfileBackgroundBlockReason(db, userId, targetUrl);
+    const beforeClaimBlock = await codecProfileBackgroundBlockReason(db, userId, targetUrl, pregenSourceId);
     if (beforeClaimBlock) {
       stopped = beforeClaimBlock;
       results.push({ variantId, status: "deferred", code: beforeClaimBlock });
@@ -17157,7 +17209,7 @@ async function runCodecProfileBackfill(
     let releaseLeaseOnExit = true;
     let providerTransportMayBeActive = false;
     try {
-      const raceBlock = await codecProfileBackgroundBlockReason(db, userId, targetUrl);
+      const raceBlock = await codecProfileBackgroundBlockReason(db, userId, targetUrl, pregenSourceId);
       if (raceBlock) {
         stopped = `${raceBlock}-race`;
         results.push({ variantId, status: "deferred", code: stopped });
@@ -17681,11 +17733,12 @@ async function codecProfileBackgroundBlockReason(
   db: SupabaseClient,
   userId: string,
   targetUrl = "",
+  pregenSourceId = "",
 ): Promise<string | null> {
   // Keep recent watch/events and subtitle-generation gates. A metadata probe
   // uses the existing crawler activity reader, not the generic reader which
   // also treats passive app presence and completed metadata work as playback.
-  const initial = await episodeBackgroundBlockReason(db, userId);
+  const initial = await episodeBackgroundBlockReason(db, userId, "", pregenSourceId);
   if (initial) return initial;
   try {
     const { data: sessions, error } = await db.from("cloud_playback_sessions")
@@ -17712,6 +17765,7 @@ async function episodeBackgroundBlockReason(
   db: SupabaseClient,
   userId: string,
   targetUrl = "",
+  pregenSourceId = "",
 ): Promise<string | null> {
   try {
     const sinceIso = new Date(
@@ -17733,12 +17787,17 @@ async function episodeBackgroundBlockReason(
     if (sessionsError) return "viewer-guard-unavailable";
     if (sessions?.length) return "live-session";
 
-    const pregenSince = new Date(Date.now() - PREGEN_ACTIVE_TTL_MS).toISOString();
-    const { data: pregen, error: pregenError } = await db.from("catalog_generated_subtitles")
-      .select("job_id").eq("claimed_by", userId).eq("status", "processing")
-      .gt("updated_at", pregenSince).limit(1);
-    if (pregenError) return "pregen-guard-unavailable";
-    if (pregen?.length) return "pregen-active";
+    if (pregenSourceId) {
+      if (await accountPregenActive(db, userId, pregenSourceId)) return "pregen-active";
+    } else {
+      // Existing episode/manual/benchmark behavior remains owner-scoped.
+      const pregenSince = new Date(Date.now() - PREGEN_ACTIVE_TTL_MS).toISOString();
+      const { data: pregen, error: pregenError } = await db.from("catalog_generated_subtitles")
+        .select("job_id").eq("claimed_by", userId).eq("status", "processing")
+        .gt("updated_at", pregenSince).limit(1);
+      if (pregenError) return "pregen-guard-unavailable";
+      if (pregen?.length) return "pregen-active";
+    }
 
     if (targetUrl) {
       const accountKey = providerAccountKeyFromUrl(targetUrl);

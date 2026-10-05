@@ -36,9 +36,9 @@ test('MKV codec backfill is sequential and fails closed around viewers, circuits
 
   assert.match(route, /for \(const variantId of variantIds\)/);
   assert.doesNotMatch(route, /Promise\.all|mapLimit|concurrency/);
-  assert.match(route, /codecProfileBackgroundBlockReason\(db, userId, targetUrl\)/);
+  assert.match(route, /codecProfileBackgroundBlockReason\(db, userId, targetUrl, pregenSourceId\)/);
   assert.match(route, /claimProviderFileProbeStrict\(db, identityKey, leaseOwner, 180\)/);
-  assert.match(route, /codecProfileBackgroundBlockReason\(db, userId, targetUrl\)[\s\S]*-race/);
+  assert.match(route, /codecProfileBackgroundBlockReason\(db, userId, targetUrl, pregenSourceId\)[\s\S]*-race/);
   assert.ok((route.match(/assertProviderCircuitClosed\(providerAccountHash, db\)/g) || []).length >= 2);
   assert.ok((route.match(/assertProviderProbeCircuitClosedStrict\(db, identityKey\)/g) || []).length >= 2);
   assert.match(route, /finally \{[\s\S]*releaseProviderFileProbe\(db, identityKey, leaseOwner\)/);
