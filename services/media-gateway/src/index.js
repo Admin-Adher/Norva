@@ -16668,7 +16668,22 @@ async function enrichRetainedFiniteVodProfile(session, signal = null) {
         if (format === 'mp4' && fileSizeBytesForSession(session)) {
             session.finiteMp4SeekBroker = true;
             const broker = await prepareFiniteMkvSeekBroker(session, signal);
-            local = await probeCodecProfileUncached(broker.inputUrl, session.userAgent, { signal, loopbackBroker: true });
+            try {
+                local = await probeCodecProfileUncached(broker.inputUrl, session.userAgent, { signal, loopbackBroker: true });
+            } catch (error) {
+                // A pre-graph failure never appears in /debug/sessions. Retain
+                // bounded transport counters before cleanup, without URLs,
+                // account/session identifiers, or FFprobe output.
+                console.warn('[media-gateway] finite MP4 profile preparation failed', JSON.stringify({
+                    providerFetches: broker.providerFetches,
+                    completedProviderFetches: broker.completedProviderFetches,
+                    interruptedProviderFetches: broker.interruptedProviderFetches,
+                    cacheHits: broker.cacheHits,
+                    cacheBytes: broker.cacheBytes,
+                    windowTrace: broker.windowTrace.slice(-12),
+                }));
+                throw error;
+            }
             if (broker.terminalError) throw broker.terminalError;
             local.fileSizeBytes = fileSizeBytesForSession(session);
             session.startupTimings.retainedVodFallback = 'shared-seekable-broker';
