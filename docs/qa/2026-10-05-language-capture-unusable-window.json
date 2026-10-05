@@ -1,0 +1,889 @@
+{
+  "schema": "norva-language-unusable-capture-deployment-v1",
+  "scope": "Typed classification of deterministically unusable capture; runtime proof and bounded read-only natural follow-up",
+  "revision": "30448e957f6d5c24cf8761e973148b53ea1855c5",
+  "pullRequest": 651,
+  "mergeSha": "f1f2699b01c9da6b327de6c8209c99a521b0b3ee",
+  "localValidation": {
+    "focused": {
+      "passed": 64,
+      "failed": 0,
+      "skipped": 0
+    },
+    "extended": {
+      "passed": 101,
+      "failed": 0,
+      "skipped": 1,
+      "skipReason": "Linux lock test unavailable on Windows"
+    },
+    "groupsOverlap": true
+  },
+  "ci": {
+    "observedCheckRuns": 5,
+    "allObservedSucceeded": true,
+    "checks": [
+      {
+        "name": "Build Windows Portable",
+        "conclusion": "success",
+        "completedAt": "2026-10-05T00:25:28Z",
+        "url": "https://github.com/Admin-Adher/Norva/actions/runs/37247082011/job/111567317386"
+      },
+      {
+        "name": "Build Android Phone APK",
+        "conclusion": "success",
+        "completedAt": "2026-10-05T00:22:45Z",
+        "url": "https://github.com/Admin-Adher/Norva/actions/runs/37247082011/job/111567317369"
+      },
+      {
+        "name": "Build Android TV APK",
+        "conclusion": "success",
+        "completedAt": "2026-10-05T00:22:48Z",
+        "url": "https://github.com/Admin-Adher/Norva/actions/runs/37247082011/job/111567317345"
+      },
+      {
+        "name": "Vercel Preview Comments",
+        "conclusion": "success",
+        "completedAt": "2026-10-05T00:19:51Z",
+        "url": "https://github.com/Admin-Adher/Norva/runs/111567015534"
+      },
+      {
+        "name": "Verify cloud contracts",
+        "conclusion": "success",
+        "completedAt": "2026-10-05T00:21:23Z",
+        "url": "https://github.com/Admin-Adher/Norva/actions/runs/37247082011/job/111566967018"
+      }
+    ]
+  },
+  "canaryFixtureIncidents": [
+    {
+      "order": 1,
+      "stage": "synthetic GPU encode",
+      "result": "failed",
+      "fixture": "64x64",
+      "minimumSupported": "128x128",
+      "correction": "Use 128x128 synthetic fixture",
+      "productCodeChanged": false,
+      "candidateImageChanged": false,
+      "productionApplied": false,
+      "exactTimestamp": null
+    },
+    {
+      "order": 2,
+      "stage": "candidate file permission assertion",
+      "result": "failed",
+      "incorrectExpectation": "All files 0644 including inherited package files",
+      "observedPackageMode": "0664",
+      "correction": "Require src files 0644; require inherited package modes equal baseline 0664",
+      "productCodeChanged": false,
+      "candidateImageChanged": false,
+      "productionApplied": false,
+      "exactTimestamp": null
+    }
+  ],
+  "gatewayCanary": {
+    "at": "2026-10-05T00:27:50.996176+00:00",
+    "image": "sha256:d378abf26bbbe0f2ec25af3eec7f75c24a9b4fc459109786d532892c9c5170dc",
+    "revision": "30448e957f6d5c24cf8761e973148b53ea1855c5",
+    "healthy": true,
+    "user": "1000:1000",
+    "network": "none",
+    "productionVolumes": false,
+    "sourceHashesMatch": true,
+    "health": {
+      "ok": true,
+      "videoEncoder": {
+        "protocol": 1,
+        "backend": "vaapi",
+        "hardware": true,
+        "ready": true,
+        "preflight": "vaapi-ready",
+        "deviceConfigured": true,
+        "decode": "vaapi-exact-profile-with-software-fallback",
+        "outputCodec": "h264"
+      },
+      "activeSessions": 0,
+      "rawPumpCount": 0
+    },
+    "providerRequests": 0,
+    "gpuEncodePassed": true,
+    "allSourceFiles0644": true,
+    "packagePermissionsPreserved": true,
+    "functional": {
+      "uid": 1000,
+      "syntheticPcmOnly": true,
+      "sourceDurationSeconds": 38.2173125,
+      "binaryMatchesPinnedBuild": true,
+      "modelMatchesPinnedBuild": true,
+      "binaryDigest": "0b12f515952eef67d7e4361d051e3311fdd4d13761168de80a4a2f03459215d3",
+      "modelDigest": "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
+      "providerRequests": 0,
+      "whisperRequests": 0,
+      "shortCapture": {
+        "outcome": "LID_CAPTURE_AUDIO_WINDOW_UNAVAILABLE",
+        "vadOutcome": "succeeded",
+        "sourceUnchanged": true,
+        "selectedFileCreated": false
+      },
+      "completeCapture": {
+        "ok": true,
+        "selector": "anchor-fallback",
+        "selectedDurationMilliseconds": 20000,
+        "sourceUnchanged": true,
+        "selectedFilePrivate": true
+      },
+      "vadCalls": 2,
+      "functionalPassed": true,
+      "syntheticFilesRemoved": true
+    },
+    "functionalCanarySha256": "2a556b619ee7ae9a50d1557aee971830e1054d05d131fb510f73751483c8332e"
+  },
+  "edgeCanary": {
+    "at": "2026-10-05T00:27:56.758672+00:00",
+    "revision": "30448e957f6d5c24cf8761e973148b53ea1855c5",
+    "playbackSha256": "c7f3b17f76661d5e52b263705e70bc74c2b509820e6a8d6c62328d7b278a39c9",
+    "healthy": true,
+    "edgeCanaryRequests": [
+      "norva-playback/health"
+    ],
+    "edgeCanaryStopped": true,
+    "networkIsolated": false,
+    "sourceHashesMatch": true,
+    "productionReplicasChanged": false,
+    "providerMediaRequests": 0
+  },
+  "allCanariesStopped": true,
+  "sourcePreservation": {
+    "gateway": {
+      "files": 84,
+      "changedFiles": [
+        "src/index.js",
+        "src/strict-lid-capture-pipeline.js",
+        "src/strict-lid-speech-sampler.js"
+      ],
+      "preservedFiles": 81,
+      "sourceTreeSha256": "97149bff41b205be58f1ede5f1d19317a7d677878acee7dd91159a064ad26cee"
+    },
+    "edge": {
+      "files": 193,
+      "changedFiles": [
+        "norva-playback/index.ts"
+      ],
+      "preservedFiles": 192,
+      "playbackSha256": "c7f3b17f76661d5e52b263705e70bc74c2b509820e6a8d6c62328d7b278a39c9",
+      "runtimeRoot": "/home/adrien/.norva/lid-unusable-capture-20261005/edge/runtime-functions"
+    }
+  },
+  "edgeDeployment": {
+    "revision": "30448e957f6d5c24cf8761e973148b53ea1855c5",
+    "startedAt": "2026-10-05T00:28:29.439718+00:00",
+    "leasesForced": false,
+    "changedFiles": 1,
+    "preservedFiles": 192,
+    "pausedAt": "2026-10-05T00:28:29.510120+00:00",
+    "replicas": [
+      {
+        "name": "norva-edge-functions",
+        "healthy": true,
+        "playbackSha256": "c7f3b17f76661d5e52b263705e70bc74c2b509820e6a8d6c62328d7b278a39c9"
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "healthy": true,
+        "playbackSha256": "c7f3b17f76661d5e52b263705e70bc74c2b509820e6a8d6c62328d7b278a39c9"
+      }
+    ],
+    "gatewaysUnchanged": true,
+    "completedAt": "2026-10-05T00:28:44.404776+00:00",
+    "restoredAt": "2026-10-05T00:28:44.731110+00:00",
+    "admissionsRestored": true,
+    "workerRestored": true,
+    "dispatcherPreserved": true,
+    "pauseSeconds": 15.22099
+  },
+  "gatewayDeployment": {
+    "revision": "30448e957f6d5c24cf8761e973148b53ea1855c5",
+    "image": "sha256:d378abf26bbbe0f2ec25af3eec7f75c24a9b4fc459109786d532892c9c5170dc",
+    "startedAt": "2026-10-05T00:29:07.071713+00:00",
+    "pausedAt": "2026-10-05T00:29:07.156659+00:00",
+    "gatewaysApplied": [
+      {
+        "name": "norva-media-gateway",
+        "at": "2026-10-05T00:29:21.266107+00:00"
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "at": "2026-10-05T00:29:23.931769+00:00"
+      }
+    ],
+    "edgesUnchanged": true,
+    "leasesForced": false,
+    "dispatcherRestarted": false,
+    "completedAt": "2026-10-05T00:29:24.009601+00:00",
+    "restoredAt": "2026-10-05T00:29:24.335951+00:00",
+    "admissionsRestored": true,
+    "workerStateRestored": true,
+    "dispatcherPreserved": true,
+    "pauseSeconds": 17.179292
+  },
+  "gatewayPostDeployment": {
+    "at": "2026-10-05T00:29:39.430189+00:00",
+    "revision": "30448e957f6d5c24cf8761e973148b53ea1855c5",
+    "image": "sha256:d378abf26bbbe0f2ec25af3eec7f75c24a9b4fc459109786d532892c9c5170dc",
+    "sourceTreeSha256": "97149bff41b205be58f1ede5f1d19317a7d677878acee7dd91159a064ad26cee",
+    "replicas": [
+      {
+        "name": "norva-media-gateway",
+        "startedAt": "2026-10-05T00:29:18.854308998Z",
+        "healthy": true,
+        "all84SourceHashesMatch": true
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "startedAt": "2026-10-05T00:29:22.563815847Z",
+        "healthy": true,
+        "all84SourceHashesMatch": true
+      }
+    ],
+    "admissions": {
+      "paused": false,
+      "cronActive": true
+    },
+    "stopAbsent": true,
+    "dispatcherRunning": true,
+    "workerRunning": true
+  },
+  "edgePostDeployment": {
+    "at": "2026-10-05T00:29:41.166365+00:00",
+    "revision": "30448e957f6d5c24cf8761e973148b53ea1855c5",
+    "replicas": [
+      {
+        "name": "norva-edge-functions",
+        "startedAt": "2026-10-05T00:28:36.286340173Z",
+        "healthy": true,
+        "playbackSha256": "c7f3b17f76661d5e52b263705e70bc74c2b509820e6a8d6c62328d7b278a39c9",
+        "all193SourceHashesMatch": true
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "startedAt": "2026-10-05T00:28:40.379378525Z",
+        "healthy": true,
+        "playbackSha256": "c7f3b17f76661d5e52b263705e70bc74c2b509820e6a8d6c62328d7b278a39c9",
+        "all193SourceHashesMatch": true
+      }
+    ],
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "healthy": true,
+        "image": "sha256:d378abf26bbbe0f2ec25af3eec7f75c24a9b4fc459109786d532892c9c5170dc"
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "healthy": true,
+        "image": "sha256:d378abf26bbbe0f2ec25af3eec7f75c24a9b4fc459109786d532892c9c5170dc"
+      }
+    ],
+    "admissions": {
+      "paused": false,
+      "cronActive": true
+    },
+    "stopAbsent": true,
+    "dispatcherRunning": true,
+    "workerRunning": true
+  },
+  "sqlMigrationApplied": false,
+  "operatorAdmissionsOfLanguageJobs": 0,
+  "manualLeaseReleases": 0,
+  "operatorCounterDelayOrQuarantineChanges": false,
+  "ordinaryTargetFollowup": {
+    "status": "observed_no_natural_typed_transition_yet",
+    "at": "2026-10-05T00:30:06.402036+00:00",
+    "baselineAt": "2026-10-05T00:23:49.549652+00:00",
+    "providerRequests": 0,
+    "newOperatorAdmissions": 0,
+    "items": [
+      {
+        "title": "Lost on a Mountain in Maine",
+        "identified": false,
+        "profileComplete": true,
+        "manualActive": 2,
+        "manualStarts24h": 12,
+        "providerActiveJobs": 4,
+        "ownerActiveSessions": 0,
+        "variantGenerationUnchanged": true,
+        "profileUnchanged": true,
+        "jobs": [
+          {
+            "created_at": "2026-10-04T13:27:49.852622+00:00",
+            "updated_at": "2026-10-04T13:43:46.330484+00:00",
+            "state": "expired",
+            "error_code": "LANGUAGE_VALIDATION_QUEUE_EXPIRED",
+            "retry_at": "2026-10-04T13:43:46.330484+00:00",
+            "purge_after": "2026-10-11T13:43:46.330484+00:00",
+            "sampling_pass": 0,
+            "strict_lid_window_position": 1,
+            "strict_lid_window_count": 6,
+            "provider_attempt_count": 1,
+            "attempt_count": 1,
+            "last_provider_progress_at": "2026-10-04T13:28:41.183804+00:00",
+            "verified_at": null,
+            "next_track_position": 0,
+            "quarantined_at": null,
+            "queue_expires_at": null,
+            "lease_expires_at": null,
+            "receiptCount": 1,
+            "receiptSequenceSHA256": "de154fafd2df488ca1aa65a13690e9d2e2a5d299370c99ddaa0cf40a0f74a3b7"
+          },
+          {
+            "created_at": "2026-10-04T21:53:43.849225+00:00",
+            "updated_at": "2026-10-05T00:22:00.751063+00:00",
+            "state": "retry_wait",
+            "error_code": "LANGUAGE_CAPTURE_INFERENCE_DEFERRED",
+            "retry_at": "2026-10-05T00:22:30.749+00:00",
+            "purge_after": "2026-10-11T21:53:43.849223+00:00",
+            "sampling_pass": 0,
+            "strict_lid_window_position": 5,
+            "strict_lid_window_count": 6,
+            "provider_attempt_count": 9,
+            "attempt_count": 87,
+            "last_provider_progress_at": "2026-10-04T22:27:38.011108+00:00",
+            "verified_at": null,
+            "next_track_position": 0,
+            "quarantined_at": null,
+            "queue_expires_at": null,
+            "lease_expires_at": null,
+            "receiptCount": 5,
+            "receiptSequenceSHA256": "e896672d59dd5ad06fd8e1b6b43bd1d3922d61beb381ca1be2f018f6a359dbcd"
+          }
+        ],
+        "baselineJobComparison": {
+          "receiptSequenceUnchanged": true,
+          "windowCursorUnchanged": true,
+          "samplingPassUnchanged": true,
+          "expectedAudioIndicesUnchanged": true,
+          "profileFingerprintUnchanged": true,
+          "priorProviderAttempts": 9,
+          "currentProviderAttempts": 9,
+          "targetTerminalCodeObserved": false,
+          "noVerifiedTimestamp": true,
+          "noQuarantine": true,
+          "retryDelaySecondsFromUpdate": 29.997937
+        }
+      },
+      {
+        "title": "The Legend of Ochi",
+        "identified": false,
+        "profileComplete": true,
+        "manualActive": 2,
+        "manualStarts24h": 12,
+        "providerActiveJobs": 4,
+        "ownerActiveSessions": 0,
+        "variantGenerationUnchanged": true,
+        "profileUnchanged": true,
+        "jobs": [
+          {
+            "created_at": "2026-10-04T15:58:37.681863+00:00",
+            "updated_at": "2026-10-04T18:57:40.118916+00:00",
+            "state": "expired",
+            "error_code": "LANGUAGE_VALIDATION_QUEUE_EXPIRED",
+            "retry_at": "2026-10-04T18:57:40.118916+00:00",
+            "purge_after": "2026-10-11T18:57:40.118916+00:00",
+            "sampling_pass": 0,
+            "strict_lid_window_position": 0,
+            "strict_lid_window_count": 6,
+            "provider_attempt_count": 1,
+            "attempt_count": 29,
+            "last_provider_progress_at": null,
+            "verified_at": null,
+            "next_track_position": 0,
+            "quarantined_at": null,
+            "queue_expires_at": null,
+            "lease_expires_at": null,
+            "receiptCount": 0,
+            "receiptSequenceSHA256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          {
+            "created_at": "2026-10-04T21:53:52.603305+00:00",
+            "updated_at": "2026-10-04T21:53:53.280892+00:00",
+            "state": "retry_wait",
+            "error_code": "PROVIDER_ACCOUNT_BUSY",
+            "retry_at": "2026-10-04T21:54:08.28+00:00",
+            "purge_after": "2026-10-11T21:53:52.603303+00:00",
+            "sampling_pass": 0,
+            "strict_lid_window_position": 0,
+            "strict_lid_window_count": 6,
+            "provider_attempt_count": 0,
+            "attempt_count": 1,
+            "last_provider_progress_at": null,
+            "verified_at": null,
+            "next_track_position": 0,
+            "quarantined_at": null,
+            "queue_expires_at": null,
+            "lease_expires_at": null,
+            "receiptCount": 0,
+            "receiptSequenceSHA256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        ]
+      },
+      {
+        "title": "Bolt from the Blue",
+        "identified": false,
+        "profileComplete": true,
+        "manualActive": 2,
+        "manualStarts24h": 12,
+        "providerActiveJobs": 4,
+        "ownerActiveSessions": 0,
+        "variantGenerationUnchanged": true,
+        "profileUnchanged": true,
+        "jobs": [
+          {
+            "created_at": "2026-10-04T13:43:46.341225+00:00",
+            "updated_at": "2026-10-04T14:04:24.642313+00:00",
+            "state": "failed",
+            "error_code": "PROFILE_CHANGED",
+            "retry_at": null,
+            "purge_after": "2026-10-11T14:04:24.642313+00:00",
+            "sampling_pass": 0,
+            "strict_lid_window_position": 0,
+            "strict_lid_window_count": 6,
+            "provider_attempt_count": 0,
+            "attempt_count": 1,
+            "last_provider_progress_at": null,
+            "verified_at": null,
+            "next_track_position": 0,
+            "quarantined_at": null,
+            "queue_expires_at": null,
+            "lease_expires_at": null,
+            "receiptCount": 0,
+            "receiptSequenceSHA256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        ]
+      },
+      {
+        "title": "I Want to Live on Mars",
+        "identified": false,
+        "profileComplete": false,
+        "manualActive": 2,
+        "manualStarts24h": 12,
+        "providerActiveJobs": 4,
+        "ownerActiveSessions": 0,
+        "variantGenerationUnchanged": true,
+        "profileUnchanged": true,
+        "jobs": []
+      }
+    ],
+    "receiptCountMeaning": "Stored receipt rows; current cryptographic/time validity is not asserted from these counts",
+    "oldSixthCaptureExpiry": "2026-10-05T00:24:13.593+00:00",
+    "oldSixthCaptureExpiryPrecedesDeployment": true,
+    "newLanguageClaimed": false,
+    "newCaptureClaimed": false,
+    "naturalTerminalTransitionClaimed": false
+  },
+  "limitations": [
+    "Synthetic canary does not identify an audio language",
+    "Unavailable incomplete capture must not be counted as complete inconclusive analysis",
+    "Capture expiry is not proof that deployed code processed it",
+    "Media file repair is not claimed"
+  ],
+  "sourceReceipts": {
+    "gateway-canary.safe.json": "49e0307fa7b1669a5fbb5e635c1d1deee450eb4bb39f1441099264c1cef26a53",
+    "edge-canary.safe.json": "068c3aeaaedf2987bcddb6ccd848c6aca6b87594a8dc3f0998885f34c5df5d70",
+    "gateway-deployment.safe.json": "ef81f3e9723331d68c863665bc0d850f7e9b6ab8b1d7cf256f12a24250d44adf",
+    "edge-deployment.safe.json": "8dfef8dd232cac069a72a0594a14ba3249ad87135a2177ad9a53bb3147293b01",
+    "gateway-post-deployment.safe.json": "74c99e7c3c87a72aee0ccbb5bb022605b82fae9bee629325a280d6422574e614",
+    "edge-post-deployment.safe.json": "8703bb1dfe35617d98a7eb85e62a16a3f33c0b2ced235d508f895b6b9497a0ea",
+    "pr651-checks-0028.json": "01e035b8b7a8a838eb2e3f9a1eee70c2188422d51db192071f702f3b627638dc",
+    "targets-postdeploy.safe.json": "67e6a633cc0dff6d2529af7a2b462dfdebf3c3c6dccca4261fe4dedc62825e13",
+    "postdeploy-capacity.safe.json": "e2650822be8d96a0209b36438ac59892ae72930584f3414e3586041173050c76",
+    "postdeploy-max-account-busy.safe.json": "5d85276316b4836776b865277d7e61a01efe988c54daf018dec0a3cef8dd953e",
+    "postdeploy-newlogs.safe.json": "cafacbcd0588b1e687f2e2107c4f2bbf1fa0570cd86b502c18d2e995923fcb69",
+    "postdeploy-max-storyboards.safe.json": "d76e27b4fe34fbe05ce4be0a746c407455e5d51f5234b1c642b890e0fe510c05",
+    "targets-lost-capture-records.safe.json": "3bb443e42dfc603c35e4e855dfdfda9b8a67d7d7c45582c7406902b2ed6bfcf6"
+  },
+  "postDeploymentCapacity": {
+    "at": "2026-10-05T00:30:49.747430+00:00",
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "httpStatus": 200,
+        "ok": true,
+        "time": "2026-10-05T00:30:49.772Z",
+        "activeSessions": 0,
+        "totalSessions": 0,
+        "viewerPlaybackActiveLocally": false,
+        "backgroundCpuProcessCount": 0,
+        "whisperInferenceActive": 0,
+        "backgroundWhisperInferenceActive": 0,
+        "activeStrictLidBrokers": 0,
+        "argosInferenceActive": 0,
+        "lidBenchmarkBusy": false,
+        "languageBackgroundCapacity": {
+          "protocol": 1,
+          "maxWorkers": 0,
+          "reason": "foreground-work",
+          "observedAt": "2026-10-05T00:30:49.772Z"
+        },
+        "languageMetadataCapacity": {
+          "protocol": 1,
+          "maxWorkers": 0,
+          "reason": "foreground-work",
+          "observedAt": "2026-10-05T00:30:49.772Z"
+        },
+        "languageForegroundWork": {
+          "protocol": 1,
+          "busy": true,
+          "activeOperations": 1,
+          "admissionChecks": 0,
+          "pendingPriorityJobs": 4,
+          "deferredBackgroundJobs": 0
+        },
+        "languageCaptureBuffer": {
+          "protocol": 1,
+          "ready": true,
+          "entries": 0,
+          "bytes": 0,
+          "reservations": 0,
+          "computations": 0,
+          "maxEntries": 16,
+          "maxBytes": 33554432,
+          "ttlMs": 1800000
+        },
+        "languageSelectionAdmission": {
+          "protocol": 1,
+          "configuredHosts": 0,
+          "limitedHosts": 0,
+          "coolingHosts": 0
+        },
+        "viewerSessionStartupAdmissions": 0,
+        "activeViewerSubtitleOperations": 0
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "httpStatus": 200,
+        "ok": true,
+        "time": "2026-10-05T00:30:49.788Z",
+        "activeSessions": 0,
+        "totalSessions": 0,
+        "viewerPlaybackActiveLocally": false,
+        "backgroundCpuProcessCount": 0,
+        "whisperInferenceActive": 0,
+        "backgroundWhisperInferenceActive": 0,
+        "activeStrictLidBrokers": 0,
+        "argosInferenceActive": 0,
+        "lidBenchmarkBusy": false,
+        "languageBackgroundCapacity": {
+          "protocol": 1,
+          "maxWorkers": 2,
+          "reason": "capacity-available",
+          "observedAt": "2026-10-05T00:30:49.787Z"
+        },
+        "languageMetadataCapacity": {
+          "protocol": 1,
+          "maxWorkers": 2,
+          "reason": "capacity-available",
+          "observedAt": "2026-10-05T00:30:49.787Z"
+        },
+        "languageForegroundWork": {
+          "protocol": 1,
+          "busy": false,
+          "activeOperations": 0,
+          "admissionChecks": 0,
+          "pendingPriorityJobs": 0,
+          "deferredBackgroundJobs": 0
+        },
+        "languageCaptureBuffer": {
+          "protocol": 1,
+          "ready": true,
+          "entries": 0,
+          "bytes": 0,
+          "reservations": 0,
+          "computations": 0,
+          "maxEntries": 16,
+          "maxBytes": 33554432,
+          "ttlMs": 1800000
+        },
+        "languageSelectionAdmission": {
+          "protocol": 1,
+          "configuredHosts": 0,
+          "limitedHosts": 0,
+          "coolingHosts": 0
+        },
+        "viewerSessionStartupAdmissions": 0,
+        "activeViewerSubtitleOperations": 0
+      }
+    ],
+    "cron": [
+      {
+        "active": true,
+        "status": "succeeded",
+        "jobname": "norva-dynamic-enrichment-fleet",
+        "end_time": "2026-10-05T00:30:00.455566+00:00",
+        "start_time": "2026-10-05T00:30:00.388861+00:00"
+      },
+      {
+        "active": true,
+        "status": "succeeded",
+        "jobname": "norva-playback-language-validation-worker",
+        "end_time": "2026-10-05T00:30:00.448138+00:00",
+        "start_time": "2026-10-05T00:30:00.371506+00:00"
+      }
+    ],
+    "flags": {
+      "enrichment_paused": false,
+      "language_metadata_lane_enabled": false,
+      "adaptive_language_admission_enabled": true
+    },
+    "dispatcherHealth": {
+      "at": 1791160244959,
+      "inFlight": 0,
+      "stopping": false,
+      "discoveryOk": true,
+      "sourceCount": 54,
+      "ownerCount": 47
+    }
+  },
+  "targetAccountGuard": {
+    "at": "2026-10-05T00:30:51.020329+00:00",
+    "activity": [
+      {
+        "kind": "gateway",
+        "lastSeenAt": "2026-10-05T00:30:43.21644+00:00",
+        "insideFiveMinutes": true,
+        "naturalFiveMinuteExpiry": "2026-10-05T00:35:43.21644+00:00"
+      }
+    ],
+    "activeOwnerSessions": 0,
+    "activeAccountSessions": 0,
+    "activeIdentityProbeLeases": 0,
+    "activeAccountLanguageLeases": 0,
+    "busyForForegroundValidation": true,
+    "activeAccountExactProbeLeases": 0
+  },
+  "newLogWindow": {
+    "at": "2026-10-05T00:31:12.002084+00:00",
+    "since": "2026-10-05T00:29:00Z",
+    "containers": [
+      {
+        "name": "norva-media-gateway",
+        "codes": {},
+        "matches": [],
+        "storyboardEvents": {
+          "checkpointed": 4
+        }
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "codes": {},
+        "matches": [],
+        "storyboardEvents": {}
+      },
+      {
+        "name": "norva-edge-functions",
+        "codes": {},
+        "matches": [],
+        "storyboardEvents": {}
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "codes": {},
+        "matches": [],
+        "storyboardEvents": {}
+      }
+    ]
+  },
+  "storyboardCorrelation": {
+    "at": "2026-10-05T00:31:34.956409+00:00",
+    "windowStart": "2026-10-05T00:29:00Z",
+    "checkpointCounts": [
+      {
+        "gateway": "norva-media-gateway",
+        "jobs": 4,
+        "anyTileIncreaseObserved": false
+      },
+      {
+        "gateway": "norva-resume-cache-pilot-20260916",
+        "jobs": 0,
+        "anyTileIncreaseObserved": false
+      }
+    ],
+    "lastCheckpointAt": "2026-10-05T00:30:43.059329076Z",
+    "doesNotProveContinuedTileGrowth": true
+  },
+  "finalReadOnlyTargetAudit": {
+    "at": "2026-10-05T00:35:52.044060+00:00",
+    "mode": "read-only-comparison",
+    "baselineAt": "2026-10-05T00:23:49.549652+00:00",
+    "providerRequests": 0,
+    "items": [
+      {
+        "title": "Lost on a Mountain in Maine",
+        "identified": false,
+        "profileComplete": true,
+        "manualActive": 2,
+        "manualStarts24h": 12,
+        "providerActiveJobs": 4,
+        "ownerActiveSessions": 0,
+        "variantGenerationUnchanged": true,
+        "profileUnchanged": true,
+        "jobs": [
+          {
+            "created_at": "2026-10-04T13:27:49.852622+00:00",
+            "updated_at": "2026-10-04T13:43:46.330484+00:00",
+            "state": "expired",
+            "error_code": "LANGUAGE_VALIDATION_QUEUE_EXPIRED",
+            "retry_at": "2026-10-04T13:43:46.330484+00:00",
+            "purge_after": "2026-10-11T13:43:46.330484+00:00",
+            "sampling_pass": 0,
+            "strict_lid_window_position": 1,
+            "strict_lid_window_count": 6,
+            "provider_attempt_count": 1,
+            "attempt_count": 1,
+            "last_provider_progress_at": "2026-10-04T13:28:41.183804+00:00",
+            "verified_at": null,
+            "next_track_position": 0,
+            "quarantined_at": null,
+            "queue_expires_at": null,
+            "lease_expires_at": null,
+            "receiptCount": 1,
+            "receiptSequenceSHA256": "de154fafd2df488ca1aa65a13690e9d2e2a5d299370c99ddaa0cf40a0f74a3b7"
+          },
+          {
+            "created_at": "2026-10-04T21:53:43.849225+00:00",
+            "updated_at": "2026-10-05T00:35:01.071336+00:00",
+            "state": "retry_wait",
+            "error_code": "PROVIDER_ACCOUNT_BUSY",
+            "retry_at": "2026-10-05T00:35:16.069+00:00",
+            "purge_after": "2026-10-11T21:53:43.849223+00:00",
+            "sampling_pass": 0,
+            "strict_lid_window_position": 5,
+            "strict_lid_window_count": 6,
+            "provider_attempt_count": 9,
+            "attempt_count": 89,
+            "last_provider_progress_at": "2026-10-04T22:27:38.011108+00:00",
+            "verified_at": null,
+            "next_track_position": 0,
+            "quarantined_at": null,
+            "queue_expires_at": null,
+            "lease_expires_at": null,
+            "receiptCount": 5,
+            "receiptSequenceSHA256": "e896672d59dd5ad06fd8e1b6b43bd1d3922d61beb381ca1be2f018f6a359dbcd"
+          }
+        ],
+        "baselineJobComparison": {
+          "receiptSequenceUnchanged": true,
+          "windowCursorUnchanged": true,
+          "samplingPassUnchanged": true,
+          "expectedAudioIndicesUnchanged": true,
+          "profileFingerprintUnchanged": true,
+          "priorProviderAttempts": 9,
+          "currentProviderAttempts": 9,
+          "targetTerminalCodeObserved": false,
+          "noVerifiedTimestamp": true,
+          "noQuarantine": true,
+          "retryDelaySecondsFromUpdate": 14.997664
+        }
+      },
+      {
+        "title": "The Legend of Ochi",
+        "identified": false,
+        "profileComplete": true,
+        "manualActive": 2,
+        "manualStarts24h": 12,
+        "providerActiveJobs": 4,
+        "ownerActiveSessions": 0,
+        "variantGenerationUnchanged": true,
+        "profileUnchanged": true,
+        "jobs": [
+          {
+            "created_at": "2026-10-04T15:58:37.681863+00:00",
+            "updated_at": "2026-10-04T18:57:40.118916+00:00",
+            "state": "expired",
+            "error_code": "LANGUAGE_VALIDATION_QUEUE_EXPIRED",
+            "retry_at": "2026-10-04T18:57:40.118916+00:00",
+            "purge_after": "2026-10-11T18:57:40.118916+00:00",
+            "sampling_pass": 0,
+            "strict_lid_window_position": 0,
+            "strict_lid_window_count": 6,
+            "provider_attempt_count": 1,
+            "attempt_count": 29,
+            "last_provider_progress_at": null,
+            "verified_at": null,
+            "next_track_position": 0,
+            "quarantined_at": null,
+            "queue_expires_at": null,
+            "lease_expires_at": null,
+            "receiptCount": 0,
+            "receiptSequenceSHA256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          {
+            "created_at": "2026-10-04T21:53:52.603305+00:00",
+            "updated_at": "2026-10-04T21:53:53.280892+00:00",
+            "state": "retry_wait",
+            "error_code": "PROVIDER_ACCOUNT_BUSY",
+            "retry_at": "2026-10-04T21:54:08.28+00:00",
+            "purge_after": "2026-10-11T21:53:52.603303+00:00",
+            "sampling_pass": 0,
+            "strict_lid_window_position": 0,
+            "strict_lid_window_count": 6,
+            "provider_attempt_count": 0,
+            "attempt_count": 1,
+            "last_provider_progress_at": null,
+            "verified_at": null,
+            "next_track_position": 0,
+            "quarantined_at": null,
+            "queue_expires_at": null,
+            "lease_expires_at": null,
+            "receiptCount": 0,
+            "receiptSequenceSHA256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        ]
+      },
+      {
+        "title": "Bolt from the Blue",
+        "identified": false,
+        "profileComplete": true,
+        "manualActive": 2,
+        "manualStarts24h": 12,
+        "providerActiveJobs": 4,
+        "ownerActiveSessions": 0,
+        "variantGenerationUnchanged": true,
+        "profileUnchanged": true,
+        "jobs": [
+          {
+            "created_at": "2026-10-04T13:43:46.341225+00:00",
+            "updated_at": "2026-10-04T14:04:24.642313+00:00",
+            "state": "failed",
+            "error_code": "PROFILE_CHANGED",
+            "retry_at": null,
+            "purge_after": "2026-10-11T14:04:24.642313+00:00",
+            "sampling_pass": 0,
+            "strict_lid_window_position": 0,
+            "strict_lid_window_count": 6,
+            "provider_attempt_count": 0,
+            "attempt_count": 1,
+            "last_provider_progress_at": null,
+            "verified_at": null,
+            "next_track_position": 0,
+            "quarantined_at": null,
+            "queue_expires_at": null,
+            "lease_expires_at": null,
+            "receiptCount": 0,
+            "receiptSequenceSHA256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        ]
+      },
+      {
+        "title": "I Want to Live on Mars",
+        "identified": false,
+        "profileComplete": false,
+        "manualActive": 2,
+        "manualStarts24h": 12,
+        "providerActiveJobs": 4,
+        "ownerActiveSessions": 0,
+        "variantGenerationUnchanged": true,
+        "profileUnchanged": true,
+        "jobs": []
+      }
+    ]
+  }
+}

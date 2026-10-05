@@ -59,6 +59,40 @@ profil exact, mais les quotas de deux travaux manuels et quatre travaux fourniss
 sont pleins. Mars reste sans profil. Aucun POST opérateur ni appel média fournisseur
 n'a été effectué pendant les audits.
 
+### Contrôle après le déploiement ciblé, 00:30–00:31 UTC
+
+La correction de classification décrite dans le diagnostic ciblé est déployée.
+À 00:30:06, elle n'a pas encore été exercée naturellement sur Lost : toujours
+cinq reçus, neuf tentatives fournisseur et dernier état `INFERENCE_DEFERRED`
+daté de 00:22. Les reçus, curseurs, profils et générations correspondent au
+snapshot pris avant déploiement ; aucune langue nouvelle n'est publiée.
+
+À 00:30:49, Lost est dû et sélectionné, mais la capacité du Gateway principal
+est zéro pour `foreground-work` : une opération active et quatre travaux
+prioritaires. Le secondaire déclare deux places ; cela n'autorise aucun
+changement de route. Aucun lecteur, broker strict ou calcul d'inférence à cet
+instant. Les deux crons sont actifs et leurs derniers passages ont réussi.
+
+La garde du compte MAX OTT est également occupée par un marqueur `gateway`
+rafraîchi à 00:30:43, avec grâce ordinaire jusqu'à 00:35:43 au minimum ; aucun
+lecteur ou bail de validation/sonde actif sur ce compte. Quatre storyboards
+de ce même compte ont chacun un checkpoint depuis 00:29. À 00:31:35, le
+principal indique `transcribeBusy=true` et quatre travaux en attente ; cette
+mesure n'identifie pas à elle seule chaque travail actif. Aucun motif pour
+forcer une garde ou augmenter la concurrence n'est établi.
+
+Les nouvelles fenêtres de logs depuis 00:29 ne contiennent encore ni le
+nouveau code de fenêtre inexploitable, ni `LID_CAPTURE_PREPARATION_FAILED`.
+Cette absence ne constitue pas une validation de la transition réelle ; le
+suivi attend la prochaine exécution ordinaire. Les anciens logs et incidents
+restent conservés. Reçus `postdeploy-*.safe.json`, aucune mutation de ces audits.
+
+Dernier contrôle à 00:35:49 UTC : le worker a repris Lost à 00:35:01 et l'a
+reporté pour `PROVIDER_ACCOUNT_BUSY`. Les cinq reçus et neuf tentatives
+fournisseur sont conservés ; aucun nouveau code de fenêtre constaté. Les
+quotas restent à deux travaux manuels et quatre du compte fournisseur.
+Aucun POST supplémentaire n'est envoyé.
+
 ## CI et publication Android
 
 L'ancien paquet Phone de PR 649 a finalement échoué pendant son **envoi d'artefact
