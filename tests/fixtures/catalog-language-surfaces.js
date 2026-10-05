@@ -132,7 +132,7 @@ window.CatalogLanguageQA = (() => {
                 const expected = MediaUtils.catalogLanguageInfo(items[index]);
                 if (badge.getAttribute('aria-label') !== expected.accessibleHeadline) throw Error('accessible language wrong');
                 if (expected.languageStatus && badge.outerHTML.includes(expected.languageStatus)) throw Error('internal provenance exposed');
-                if (index === 2 && (badge.querySelector('.language-badge-status') || !badge.textContent.includes(MediaUtils.languageDisplayFull('fr')))) throw Error('AR file must stay observed French');
+                if (items[index].stream_id === '2' && (badge.querySelector('.language-badge-status') || !badge.textContent.includes(MediaUtils.languageDisplayFull('fr')))) throw Error('AR file must stay observed French');
                 const box = badge.closest('.movie-poster,.series-poster,.card-image').getBoundingClientRect();
                 for (const text of badge.querySelectorAll('.language-badge-label,.language-badge-status')) {
                     const rect = text.getBoundingClientRect();
