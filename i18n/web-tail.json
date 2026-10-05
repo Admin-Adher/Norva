@@ -26833,5 +26833,22 @@
     "ar": "قد يظهر المشهد نفسه في وقت مختلف حسب الإصدار.",
     "id": "Adegan yang sama dapat berada pada waktu berbeda di setiap versi.",
     "fil": "Maaaring nasa ibang oras ang parehong eksena depende sa bersyon."
+  },
+  "ui_playback_version_invalid_media": {
+    "source": "The received data for this copy cannot be read. You can choose another version.",
+    "refs": [
+      "public/js/pages/WatchPage.js",
+      "public/js/utils/standalone.js"
+    ],
+    "en": "The received data for this copy cannot be read. You can choose another version.",
+    "fr": "Les données reçues pour cette copie sont illisibles. Vous pouvez choisir une autre version.",
+    "pt-BR": "Os dados recebidos desta cópia não podem ser lidos. Você pode escolher outra versão.",
+    "es": "Los datos recibidos de esta copia no se pueden leer. Puedes elegir otra versión.",
+    "hi": "इस कॉपी के लिए प्राप्त डेटा पढ़ा नहीं जा सकता। आप दूसरा संस्करण चुन सकते हैं।",
+    "tr": "Bu kopya için alınan veriler okunamıyor. Başka bir sürüm seçebilirsiniz.",
+    "bn": "এই কপির জন্য পাওয়া ডেটা পড়া যাচ্ছে না। আপনি অন্য সংস্করণ বেছে নিতে পারেন।",
+    "ar": "لا يمكن قراءة البيانات المستلمة لهذه النسخة. يمكنك اختيار نسخة أخرى.",
+    "id": "Data yang diterima untuk salinan ini tidak dapat dibaca. Anda dapat memilih versi lain.",
+    "fil": "Hindi mabasa ang natanggap na data para sa kopyang ito. Maaari kang pumili ng ibang bersyon."
   }
 }

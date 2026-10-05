@@ -4283,6 +4283,7 @@ class WatchPage {
     }
 
     isTerminalPlaybackError(message) {
+        if (/\bINVALID_MKV_INPUT\b/i.test(message || '')) return true;
         return /UPSTREAM_(UNAUTHORIZED|RATE_LIMIT|FORBIDDEN|NOT_FOUND|REFUSED|UNAVAILABLE|RANGE_REJECTED)|PROVIDER_FILE_REFUSED|PROVIDER_(ACCOUNT_)?BUSY|PLAYBACK_SUPERSEDED|401|403|404|416|429|458|5\d\d|Unauthorized|Forbidden|Too Many Requests|Many Requests|rate limit|provider refused|Service Unavailable|server error|Requested Range Not Satisfiable|4XX Client Error|Error opening input|Invalid data/i.test(message || '');
     }
 
@@ -4391,6 +4392,9 @@ class WatchPage {
             // This response identifies the selected file's refusal. It proves
             // neither a general cloud block nor that another device can play it.
             return (globalThis.NorvaI18n?.t("ui_web_542c160150e3", { defaultValue: "The provider is temporarily unavailable for this stream. Try another version or retry in a moment." }) ?? 'The provider is temporarily unavailable for this stream. Try another version or retry in a moment.');
+        }
+        if (/\bINVALID_MKV_INPUT\b/i.test(text)) {
+            return (globalThis.NorvaI18n?.t('ui_playback_version_invalid_media', { defaultValue: 'The received data for this copy cannot be read. You can choose another version.' }) ?? 'The received data for this copy cannot be read. You can choose another version.');
         }
         if (/MEDIA_CACHE_(PRODUCER_ACTIVE|BACKGROUND_DRAINING)/i.test(text)) {
             return (globalThis.NorvaI18n?.t("ui_web_800cec00079f", { defaultValue: "This film is still being prepared. Please retry in a moment." }) ?? 'This film is still being prepared. Please retry in a moment.');
@@ -8322,9 +8326,10 @@ class WatchPage {
         // failed route does not prove that another device or network will work.
         const playbackSuperseded = this.isPlaybackSupersededError(safeMessage);
         const providerBusy = !playbackSuperseded && this.isProviderBusyError(safeMessage);
-        const providerFileRefused = /\bPROVIDER_FILE_REFUSED\b/i.test(safeMessage);
+        const invalidMedia = /\bINVALID_MKV_INPUT\b/i.test(safeMessage);
+        const providerFileRefused = /\bPROVIDER_FILE_REFUSED\b/i.test(safeMessage) || invalidMedia;
         if (providerFileRefused && this.content?.type === 'movie') {
-            this.showRefusedVersionRecovery(errorEl, videoSection);
+            this.showRefusedVersionRecovery(errorEl, videoSection, { invalidMedia });
             return;
         }
         const providerBlocked = !providerBusy && this.isConnectionLimitError(safeMessage);
@@ -8387,13 +8392,17 @@ class WatchPage {
         });
     }
 
-    showRefusedVersionRecovery(errorEl, videoSection) {
+    showRefusedVersionRecovery(errorEl, videoSection, { invalidMedia = false } = {}) {
         this.clearPlaybackErrorRefreshTimer();
-        window.NorvaPlaybackRefusals?.markRefused(this.content, this.app, this._fileRefusalScope);
+        // Invalid bytes do not prove an access refusal. Keep that advisory separate.
+        if (!invalidMedia) window.NorvaPlaybackRefusals?.markRefused(this.content, this.app, this._fileRefusalScope);
         const t = (key, defaultValue) => globalThis.NorvaI18n?.t(key, { defaultValue }) ?? defaultValue;
+        const message = invalidMedia
+            ? t('ui_playback_version_invalid_media', 'The received data for this copy cannot be read. You can choose another version.')
+            : t('ui_playback_version_unavailable_message', 'Access to this copy was refused.');
         errorEl.innerHTML = `<div class="watch-error-box watch-error-file-refused">
             <p class="watch-error-title">${this.escapeHtml(t('ui_playback_version_unavailable_title', 'This version is unavailable'))}</p>
-            <p class="watch-error-msg">${this.escapeHtml(t('ui_playback_version_unavailable_message', 'Access to this copy was refused.'))}</p>
+            <p class="watch-error-msg">${this.escapeHtml(message)}</p>
             <p class="watch-error-refresh" id="watch-error-version-status" role="status" aria-live="polite"></p>
             <div class="watch-error-actions">
                 <button type="button" class="watch-error-refresh-btn" id="watch-error-versions-btn">${this.escapeHtml(t('ui_playback_version_other_versions', 'Other versions'))}</button>

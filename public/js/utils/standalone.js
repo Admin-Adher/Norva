@@ -758,12 +758,12 @@
             try { nativePlaybackStartFailure?.dismiss?.(); } catch (_) { /* best-effort */ }
             nativePlaybackStartFailure = null;
         };
-        const showNativeFileRefusal = (owner, content, position, scope, isCurrent, retry) => {
+        const showNativeFileRefusal = (owner, content, position, scope, isCurrent, retry, invalidMedia = false) => {
             const app = window.app;
             if (typeof window.NorvaModal?.installHygiene !== 'function'
                 || typeof app?.pages?.movies?.openPlaybackRecovery !== 'function') return false;
             const t = (key, fallback) => globalThis.NorvaI18n?.t(key, { defaultValue: fallback }) ?? fallback;
-            window.NorvaPlaybackRefusals?.markRefused(content, app, scope);
+            if (!invalidMedia) window.NorvaPlaybackRefusals?.markRefused(content, app, scope);
             const overlay = document.createElement('div');
             overlay.className = 'norva-modal-overlay active';
             overlay.setAttribute('role', 'dialog');
@@ -775,7 +775,9 @@
             const title = document.createElement('div'); title.className = 'norva-modal-title';
             title.textContent = t('ui_playback_version_unavailable_title', 'This version is unavailable'); card.appendChild(title);
             const message = document.createElement('p'); message.className = 'norva-modal-message';
-            message.textContent = t('ui_playback_version_unavailable_message', 'Access to this copy was refused.'); card.appendChild(message);
+            message.textContent = invalidMedia
+                ? t('ui_playback_version_invalid_media', 'The received data for this copy cannot be read. You can choose another version.')
+                : t('ui_playback_version_unavailable_message', 'Access to this copy was refused.'); card.appendChild(message);
             const status = document.createElement('p'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite'); card.appendChild(status);
             const actions = document.createElement('div'); actions.className = 'watch-error-actions'; card.appendChild(actions);
             let busy = false, dismissed = false;
@@ -1634,9 +1636,9 @@
                         ? { ...content, resumeTime: effectiveResume, explicitRecoveryResume: true }
                         : content;
                     const errorText = typeof this.getErrorText === 'function' ? this.getErrorText(error) : String(error?.code || '');
-                    if (content?.type === 'movie' && /\bPROVIDER_FILE_REFUSED\b/i.test(errorText)
+                    if (content?.type === 'movie' && /\b(?:PROVIDER_FILE_REFUSED|INVALID_MKV_INPUT)\b/i.test(errorText)
                         && showNativeFileRefusal(this, content, effectiveResume, launchRefusalScope,
-                            isCurrentLaunch, () => this.play(retryContent, streamUrl, playback))) return;
+                            isCurrentLaunch, () => this.play(retryContent, streamUrl, playback), /\bINVALID_MKV_INPUT\b/i.test(errorText))) return;
                     nativePlaybackStartFailure = window.app?.showToast?.(
                         globalThis.NorvaI18n?.t('ui_web_05958c958fa0', {
                             defaultValue: 'This title could not be started. Please try again.'

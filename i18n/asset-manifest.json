@@ -18,7 +18,7 @@
   "public/js/components/TitleRatingControl.js": "2f1e6f4c44",
   "public/js/components/VideoPlayer.js": "9bc694e837",
   "public/js/consent-banner.js": "d4e720e971",
-  "public/js/i18n.js": "bc3a35b637",
+  "public/js/i18n.js": "967117f53a",
   "public/js/landing.js": "2970322ec7",
   "public/js/login.js": "d546bb24a3",
   "public/js/maintenance-banner.js": "07cae3b33f",
@@ -31,7 +31,7 @@
   "public/js/pages/PartnersPage.js": "2e4adbbee5",
   "public/js/pages/SeriesPage.js": "6c04a0e7fa",
   "public/js/pages/Settings.js": "995a273060",
-  "public/js/pages/WatchPage.js": "48dcb2b48d",
+  "public/js/pages/WatchPage.js": "ed3f44bf90",
   "public/js/plan-selection-ui.js": "d9a5e6f499",
   "public/js/profiles.js": "a086ae985e",
   "public/js/promo-ui.js": "16352011b4",
@@ -41,6 +41,6 @@
   "public/js/utils/mediaUtils.js": "ae8caf6605",
   "public/js/utils/regions.js": "68b00bc227",
   "public/js/utils/sourceHealth.js": "c9d3adcf56",
-  "public/js/utils/standalone.js": "153ccc9273",
+  "public/js/utils/standalone.js": "acd6de4485",
   "public/js/utils/tvNavigation.js": "63bd53a493"
 }

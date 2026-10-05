@@ -71,14 +71,15 @@ test('legacy authorization refusal no longer claims cloud blocking or promises a
     }
 });
 
-test('real Edge envelope and cloud client preserve file refusal through to the visible manual-retry error', async()=>{
+for (const failureCode of ['PROVIDER_FILE_REFUSED', 'INVALID_MKV_INPUT']) {
+test(`real Edge envelope and cloud client preserve ${failureCode} through to manual recovery`, async()=>{
     const {publicEdgeErrorPayload,bindCatalogVisibilityEpoch,finalizeCatalogVisibilityResponse}=await import('../supabase/functions/_shared/catalog-visibility-response.mjs');
-    const gatewayBody={code:'PROVIDER_FILE_REFUSED',error:'This media file is currently unavailable.',
+    const gatewayBody={code:failureCode,error:'This media file is currently unavailable.',
         upstreamStatus:403,url:'https://private.invalid/movie/SECRET/SECRET/file.mkv',diagnostic:'PRIVATE_DIAGNOSTIC'};
     // This is the same wrapping used by createGatewaySession before the handler catch.
     const wrapped=Object.assign(new Error('Media gateway refused the session'),{details:gatewayBody});
     let envelope=publicEdgeErrorPayload(wrapped,502,{unavailableMessage:'Norva Playback is temporarily unavailable'});
-    assert.deepEqual(envelope,{error:'Norva Playback is temporarily unavailable',details:{code:'PROVIDER_FILE_REFUSED'}});
+    assert.deepEqual(envelope,{error:'Norva Playback is temporarily unavailable',details:{code:failureCode}});
     // Authenticated dispatch sanitizes the error a second time after the catch.
     // Exercise that real boundary, with the exact epoch recheck still enforced.
     let epochReads=0;
@@ -91,7 +92,7 @@ test('real Edge envelope and cloud client preserve file refusal through to the v
     assert.equal(finalized.headers.get('cache-control'),'no-store');
     assert.equal(finalized.headers.get('x-norva-visibility-epoch'),'v2.1.4');
     envelope=await finalized.json();
-    assert.deepEqual(envelope,{error:'Service temporarily unavailable',details:{code:'PROVIDER_FILE_REFUSED'}});
+    assert.deepEqual(envelope,{error:'Service temporarily unavailable',details:{code:failureCode}});
     const values=new Map([['norva-cloud-token','test-owner-token']]);
     const window={location:{origin:'https://norva.tv',search:''},NORVA_PLAYBACK_URL:'https://playback.test/functions/v1/norva-playback'};
     const requests=[];
@@ -105,7 +106,7 @@ test('real Edge envelope and cloud client preserve file refusal through to the v
     let error;
     try {await window.NorvaCloud.playback.createSession({sourceId:'owned-source',itemType:'movie',itemId:'selected-file',mode:'transcode'});}
     catch(value){error=value;}
-    assert.ok(error);assert.equal(error.status,502);assert.equal(error.payload.details.code,'PROVIDER_FILE_REFUSED');
+    assert.ok(error);assert.equal(error.status,502);assert.equal(error.payload.details.code,failureCode);
     assert.equal(requests.length,1,'the failed selected file creates no fallback or hidden retry');
     assert.equal(requests[0].body.itemId,'selected-file');
     const {page,errorEl,calls}=fixture('fr');
@@ -115,10 +116,30 @@ test('real Edge envelope and cloud client preserve file refusal through to the v
     assert.equal(calls.scheduled,0);assert.equal(calls.switched,0);assert.equal(calls.retried,0);
 });
 
+}
+
 test('public envelope still rejects neighbouring unapproved codes and provider details', async()=>{
     const {publicEdgeErrorPayload}=await import('../supabase/functions/_shared/catalog-visibility-response.mjs');
-    for(const code of ['PROVIDER_FILE_REFUSED_PRIVATE','PRIVATE_PROVIDER_CODE']){
+    for(const code of ['PROVIDER_FILE_REFUSED_PRIVATE','INVALID_MKV_INPUT_PRIVATE','PRIVATE_PROVIDER_CODE']){
         const payload=publicEdgeErrorPayload(Object.assign(new Error('private'),{details:{code,upstreamStatus:403,password:'secret'}}),502);
         assert.deepEqual(payload,{error:'Service temporarily unavailable'});
     }
 });
+
+ test('invalid media is localized, terminal and never silently retried or labelled access refusal', () => {
+    for (const {code} of require('../i18n/locales.json')) {
+        const {page,calls,errorEl,clickRetry}=fixture(code);
+        const error={status:502,payload:{details:{code:'INVALID_MKV_INPUT'}}};
+        const text=page.getErrorText(error);
+        assert.equal(page.isTerminalPlaybackError('INVALID_MKV_INPUT'),true);
+        assert.equal(page.playbackCoordinationRetryDelayMs(error,0,0),null);
+        const selected=JSON.stringify(page.content);
+        page.showPlaybackError(text,{immediate:true});
+        assert.ok(errorEl.innerHTML.includes(translations.ui_playback_version_invalid_media[code]));
+        assert.ok(errorEl.innerHTML.includes('watch-error-versions-btn'));
+        assert.ok(errorEl.innerHTML.includes('watch-error-back-btn'));
+        assert.doesNotMatch(errorEl.innerHTML,/INVALID_MKV_INPUT|502|Access to this copy was refused/);
+        assert.equal(calls.scheduled,0);assert.equal(calls.switched,0);assert.equal(calls.retried,0);
+        clickRetry();assert.equal(calls.retried,1);assert.equal(JSON.stringify(page.content),selected);
+    }
+ });
