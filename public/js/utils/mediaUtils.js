@@ -1135,6 +1135,37 @@ const MediaUtils = (() => {
         return (scores.length ? Math.max(...scores) : 0) + scoreGenrePreferences(item, normalizedPrefs);
     }
 
+    // Presentation ranking only: never changes a selected version or its evidence.
+    // Calculate once per item when sorting large loaded catalogues.
+    function presentationCompleteness(item = {}) {
+        const data = item.data || {};
+        const metadata = item.metadata || data.metadata || {};
+        const poster = [item.poster_url, item.posterUrl, item.stream_icon, item.cover,
+            data.poster, data.posterUrl, data.poster_url, data.cover].some(value =>
+            typeof value === 'string' && /^(?:https?:\/\/|\/)/i.test(value.trim())
+            && !/placeholder|no[-_]?poster|no[-_]?image/i.test(value));
+        const synopsis = [item.overview, item.description, item.plot, data.overview,
+            data.description, data.plot, metadata.overview, metadata.plot].some(value =>
+            typeof value === 'string' && value.replace(/<[^>]*>/g, '').trim().length > 0
+            && !/^(?:n\/?a|unknown|null|undefined|no (?:overview|description|synopsis)(?: available)?)[.!]?$/i.test(value.trim()));
+        const knownAudio = record => {
+            if (humanAudioLanguages(record).length || providerAudioLanguages(record).length) return true;
+            if (!hasDisplayableAudioLanguage(record)) return false;
+            const languages = record.audioLanguages || record.audio_languages;
+            return versionTrackLanguages(versionTrackState(record, 'audio').tracks).length > 0
+                || (Array.isArray(languages) && versionTrackLanguages(languages.map(lang => ({ lang }))).length > 0);
+        };
+        const record = { ...data, ...item };
+        const audio = knownAudio(record) || knownAudio(item.defaultVariant || item.default_variant || {});
+        return Number(poster) + Number(synopsis) + Number(audio);
+    }
+
+    function rankByPresentation(items = [], tieBreak = () => 0) {
+        return items.map((item, index) => ({ item, index, score: presentationCompleteness(item) }))
+            .sort((a, b) => b.score - a.score || tieBreak(a.item, b.item) || a.index - b.index)
+            .map(entry => entry.item);
+    }
+
     // Server-confirmed listening reports remain a separate, exact-file display
     // source. They never become a provider declaration, ffprobe tag or LID result.
     function humanAudioLanguages(item = {}) {
@@ -2664,6 +2695,7 @@ const MediaUtils = (() => {
         resolveContentLanguage, languageDisplayFull, languageFacetName, languageFacetLabel, sortLanguageFacets,
         normalizeGenrePreference, normalizeGenrePreferences, scoreGenrePreferences,
         analyzeLanguageCompatibility, scoreVersionLanguage, scoreTitleForPreferences,
+        presentationCompleteness, rankByPresentation,
         audioLanguageValidationStatus,
         providerAudioLanguages, providerAudioStatusLabel, providerAudioBadge,
         humanAudioLanguages, humanAudioMetadata,

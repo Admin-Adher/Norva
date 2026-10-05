@@ -180,7 +180,8 @@
         if (!container) return;
         options = options || {};
         const onItemClick = options.onItemClick || function () {};
-        const usable = (rails || []).filter((r) => Array.isArray(r.items) && r.items.length);
+        const usable = (rails || []).filter((r) => Array.isArray(r.items) && r.items.length)
+            .map(rail => ({ ...rail, items: window.MediaUtils?.rankByPresentation?.(rail.items) || rail.items }));
         if (!usable.length) {
             // No rails to host → let the container go back to its centered grid
             // layout so the empty state sits in the middle, not stuck left.
@@ -222,6 +223,7 @@
         if (!gridEl) return;
         options = options || {};
         const onItemClick = options.onItemClick || function () {};
+        if (options.prioritizePresentation) items = window.MediaUtils?.rankByPresentation?.(items) || items;
         const start = Number(options.startIndex) || 0;
         const holder = document.createElement('div');
         holder.innerHTML = (items || []).map((it, i) => cardHtml(it, 0, start + i)).join('');

@@ -713,7 +713,8 @@ class SeriesPage {
                 }
             } else {
                 window.GenreRails.appendCards(this.bucketGridEl, fresh, {
-                    startIndex: this.bucketOffset,
+                    prioritizePresentation: (!this.sortSelect?.value || this.sortSelect.value === 'default') && !this.searchInput?.value?.trim(),
+                startIndex: this.bucketOffset,
                     onItemClick: (item) => this.openRailItem(item)
                 });
             }
@@ -804,7 +805,7 @@ class SeriesPage {
         if (!T || !window.GenreRails || !Array.isArray(this.seriesList) || !this.seriesList.length) return false;
 
         const byBucket = new Map();
-        for (const s of this.seriesList) {
+        for (const s of MediaUtils.rankByPresentation(this.seriesList)) {
             const genres = (s.tmdb && s.tmdb.genres) || [];
             for (const b of T.classifyTitle(s.category_name || s.category_id, genres)) {
                 if (b === 'autres') continue;
@@ -1573,7 +1574,7 @@ class SeriesPage {
         if (!this.genreSelect) return;
         const genres = new Set();
         let hasStatus = false;
-        for (const s of this.seriesList) {
+        for (const s of MediaUtils.rankByPresentation(this.seriesList)) {
             if (s.tmdb?.genres) s.tmdb.genres.forEach(g => genres.add(g));
             if (s.tmdb?.status) hasStatus = true;
         }
@@ -1894,7 +1895,9 @@ class SeriesPage {
         const sort = this.sortSelect?.value || 'default';
         const rep = c => c.representative;
         const pref = (a, b) => (b.preferenceScore || 0) - (a.preferenceScore || 0);
-        const sortWithPreference = (compare) => cards.sort((a, b) => compare(a, b) || pref(a, b));
+        const completeness = new Map(cards.map(card => [card, MediaUtils.presentationCompleteness?.(rep(card)) || 0]));
+        const presentation = (a, b) => completeness.get(b) - completeness.get(a) || pref(a, b);
+        const sortWithPreference = (compare) => cards.sort((a, b) => compare(a, b) || presentation(a, b));
         switch (sort) {
             case 'added':
                 sortWithPreference((a, b) => this.parseAddedMs(rep(b)) - this.parseAddedMs(rep(a)));
@@ -1912,7 +1915,7 @@ class SeriesPage {
                 sortWithPreference((a, b) => (rep(a).name || '').localeCompare(rep(b).name || ''));
                 break;
             default:
-                cards.sort(pref);
+                cards.sort(this.searchInput?.value?.trim() ? pref : presentation);
                 break;
         }
     }

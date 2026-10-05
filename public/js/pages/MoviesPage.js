@@ -689,6 +689,7 @@ class MoviesPage {
                 return true;
             });
             window.GenreRails.appendCards(this.bucketGridEl, fresh, {
+                prioritizePresentation: (!this.sortSelect?.value || this.sortSelect.value === 'default') && !this.searchInput?.value?.trim(),
                 startIndex: this.bucketOffset,
                 onItemClick: (item) => this.openRailItem(item)
             });
@@ -772,7 +773,7 @@ class MoviesPage {
         if (!T || !window.GenreRails || !Array.isArray(this.movies) || !this.movies.length) return false;
 
         const byBucket = new Map();
-        for (const m of this.movies) {
+        for (const m of MediaUtils.rankByPresentation(this.movies)) {
             const genres = (m.tmdb && m.tmdb.genres) || [];
             for (const b of T.classifyTitle(m.category_name || m.category_id, genres)) {
                 if (b === 'autres') continue;
@@ -1572,7 +1573,7 @@ class MoviesPage {
         if (!this.genreSelect) return;
         const genres = new Set();
         let hasRuntime = false;
-        for (const m of this.movies) {
+        for (const m of MediaUtils.rankByPresentation(this.movies)) {
             if (m.tmdb?.genres) m.tmdb.genres.forEach(g => genres.add(g));
             if (m.tmdb?.runtime) hasRuntime = true;
         }
@@ -1911,7 +1912,9 @@ class MoviesPage {
         const sort = this.sortSelect?.value || 'default';
         const rep = c => c.representative;
         const pref = (a, b) => (b.preferenceScore || 0) - (a.preferenceScore || 0);
-        const sortWithPreference = (compare) => cards.sort((a, b) => compare(a, b) || pref(a, b));
+        const completeness = new Map(cards.map(card => [card, MediaUtils.presentationCompleteness?.(rep(card)) || 0]));
+        const presentation = (a, b) => completeness.get(b) - completeness.get(a) || pref(a, b);
+        const sortWithPreference = (compare) => cards.sort((a, b) => compare(a, b) || presentation(a, b));
         switch (sort) {
             case 'added':
                 sortWithPreference((a, b) => this.parseAddedMs(rep(b)) - this.parseAddedMs(rep(a)));
@@ -1929,7 +1932,7 @@ class MoviesPage {
                 sortWithPreference((a, b) => (rep(a).name || '').localeCompare(rep(b).name || ''));
                 break;
             default:
-                cards.sort(pref); // language preference first, stable provider order for ties
+                cards.sort(this.searchInput?.value?.trim() ? pref : presentation); // complete cards first; stable preference/provider order within each tier
                 break;
         }
     }

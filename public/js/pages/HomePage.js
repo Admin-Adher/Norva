@@ -2222,17 +2222,19 @@ class HomePage {
             if (/recently-added/.test(rid)) return ('new');
             return ('featured');
         };
-        for (const rail of heroRails) {
+        // Rank the full available promotional pool before the six-slide cap.
+        // Continue Watching keeps its dedicated resumable slot.
+        const candidates = heroRails.flatMap(rail => (rail.items || []).map(item => ({ item, reason: reasonOf(rail) })));
+        const orderedCandidates = candidates.map((candidate, index) => ({ ...candidate, index,
+            quality: MediaUtils.presentationCompleteness(candidate.item) }))
+            .sort((a, b) => b.quality - a.quality || a.index - b.index);
+        for (const { item, reason } of orderedCandidates) {
             if (railPicks.length >= 6) break;
-            const reason = reasonOf(rail);
-            for (const item of (rail.items || [])) {
-                if (railPicks.length >= 6) break;
-                if (!usable(item) || !this.backdropFromItem(item)) continue;
-                const key = `${item.source_id || item.sourceId || ''}:${item.item_id || item.itemId || item.id || ''}`;
-                if (seen.has(key)) continue;
-                seen.add(key);
-                railPicks.push({ item, reason });
-            }
+            if (!usable(item) || !this.backdropFromItem(item)) continue;
+            const key = `${item.source_id || item.sourceId || ''}:${item.item_id || item.itemId || item.id || ''}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            railPicks.push({ item, reason });
         }
         const slides = [
             ...(firstHistory ? [{ item: firstHistory, isResume: true, reason: 'resume' }] : []),
@@ -2565,7 +2567,7 @@ class HomePage {
 
     rankRailItemsByLanguagePreference(items = []) {
         if (!window.MediaUtils?.scoreTitleForPreferences) return items;
-        return [...items].sort((a, b) =>
+        return MediaUtils.rankByPresentation(items, (a, b) =>
             MediaUtils.scoreTitleForPreferences(b, this.contentPreferences) -
             MediaUtils.scoreTitleForPreferences(a, this.contentPreferences)
         );
