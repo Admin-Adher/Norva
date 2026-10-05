@@ -15540,6 +15540,10 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         finiteWindowBytes: effectiveWindowBytes,
         finiteSeekLookbehindBytes: finiteTs ? 256 * 1024 : 0,
         finiteSeekContinuationGraceMs: finiteTs || finiteMp4 ? 50 : 0,
+        // MP4 demuxers may parse cached packets for 100–350 ms before
+        // closing that local range. Use the existing bounded initial grace
+        // so this work cannot speculatively reopen a distant track window.
+        finiteInitialContinuationGraceMs: finiteMp4 ? 500 : 0,
         finiteAbandonedDrainMs: finiteTs || finiteMp4 ? 1500 : 0,
         finiteWarmupCueGraceMs: finiteTs ? 0 : FINITE_MKV_RESUME_CUE_GRACE_MS,
         finiteWarmupWindowBytes: warmupWindowBytes,

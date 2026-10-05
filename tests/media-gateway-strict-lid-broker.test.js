@@ -3543,12 +3543,12 @@ test('disjoint MP4 packet reads reuse complete small ranges without provider ove
   });
   const sourceUrl=await listen(provider);
   const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,pathPrefix:'finite-mkv-seek',
-    finiteWindowBytes:8*1024*1024,finiteSequentialWindowBytes:8*1024*1024,finiteFirstWindowBytes:256*1024,finiteSeekContinuationGraceMs:50,
+    finiteWindowBytes:8*1024*1024,finiteSequentialWindowBytes:8*1024*1024,finiteFirstWindowBytes:256*1024,finiteSeekContinuationGraceMs:50,finiteInitialContinuationGraceMs:500,
     finiteCacheBytes:16*1024*1024,finiteAbandonedDrainMs:100,releaseDelayMs:0,completedReleaseDelayMs:0,supersededReleaseDelayMs:0});
   t.after(async()=>{await broker.close();await closeServer(provider);});
   const packet=start=>new Promise((resolve,reject)=>{
     const request=http.get(broker.inputUrl,{headers:{Range:`bytes=${start}-${data.length-1}`}},response=>{
-      response.once('data',chunk=>{assert.deepEqual(chunk.subarray(0,608),data.subarray(start,start+608));request.destroy();resolve();});
+      response.once('data',chunk=>{assert.deepEqual(chunk.subarray(0,608),data.subarray(start,start+608));setTimeout(()=>{request.destroy();resolve();},200);});
       response.on('error',()=>{});
     });request.on('error',reject);
   });
