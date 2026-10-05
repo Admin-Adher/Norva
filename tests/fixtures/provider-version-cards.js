@@ -175,7 +175,7 @@ window.ProviderVersionCardsQA = (() => {
             resolve();
         }));
     });
-    function mountPlaybackRecovery({ single = false, holdClose = false, lookupFails = false, closeFails = false } = {}) {
+    function mountPlaybackRecovery({ single = false, holdClose = false, lookupFails = false, closeFails = false, code = 'PROVIDER_FILE_REFUSED' } = {}) {
         const host = document.getElementById('qa-host');
         host.innerHTML = `<section id="qa-recovery-watch" class="watch-video-section" style="position:relative;min-height:360px">
             <div id="watch-error" class="watch-error hidden"></div></section>
@@ -245,15 +245,21 @@ window.ProviderVersionCardsQA = (() => {
             retryPlaybackInPlace: () => { evidence.retries.push('failed-file'); }
         });
         app.pages.watch = watch;
-        watch.showPlaybackError('PROVIDER_FILE_REFUSED', { immediate: true });
+        watch.showPlaybackError(code, { immediate: true });
+        if (code === 'INVALID_MKV_INPUT') {
+            const text = document.getElementById('watch-error').textContent;
+            if (!text.includes(NorvaI18n.t('ui_playback_version_invalid_media'))) throw Error('invalid media explanation absent');
+            if (window.NorvaPlaybackRefusals?.has(watch.content, app)) throw Error('invalid bytes labelled access refusal');
+        }
         evidence.movies = movies; evidence.watch = watch;
         recoveryFixture = evidence;
         return evidence;
     }
 
-    async function verifyPlaybackRecovery() {
+    async function verifyPlaybackRecovery(code = null) {
+        if (!code) { await verifyPlaybackRecovery('PROVIDER_FILE_REFUSED'); return verifyPlaybackRecovery('INVALID_MKV_INPUT'); }
         const assert = (condition, message) => { if (!condition) throw Error(message); };
-        let fixture = mountPlaybackRecovery({ holdClose: true });
+        let fixture = mountPlaybackRecovery({ holdClose: true, code });
         const actions = [...document.querySelectorAll('#watch-error button')];
         assert(actions.length === 3, 'refused file needs three explicit actions');
         for (const button of actions) {
@@ -281,7 +287,7 @@ window.ProviderVersionCardsQA = (() => {
         assert(fixture.plays.length === 1 && fixture.plays[0].file === 'english-copy' && fixture.plays[0].position === 300, 'explicit resume selection');
         assert(!fixture.plays[0].preferences, 'old file track indices copied');
 
-        fixture = mountPlaybackRecovery();
+        fixture = mountPlaybackRecovery({ code });
         document.getElementById('watch-error-refresh-btn').click();
         assert(fixture.retries.length === 1 && fixture.retries[0] === 'failed-file' && fixture.plays.length === 0, 'retry changed file');
         document.getElementById('watch-error-back-btn').click(); await turn();
@@ -291,25 +297,25 @@ window.ProviderVersionCardsQA = (() => {
         document.querySelector('[data-recovery-action="start"]').click(); await turn();
         assert(fixture.plays[0]?.file === 'french-copy' && fixture.plays[0]?.position === 0, 'explicit start from beginning');
 
-        fixture = mountPlaybackRecovery({ single: true });
+        fixture = mountPlaybackRecovery({ single: true, code });
         document.getElementById('watch-error-versions-btn').click(); await turn();
         assert(fixture.movies._playbackRecovery.keys.size === 1 && fixture.plays.length === 0, 'single-version recovery');
         assert(document.querySelector('.movie-version-recovery [role="status"]')?.textContent, 'missing no-other-version message');
         assert(document.querySelectorAll('#qa-recovery-versions button').length === 0, 'invented alternative');
 
         for (const failure of [{ lookupFails: true }, { closeFails: true }]) {
-            fixture = mountPlaybackRecovery(failure);
+            fixture = mountPlaybackRecovery({ ...failure, code });
             document.getElementById('watch-error-versions-btn').click(); await turn();
             assert(fixture.app.currentPage === 'watch' && fixture.plays.length === 0, 'failed hand-off navigated or played');
             assert(!document.getElementById('watch-error-versions-btn').disabled, 'failed hand-off cannot retry');
             assert(document.getElementById('watch-error-version-status').textContent, 'failed hand-off lacks accessible status');
         }
         assert(document.documentElement.scrollWidth <= innerWidth + 1, 'recovery horizontal overflow');
-        mountPlaybackRecovery();
+        mountPlaybackRecovery({ code });
         return { scenarios: 8, providerRequests: 0, explicitAlternativeChoices: 2 };
     }
-    async function mountNativePlaybackRecovery() {
-        const fixture = mountPlaybackRecovery();
+    async function mountNativePlaybackRecovery(code = 'PROVIDER_FILE_REFUSED') {
+        const fixture = mountPlaybackRecovery({ code });
         fixture.app.currentPage = 'movies';
         document.getElementById('qa-recovery-watch').hidden = true;
         document.getElementById('qa-recovery-details').hidden = false;
@@ -327,14 +333,15 @@ window.ProviderVersionCardsQA = (() => {
         fixture.watch.content = null;
         await fixture.watch.play({ id: 'failed-file', sourceId: 'qa-source', type: 'movie', title: 'Example Film' }, async () => {
             fixture.nativeResolutions.push('failed-file');
-            const error = new Error('Fixture typed file refusal'); error.code = 'PROVIDER_FILE_REFUSED'; throw error;
+            const error = new Error('Fixture typed file refusal'); error.code = code; throw error;
         });
         await turn();
         return fixture;
     }
 
-    async function verifyNativePlaybackRecovery() {
-        let fixture = await mountNativePlaybackRecovery();
+    async function verifyNativePlaybackRecovery(code = null) {
+        if (!code) { await verifyNativePlaybackRecovery('PROVIDER_FILE_REFUSED'); return verifyNativePlaybackRecovery('INVALID_MKV_INPUT'); }
+        let fixture = await mountNativePlaybackRecovery(code);
         let overlay = document.querySelector('.norva-modal-overlay');
         if (!overlay || overlay.getAttribute('aria-modal') !== 'true') throw Error('missing native pre-launch dialog');
         const actions = [...overlay.querySelectorAll('[data-native-recovery-action]')];
@@ -346,11 +353,11 @@ window.ProviderVersionCardsQA = (() => {
         overlay = document.querySelector('.norva-modal-overlay');
         overlay.querySelector('[data-native-recovery-action="versions"]').click(); await turn();
         if (document.querySelector('.norva-modal-overlay') || fixture.movies.currentMovieVersions?.length !== 3 || fixture.nativeLaunches.length) throw Error('native refusal did not open owned version list');
-        fixture = await mountNativePlaybackRecovery();
+        fixture = await mountNativePlaybackRecovery(code);
         if (window.__norvaHandleBack() !== 'handled') throw Error('native hardware Back not consumed');
         await turn();
         if (document.querySelector('.norva-modal-overlay') || fixture.nativeLaunches.length) throw Error('Back should dismiss native prelaunch recovery');
-        fixture = await mountNativePlaybackRecovery();
+        fixture = await mountNativePlaybackRecovery(code);
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); await turn();
         if (document.querySelector('.norva-modal-overlay') || fixture.nativeLaunches.length) throw Error('Escape should dismiss native prelaunch recovery');
         mountPlaybackRecovery();

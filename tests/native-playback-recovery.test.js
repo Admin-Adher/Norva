@@ -1182,10 +1182,11 @@ function nativeVodIntentFixture({ resumeInfo, stopSessions, resolveInitial, user
   return { window, document, owner: page, play, navigate, launches, resolutions, savedHistory, scheduled, expired, notices };
 }
 
+for (const failureCode of ['PROVIDER_FILE_REFUSED', 'INVALID_MKV_INPUT']) {
 for (const scenario of ['versions', 'retry', 'details', 'owner-changed', 'close-failed', 'previous-close-failed']) {
-  test(`typed initial native movie refusal provides explicit recovery without launching Activity (${scenario})`, async () => {
+  test(`typed initial native movie refusal provides explicit recovery without launching Activity (${failureCode}, ${scenario})`, async () => {
     const fixture = nativeVodIntentFixture({ itemType: 'movie', resolveInitial: async () => {
-      const error = new Error('private transport detail'); error.code = 'PROVIDER_FILE_REFUSED'; throw error;
+      const error = new Error('private transport detail'); error.code = failureCode; throw error;
     } });
     const nodes = [], marks = [], opens = [];
     fixture.document.createElement = tag => {
@@ -1203,8 +1204,9 @@ for (const scenario of ['versions', 'retry', 'details', 'owner-changed', 'close-
     await fixture.play('movie-A');
     assert.equal(fixture.launches.length, 0);
     assert.equal(fixture.notices.length, 0, 'typed refusal replaces the generic one-action toast');
-    assert.equal(marks.length, 1);
-    assert.equal(marks[0][2], scope);
+    assert.equal(marks.length, failureCode === 'PROVIDER_FILE_REFUSED' ? 1 : 0);
+    if (marks.length) assert.equal(marks[0][2], scope);
+    if (failureCode === 'INVALID_MKV_INPUT') assert.ok(nodes.some(node => /received data/.test(node.textContent || '')));
     assert.equal(nodes.filter(node => node.tag === 'button').length, 3);
     assert.ok(nodes.every(node => !/private transport/.test(node.textContent || '')), 'transport detail never enters UI');
     const versions = nodes.find(node => node.dataset.nativeRecoveryAction === 'versions');
@@ -1234,6 +1236,8 @@ for (const scenario of ['versions', 'retry', 'details', 'owner-changed', 'close-
     }
     assert.equal(fixture.launches.length, 0, 'no alternative session may be created by this UI');
   });
+}
+
 }
 
 for (const position of [0, 300]) {
