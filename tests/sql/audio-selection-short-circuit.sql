@@ -1,0 +1,108 @@
+-- Networkless schema-only clone; synthetic rows roll back.
+begin;
+set local statement_timeout='20s';
+set local request.jwt.claim.role='service_role';
+create function pg_temp.uid(n int) returns uuid language sql immutable as $$select ('00000000-0000-0000-0000-'||lpad(n::text,12,'0'))::uuid$$;
+create temp table checks(label text primary key);
+create function pg_temp.ok(value boolean,label text) returns void language plpgsql as $$
+begin if value is distinct from true then raise exception 'fixture_failed: %',label; end if; insert into checks values(label); end $$;
+insert into public.admin_feature_flags(key,enabled) values
+ ('owned_provider_language_metadata_enabled',true),('language_metadata_lane_enabled',true),('enrichment_paused',false)
+ on conflict(key) do update set enabled=excluded.enabled;
+insert into public.catalog_language_metadata_rollout(singleton,basis_points) values(true,10000);
+insert into public.catalog_owned_language_metadata_rollout(singleton,basis_points) values(true,10000);
+insert into public.catalog_language_metadata_capacity(singleton,max_workers,reason,observed_at,expires_at)
+ values(true,1,'capacity-available',now(),now()+interval '10 minutes');
+set local session_replication_role=replica;
+insert into auth.users(id) values(pg_temp.uid(1)),(pg_temp.uid(9));
+insert into public.provider_identities(id) values(pg_temp.uid(4));
+insert into public.cloud_sources(id,user_id,source_type,display_name,sync_status) values
+ (pg_temp.uid(2),pg_temp.uid(1),'xtream','Synthetic unknown supplier','ready'),
+ (pg_temp.uid(7),pg_temp.uid(9),'xtream','Other owner','ready');
+insert into public.cloud_source_lifecycle(source_id,user_id,replacement_root_id,config_revision,visibility_epoch)
+ values(pg_temp.uid(2),pg_temp.uid(1),pg_temp.uid(2),1,1),(pg_temp.uid(7),pg_temp.uid(9),pg_temp.uid(7),1,1);
+insert into public.cloud_source_catalog_heads(source_id,user_id,active_generation_id,head_revision)
+ values(pg_temp.uid(2),pg_temp.uid(1),pg_temp.uid(3),1),(pg_temp.uid(7),pg_temp.uid(9),pg_temp.uid(8),1);
+insert into public.cloud_source_catalog_generations(id,user_id,source_id,config_revision,state)
+ values(pg_temp.uid(3),pg_temp.uid(1),pg_temp.uid(2),1,'active'),(pg_temp.uid(8),pg_temp.uid(9),pg_temp.uid(7),1,'active');
+insert into public.catalog_source_provider_identities(source_id,user_id,identity_id,provider_key,verified_at)
+ values(pg_temp.uid(2),pg_temp.uid(1),pg_temp.uid(4),'fixture',now()),(pg_temp.uid(7),pg_temp.uid(9),pg_temp.uid(4),'fixture',now());
+insert into public.cloud_titles(id,user_id,item_type,identity_key,identity_source,title)
+ values(pg_temp.uid(5),pg_temp.uid(1),'movie','fixture','normalized','Synthetic movie'),
+ (pg_temp.uid(6),pg_temp.uid(9),'movie','fixture','normalized','Other owner movie');
+insert into public.cloud_title_variants(id,user_id,title_id,source_id,generation_id,item_type,external_id,raw_title,
+ write_head_revision,write_config_revision,write_source_visibility_epoch,write_user_visibility_epoch)
+ select pg_temp.uid(n),pg_temp.uid(1),pg_temp.uid(5),pg_temp.uid(2),pg_temp.uid(3),'movie',n::text,'Synthetic movie',1,1,1,1 from generate_series(101,140) n;
+insert into public.cloud_title_variants(id,user_id,title_id,source_id,generation_id,item_type,external_id,raw_title,
+ write_head_revision,write_config_revision,write_source_visibility_epoch,write_user_visibility_epoch)
+ values(pg_temp.uid(201),pg_temp.uid(9),pg_temp.uid(6),pg_temp.uid(7),pg_temp.uid(8),'movie','102','Other owner movie',1,1,1,1);
+insert into public.cloud_catalog_provider_language_hints(variant_id,user_id,title_id,source_id,item_type,language)
+ values(pg_temp.uid(101),pg_temp.uid(1),pg_temp.uid(5),pg_temp.uid(2),'movie','fr');
+set local session_replication_role=origin;
+
+-- Independent former truth predicate, evaluated on the same synthetic state.
+CREATE OR REPLACE FUNCTION pg_temp.reference_identified(p_user uuid, p_source uuid, p_variant uuid)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE
+ SET search_path TO ''
+AS $function$
+  select exists(
+    select 1 from public.cloud_catalog_visible_title_variants v
+    join public.cloud_titles t on t.id=v.title_id and t.user_id=v.user_id and t.item_type=v.item_type
+    where v.id=p_variant and v.user_id=p_user and v.source_id=p_source and v.item_type='movie'
+      and (
+        exists(select 1 from public.cloud_catalog_owned_audio_declarations_exact_movie(v.user_id,v.source_id,v.id) d
+          where d.user_id=v.user_id and d.source_id=v.source_id and d.variant_id=v.id)
+        or exists(select 1 from public.cloud_catalog_provider_language_hints h
+          where h.variant_id=v.id and h.user_id=v.user_id and h.source_id=v.source_id
+            and h.title_id=v.title_id and h.item_type='movie')
+        or exists(select 1 from public.cloud_title_file_language_observations o
+          cross join lateral unnest(o.audio_languages) lang(code)
+          where o.user_id=v.user_id and o.title_id=v.title_id and o.variant_id=v.id
+            and o.file_external_id=v.external_id and o.audio_observed
+            and (lang.code='yue' or public.norva_canonical_language_code(lang.code) is not null))
+      )
+  )
+$function$;
+select pg_temp.ok(not catalog_movie_audio_identified(pg_temp.uid(1),pg_temp.uid(2),pg_temp.uid(102)),'unknown_stays_unknown');
+select pg_temp.ok(catalog_movie_audio_identified(pg_temp.uid(1),pg_temp.uid(2),pg_temp.uid(101)),'hint_identified');
+set local session_replication_role=replica;
+insert into cloud_title_file_language_observations(user_id,title_id,variant_id,file_external_id,audio_languages,audio_observed)
+values(pg_temp.uid(1),pg_temp.uid(5),pg_temp.uid(102),'102',array['en'],true),
+(pg_temp.uid(1),pg_temp.uid(5),pg_temp.uid(103),'103',array['und'],true),
+(pg_temp.uid(1),pg_temp.uid(5),pg_temp.uid(104),'WRONG',array['fr'],true),
+(pg_temp.uid(1),pg_temp.uid(5),pg_temp.uid(105),'105','{}',false),
+(pg_temp.uid(1),pg_temp.uid(5),pg_temp.uid(106),'106',array['yue'],true);
+set local session_replication_role=origin;
+select pg_temp.ok(catalog_movie_audio_identified(pg_temp.uid(1),pg_temp.uid(2),pg_temp.uid(102)),'exact_observation_identified');
+select pg_temp.ok(not catalog_movie_audio_identified(pg_temp.uid(1),pg_temp.uid(2),pg_temp.uid(103)),'und_not_identified');
+select pg_temp.ok(not catalog_movie_audio_identified(pg_temp.uid(1),pg_temp.uid(2),pg_temp.uid(104)),'wrong_file_not_identified');
+select pg_temp.ok(not catalog_movie_audio_identified(pg_temp.uid(1),pg_temp.uid(2),pg_temp.uid(105)),'unobserved_not_identified');
+select pg_temp.ok(catalog_movie_audio_identified(pg_temp.uid(1),pg_temp.uid(2),pg_temp.uid(106)),'yue_preserved');
+select pg_temp.ok(not catalog_movie_audio_identified(pg_temp.uid(9),pg_temp.uid(2),pg_temp.uid(102)),'wrong_owner_excluded');
+select pg_temp.ok(not catalog_movie_audio_identified(pg_temp.uid(1),pg_temp.uid(7),pg_temp.uid(102)),'wrong_source_excluded');
+select pg_temp.ok(not exists(select 1 from cloud_title_variants v where
+ catalog_movie_audio_identified(v.user_id,v.source_id,v.id) is distinct from pg_temp.reference_identified(v.user_id,v.source_id,v.id)),'all_fixture_truth_equivalent');
+update cloud_sources set enabled=false where id=pg_temp.uid(2);
+select pg_temp.ok(not catalog_movie_audio_identified(pg_temp.uid(1),pg_temp.uid(2),pg_temp.uid(102)),'hidden_observation_excluded');
+select pg_temp.ok(not exists(select 1 from cloud_title_variants v where
+ catalog_movie_audio_identified(v.user_id,v.source_id,v.id) is distinct from pg_temp.reference_identified(v.user_id,v.source_id,v.id)),'hidden_truth_equivalent');
+update cloud_sources set enabled=true where id=pg_temp.uid(2);
+-- Deliberately fail the expensive branch: exact observations and hints must not
+-- evaluate declarations. Unknown files must still reach the real fallback.
+create or replace function public.cloud_catalog_owned_audio_declarations_exact_movie(p_user_id uuid,p_source_id uuid,p_variant_id uuid)
+returns table(user_id uuid,source_id uuid,item_type text,title_id uuid,variant_id uuid,language text)
+language plpgsql stable as $$begin raise exception 'expensive_declaration_evaluated'; end$$;
+select pg_temp.ok(catalog_movie_audio_identified(pg_temp.uid(1),pg_temp.uid(2),pg_temp.uid(102)),'observation_short_circuits_declaration');
+select pg_temp.ok(catalog_movie_audio_identified(pg_temp.uid(1),pg_temp.uid(2),pg_temp.uid(101)),'hint_short_circuits_declaration');
+do $$begin
+ begin perform catalog_movie_audio_identified(pg_temp.uid(1),pg_temp.uid(2),pg_temp.uid(103));
+ raise exception 'fallback_not_evaluated';
+ exception when raise_exception then
+  if sqlerrm <> 'expensive_declaration_evaluated' then raise; end if;
+ end;
+ perform pg_temp.ok(true,'unknown_keeps_declaration_fallback');
+end$$;
+select jsonb_build_object('passed',true,'checks',count(*),'customerRows',0,'providerRequests',0) from checks;
+rollback;
