@@ -27,6 +27,9 @@ function build({ encode = false, audioCopy = true, backend = 'vaapi', hardwareDe
         audioArgsForSession: () => audioCopy ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '192k'],
         audioMapForSession: () => '0:1', normalizeAudioStreamIndex: Number,
         videoModeForSession: () => encode ? 'encode' : 'copy',
+        finiteMp4CopyVideoBitstreamArgs: vm.runInNewContext(`(${source.slice(source.indexOf('function finiteMp4CopyVideoBitstreamArgs('), source.indexOf('function videoModeForSession('))})`, {
+            asRecord: value => value || {}, normalizeCodecToken: value => value, videoModeForSession: () => encode ? 'encode' : 'copy',
+        }),
         vaapiHardwareDecodeCodecForSession: () => hardwareDecode ? 'h264' : null,
         reserveVideoEncoderAdmission: () => admitted, releaseVideoEncoderAdmission: () => { released++; },
         usesFiniteMkvSeekBroker: () => false, isFiniteMkvVodSession: () => false,

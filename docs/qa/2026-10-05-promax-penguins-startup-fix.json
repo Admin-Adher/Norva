@@ -1,0 +1,571 @@
+{
+  "title": "Promax — March of the Penguins startup and resume fixes",
+  "codeRevision": "f549a2931fe494e42dd7f1a47e2755f842a993e9",
+  "pullRequest": 670,
+  "gatewayImage": "sha256:06cfcac1d73702cfd754cbbb9ab063902cb30eb04087eddd1ece0d402bc4f78f",
+  "gatewayTreeSha256": "58df4b3e453f7231d2487081b0b0207e61e093ecf6700e54a4f9f3033c6e4f4d",
+  "edgePlaybackSha256": "a5c22919c4ca9aebbabd616d17985ebc1acac12d5ecce75037257fe8281cb0a7",
+  "results": [
+    {
+      "label": "ar",
+      "createdAt": "2026-10-05T22:34:05.365423+00:00",
+      "firstFrameMs": 31949,
+      "playStartedAt": "2026-10-05T22:34:52.573146+00:00",
+      "sessionStateAtCloseout": "expired",
+      "serverReadyMs": 30259,
+      "observedWallSeconds": 120.104,
+      "videoAdvancedSeconds": 120.10418,
+      "domSamples": [
+        {
+          "label": "ar-atomic-final",
+          "at": "2026-10-05T22:34:59.894Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  0.0261,
+                  36.02611
+                ]
+              ],
+              "error": null,
+              "paused": false,
+              "ready": 4,
+              "time": 7.71322
+            }
+          ]
+        },
+        {
+          "label": "ar-atomic-final",
+          "at": "2026-10-05T22:35:27.870Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  4.0261,
+                  72.02611
+                ]
+              ],
+              "error": null,
+              "paused": false,
+              "ready": 4,
+              "time": 35.689295
+            }
+          ]
+        },
+        {
+          "label": "ar-atomic-final",
+          "at": "2026-10-05T22:35:58.976Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  36.0261,
+                  108.02611
+                ]
+              ],
+              "error": null,
+              "paused": false,
+              "ready": 4,
+              "time": 66.795305
+            }
+          ]
+        },
+        {
+          "label": "ar-atomic-final",
+          "at": "2026-10-05T22:36:23.993Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  60.0261,
+                  136.02611
+                ]
+              ],
+              "error": null,
+              "paused": false,
+              "quality": null,
+              "ready": 4,
+              "time": 91.81281
+            }
+          ]
+        },
+        {
+          "label": "ar-atomic-final",
+          "at": "2026-10-05T22:36:44.859Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  82.0261,
+                  162.02611
+                ]
+              ],
+              "error": null,
+              "paused": false,
+              "ready": 4,
+              "time": 112.678879
+            }
+          ]
+        },
+        {
+          "label": "ar-atomic-final",
+          "at": "2026-10-05T22:36:59.998Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  96.0261,
+                  190.02611
+                ]
+              ],
+              "error": null,
+              "paused": false,
+              "ready": 4,
+              "time": 127.8174
+            }
+          ]
+        }
+      ],
+      "finalBufferAheadSeconds": 62.209,
+      "startupPolicy": {
+        "protocol": 2,
+        "eligible": false,
+        "pipeline": "video-transcode",
+        "targetBufferSeconds": null,
+        "minimumEncodeRateX": 2,
+        "observedEncodeRateX": 1.187,
+        "reason": "encode-rate-below-minimum"
+      },
+      "startupDecodeProof": true
+    },
+    {
+      "label": "fr2",
+      "createdAt": "2026-10-05T22:37:28.157051+00:00",
+      "firstFrameMs": 12941,
+      "playStartedAt": "2026-10-05T22:37:40.491014+00:00",
+      "sessionStateAtCloseout": "expired",
+      "serverReadyMs": 11310,
+      "observedWallSeconds": 43.364,
+      "videoAdvancedSeconds": 43.364684,
+      "domSamples": [
+        {
+          "label": "fr2-atomic-final",
+          "at": "2026-10-05T22:38:04.008Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  0.028844,
+                  144.047611
+                ]
+              ],
+              "error": null,
+              "paused": false,
+              "ready": 4,
+              "time": 23.862859
+            }
+          ]
+        },
+        {
+          "label": "fr2-atomic-final",
+          "at": "2026-10-05T22:38:47.372Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  36.064822,
+                  188.049855
+                ]
+              ],
+              "error": null,
+              "paused": false,
+              "ready": 4,
+              "time": 67.227543
+            }
+          ]
+        }
+      ],
+      "finalBufferAheadSeconds": 120.822,
+      "startupPolicy": {
+        "protocol": 2,
+        "eligible": true,
+        "pipeline": "video-transcode",
+        "targetBufferSeconds": 6,
+        "minimumEncodeRateX": 2,
+        "observedEncodeRateX": 8.359,
+        "reason": "vaapi-transcode-ready"
+      },
+      "startupDecodeProof": true
+    },
+    {
+      "label": "fr3",
+      "createdAt": "2026-10-05T22:39:25.202513+00:00",
+      "firstFrameMs": 12713,
+      "playStartedAt": "2026-10-05T22:39:37.465742+00:00",
+      "sessionStateAtCloseout": "expired",
+      "serverReadyMs": 11108,
+      "observedWallSeconds": 43.534,
+      "videoAdvancedSeconds": 43.534091,
+      "domSamples": [
+        {
+          "label": "fr3-atomic-final",
+          "at": "2026-10-05T22:39:57.476Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  0.0556,
+                  126.056366
+                ]
+              ],
+              "error": null,
+              "paused": false,
+              "ready": 4,
+              "time": 20.375109
+            }
+          ]
+        },
+        {
+          "label": "fr3-atomic-final",
+          "at": "2026-10-05T22:40:41.010Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  32.087577,
+                  184.072633
+                ]
+              ],
+              "error": null,
+              "paused": false,
+              "ready": 4,
+              "time": 63.9092
+            }
+          ]
+        }
+      ],
+      "finalBufferAheadSeconds": 120.163,
+      "startupPolicy": {
+        "protocol": 2,
+        "eligible": true,
+        "pipeline": "video-transcode",
+        "targetBufferSeconds": 6,
+        "minimumEncodeRateX": 2,
+        "observedEncodeRateX": 20,
+        "reason": "vaapi-transcode-ready"
+      },
+      "startupDecodeProof": true
+    },
+    {
+      "label": "fr1",
+      "createdAt": "2026-10-05T22:41:16.925713+00:00",
+      "firstFrameMs": 9505,
+      "playStartedAt": "2026-10-05T22:41:26.065458+00:00",
+      "sessionStateAtCloseout": "expired",
+      "serverReadyMs": 8022,
+      "observedWallSeconds": 50.784,
+      "videoAdvancedSeconds": 50.784158,
+      "domSamples": [
+        {
+          "label": "fr1-atomic-final",
+          "at": "2026-10-05T22:41:39.321Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  0.022333,
+                  70.051333
+                ]
+              ],
+              "error": null,
+              "paused": false,
+              "ready": 4,
+              "time": 13.613772
+            }
+          ]
+        },
+        {
+          "label": "fr1-atomic-final",
+          "at": "2026-10-05T22:42:30.105Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  34.056333,
+                  178.032333
+                ]
+              ],
+              "error": null,
+              "paused": false,
+              "ready": 4,
+              "time": 64.39793
+            }
+          ]
+        }
+      ],
+      "finalBufferAheadSeconds": 113.634,
+      "startupPolicy": {
+        "protocol": 2,
+        "eligible": true,
+        "pipeline": "video-transcode",
+        "targetBufferSeconds": 6,
+        "minimumEncodeRateX": 2,
+        "observedEncodeRateX": 4.224,
+        "reason": "vaapi-transcode-ready"
+      },
+      "startupDecodeProof": null
+    },
+    {
+      "label": "en",
+      "createdAt": "2026-10-05T22:42:53.274957+00:00",
+      "firstFrameMs": 39871,
+      "playStartedAt": "2026-10-05T22:45:11.46188+00:00",
+      "sessionStateAtCloseout": "expired",
+      "serverReadyMs": 38328,
+      "observedWallSeconds": 106.478,
+      "videoAdvancedSeconds": 106.478082,
+      "domSamples": [
+        {
+          "label": "en-atomic-final",
+          "at": "2026-10-05T22:43:52.319Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  0.036333,
+                  24.061333
+                ]
+              ],
+              "error": null,
+              "paused": true,
+              "ready": 4,
+              "time": 0
+            }
+          ]
+        },
+        {
+          "label": "en-atomic-final",
+          "at": "2026-10-05T22:44:32.068Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  0.036333,
+                  62.057333
+                ]
+              ],
+              "error": null,
+              "paused": true,
+              "ready": 4,
+              "time": 0
+            }
+          ]
+        },
+        {
+          "label": "en-atomic-final",
+          "at": "2026-10-05T22:45:33.295Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  0.036333,
+                  122.075333
+                ]
+              ],
+              "error": null,
+              "paused": false,
+              "ready": 4,
+              "time": 21.903426
+            }
+          ]
+        },
+        {
+          "label": "en-atomic-final",
+          "at": "2026-10-05T22:46:09.780Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  28.065333,
+                  150.060333
+                ]
+              ],
+              "error": null,
+              "paused": false,
+              "ready": 4,
+              "time": 58.388133
+            }
+          ]
+        },
+        {
+          "label": "en-atomic-final",
+          "at": "2026-10-05T22:47:19.773Z",
+          "videos": [
+            {
+              "buffered": [
+                [
+                  98.051333,
+                  218.046333
+                ]
+              ],
+              "error": null,
+              "paused": false,
+              "ready": 4,
+              "time": 128.381508
+            }
+          ]
+        }
+      ],
+      "finalBufferAheadSeconds": 89.665,
+      "startupPolicy": {
+        "protocol": 2,
+        "eligible": false,
+        "pipeline": "video-transcode",
+        "targetBufferSeconds": null,
+        "minimumEncodeRateX": 2,
+        "observedEncodeRateX": 0.51,
+        "reason": "encode-rate-below-minimum"
+      },
+      "startupDecodeProof": null
+    }
+  ],
+  "pauses": [
+    {
+      "receipt": ".codex-artifacts/promax-penguins-atomic-20261005/receipts/alignment-deployment.safe.json",
+      "pausedAt": "2026-10-05T21:53:20.911513+00:00",
+      "restoredAt": "2026-10-05T21:53:37.835807+00:00",
+      "error": null,
+      "leasesForced": false
+    },
+    {
+      "receipt": ".codex-artifacts/promax-penguins-atomic-20261005/receipts/deployment.safe.json",
+      "pausedAt": "2026-10-05T22:33:10.598701+00:00",
+      "restoredAt": "2026-10-05T22:33:26.406905+00:00",
+      "error": null,
+      "leasesForced": false
+    },
+    {
+      "receipt": ".codex-artifacts/promax-penguins-cache-release-20261005/receipts/deployment.safe.json",
+      "pausedAt": "2026-10-05T22:16:05.178798+00:00",
+      "restoredAt": "2026-10-05T22:16:21.221449+00:00",
+      "error": null,
+      "leasesForced": false
+    },
+    {
+      "receipt": ".codex-artifacts/promax-penguins-prefix-20261005/receipts/deployment.safe.json",
+      "pausedAt": "2026-10-05T22:04:45.338426+00:00",
+      "restoredAt": "2026-10-05T22:04:56.141386+00:00",
+      "error": null,
+      "leasesForced": false
+    },
+    {
+      "receipt": ".codex-artifacts/promax-penguins-route-20261005/deployment-receipts/edge-first/deployment.safe.json",
+      "pausedAt": "2026-10-05T21:08:33.315237+00:00",
+      "restoredAt": "2026-10-05T21:08:53.637715+00:00",
+      "error": null,
+      "leasesForced": false
+    },
+    {
+      "receipt": ".codex-artifacts/promax-penguins-route-20261005/deployment-receipts/edge-route/deployment.safe.json",
+      "pausedAt": "2026-10-05T21:44:57.718560+00:00",
+      "restoredAt": "2026-10-05T21:45:11.894100+00:00",
+      "error": null,
+      "leasesForced": false
+    },
+    {
+      "receipt": ".codex-artifacts/promax-penguins-route-20261005/deployment-receipts/gateway-bursts/deployment.safe.json",
+      "pausedAt": "2026-10-05T21:41:06.896242+00:00",
+      "restoredAt": "2026-10-05T21:41:28.066650+00:00",
+      "error": null,
+      "leasesForced": false
+    },
+    {
+      "receipt": ".codex-artifacts/promax-penguins-route-20261005/deployment-receipts/gateway-diagnostic/deployment.safe.json",
+      "pausedAt": "2026-10-05T21:17:35.022871+00:00",
+      "restoredAt": "2026-10-05T21:17:47.009985+00:00",
+      "error": null,
+      "leasesForced": false
+    },
+    {
+      "receipt": ".codex-artifacts/promax-penguins-route-20261005/deployment-receipts/gateway-first/deployment.safe.json",
+      "pausedAt": "2026-10-05T21:09:28.571583+00:00",
+      "restoredAt": "2026-10-05T21:09:52.159058+00:00",
+      "error": null,
+      "leasesForced": false
+    },
+    {
+      "receipt": ".codex-artifacts/promax-penguins-route-20261005/deployment-receipts/gateway-headers/deployment.safe.json",
+      "pausedAt": "2026-10-05T21:28:35.897758+00:00",
+      "restoredAt": "2026-10-05T21:28:57.382747+00:00",
+      "error": null,
+      "leasesForced": false
+    },
+    {
+      "receipt": ".codex-artifacts/promax-penguins-route-20261005/deployment-receipts/gateway-native/deployment.safe.json",
+      "pausedAt": "2026-10-05T21:34:29.105346+00:00",
+      "restoredAt": "2026-10-05T21:34:50.082686+00:00",
+      "error": null,
+      "leasesForced": false
+    },
+    {
+      "receipt": ".codex-artifacts/promax-penguins-small-complete-20261005/receipts/deployment-first-failed.safe.json",
+      "pausedAt": "2026-10-05T22:22:22.878262+00:00",
+      "restoredAt": "2026-10-05T22:25:33.547555+00:00",
+      "error": "URLError",
+      "leasesForced": false
+    },
+    {
+      "receipt": ".codex-artifacts/promax-penguins-small-complete-20261005/receipts/deployment-retry1.safe.json",
+      "pausedAt": "2026-10-05T22:26:36.761321+00:00",
+      "restoredAt": "2026-10-05T22:26:57.705394+00:00",
+      "error": null,
+      "leasesForced": false
+    },
+    {
+      "receipt": ".codex-artifacts/promax-penguins-splittracks-final-20261005/receipts/deployment.safe.json",
+      "pausedAt": "2026-10-05T21:59:57.698730+00:00",
+      "restoredAt": "2026-10-05T22:00:19.937168+00:00",
+      "error": null,
+      "leasesForced": false
+    }
+  ],
+  "tests": {
+    "targeted": {
+      "total": 194,
+      "passed": 188,
+      "failed": 0,
+      "skipped": 6
+    },
+    "isolatedCanary": {
+      "passed": 8,
+      "failed": 0,
+      "notSelected": 97,
+      "gpu": true,
+      "network": "none",
+      "user": "1000:1000"
+    },
+    "cloud": {
+      "total": 5989,
+      "passed": 5959,
+      "failed": 0,
+      "skipped": 30
+    },
+    "groupsOverlap": true
+  },
+  "ci": {
+    "codeChecksPassed": 5,
+    "androidPhoneAndTvPackages": "success",
+    "windowsPackage": "success",
+    "vercelNorvaPreview": "rate-limited; no backend dependency",
+    "vercelPwaPreview": "success"
+  },
+  "limits": [
+    "Short sequential playback tests, not full-film certification",
+    "Historical cold codec timeout cause not individually attributed",
+    "Cold corrected-container receipt covered by isolated real-code regression, not a forced production profile reset",
+    "Arabic startup remains slower",
+    "No new human language confirmation",
+    "Historical other-provider empty/refused/corrupt files not repaired by this change"
+  ],
+  "report": "2026-10-05-promax-penguins-startup-fix.md"
+}

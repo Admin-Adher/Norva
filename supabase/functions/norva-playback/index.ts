@@ -2353,7 +2353,12 @@ async function createPlaybackSessionCore(
       sourceId, itemType, container: authoritativeVodContainer,
       enabled: Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_ENABLED") !== "false",
     });
+  // An observed container correction proves MP4 bytes, not efficient native
+  // audio/video range delivery. Keep the same Gateway adaptation as the cold
+  // correction; warming its codec profile must not silently switch this file
+  // to a different transport. Explicit native recovery retains its own proof.
   const nativeMp4Proof = serverPromotedProviderMp4 && !serverSelectionVodRelay && !serverDirectPublicHls
+    && canonicalVodContainer(resolvedContainerObservation.container) !== "mp4"
     ? browserNativeMp4Proof(resolved.playbackHint, requestedPlaybackHint)
     : null;
   const serverNativeProviderMp4 = Boolean(nativeMp4Proof);
@@ -2673,6 +2678,9 @@ async function createPlaybackSessionCore(
   markStartup("coordinatorMs");
   startupTrace.coordinatorWaitMs = startupWaitMs;
 
+  // The admission hash stays immutable. Only this request's persisted,
+  // Gateway-attested container recovery may bind a different prepared target.
+  let preparedPlaybackTargetUrlHash = targetUrlHash;
   // Native and HLS grants use the same exact-source receipt fence.
   // Only unrelated account catalogue changes may be adopted after preparation.
   const bindPreparedPlaybackReceipt = async (
@@ -2726,7 +2734,7 @@ async function createPlaybackSessionCore(
         const currentTarget = currentCoordinates
           ? await resolveExactEpisodePlaybackTarget(sourceId, userId, currentCoordinates, requestedPlaybackHint, db)
           : await resolvePlaybackTarget(sourceId, itemType, itemId, userId, db, requestedPlaybackHint);
-        if (await sha256Hex(currentTarget.targetUrl) !== targetUrlHash) {
+        if (await sha256Hex(currentTarget.targetUrl) !== preparedPlaybackTargetUrlHash) {
           throw new HttpError(409, "Playback item changed during preparation");
         }
         await adoptActiveCatalogUserVisibilityEpoch(db, sourceId, userId, playbackGeneration);
@@ -3214,6 +3222,7 @@ async function createPlaybackSessionCore(
       preparation ? { expiresAt: preparation.expiresAt, gatewayGenerations: preparation.gatewayGenerations } : null,
     );
     markStartup("gatewayMs");
+    preparedPlaybackTargetUrlHash = gateway.preparedTargetUrlHash ?? targetUrlHash;
     if (mediaCacheLifecycle.producer) mediaCacheLifecycle.transferredToGateway = true;
     if ((preparation?.signal ?? req.signal).aborted) throw playbackRequestAbortError();
     const gatewayCommit = await commitEdgeSessionCoordinator(edgeCoordination, {
@@ -8951,6 +8960,7 @@ async function createGatewaySession(
       subtitleRenditions: null,
       exactSubtitleHls: null,
       startupPolicy: null,
+      preparedTargetUrlHash: await sha256Hex(targetUrl),
     };
   }
 
@@ -8958,6 +8968,7 @@ async function createGatewaySession(
     throw new HttpError(409, "Live preparation route changed");
   const startupStartedAt = performance.now();
   const originalTargetUrlHash = await sha256Hex(targetUrl);
+  let preparedTargetUrlHash = originalTargetUrlHash;
   const identityForTarget = async (resolvedUrl: string) => await sha256Hex(JSON.stringify([
     "norva-vod-identity-v1", playbackIdentity.sourceId, playbackIdentity.itemType,
     playbackIdentity.itemId, playbackIdentity.variantId || null, resolvedUrl,
@@ -9011,7 +9022,7 @@ async function createGatewaySession(
       originalTargetUrlHash,
     );
     if (mismatch) {
-      await persistGatewaySourceContainerMismatch(db, {
+      const correctionPersisted = await persistGatewaySourceContainerMismatch(db, {
         playbackSessionId,
         userId,
         sourceId: playbackIdentity.sourceId,
@@ -9022,6 +9033,9 @@ async function createGatewaySession(
         mismatch,
         generation: playbackGeneration,
       });
+      if (!correctionPersisted) {
+        throw new HttpError(409, "Container correction authority changed during preparation");
+      }
       if (PROVIDER_SLOT_RELEASE_DELAY_MS > 0) await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
       const correctedTargetUrl = rewriteVodContainerUrl(
         targetUrl,
@@ -9057,6 +9071,9 @@ async function createGatewaySession(
       response = retry.response;
       gatewayBody = retry.body;
       containerCorrectionRetried = true;
+      // Derived here from the validated mismatch and our own URL rewrite,
+      // never from an echoed request hint or a Gateway response field.
+      if (response.ok) preparedTargetUrlHash = await sha256Hex(correctedTargetUrl);
     }
   }
   if (!response.ok) {
@@ -9288,6 +9305,7 @@ async function createGatewaySession(
       codecProfile,
       codecProfileSource: stringOrNull(gatewayBody.codecProfileSource),
       cleanupCreatedSession,
+      preparedTargetUrlHash,
     };
   } catch (databaseError) {
     const cleanup = await cleanupCreatedSession();

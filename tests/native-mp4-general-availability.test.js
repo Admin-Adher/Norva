@@ -160,3 +160,23 @@ test('verified TS search policy is immutable and restricted to native recovery',
     assert.throws(() => sessions.grant(claims({ scope: 'native-vod-recovery' })),
         { code: 'NATIVE_MP4_SESSION_CONFLICT' });
 });
+
+
+test('warming an observed container correction preserves its Gateway lane instead of promoting native delivery',()=>{
+ const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+ const code=fs.readFileSync(path.join(__dirname,'../supabase/functions/norva-playback/index.ts'),'utf8');
+ const start=code.indexOf('  const nativeMp4Proof =');
+ const end=code.indexOf('  if (serverPromotedRelay || serverPromotedProviderMp4)',start);
+ const run=change=>vm.runInNewContext(`(()=>{${code.slice(start,end)};return {mode,nativeMp4Proof};})()`,{
+  serverPromotedProviderMp4:true,serverSelectionVodRelay:false,serverDirectPublicHls:false,
+  canonicalVodContainer:value=>value||null,resolvedContainerObservation:{},resolved:{playbackHint:{}},requestedPlaybackHint:{},
+  browserNativeMp4Proof:()=>({fileSizeBytes:123456,durationSeconds:120}),browserNativeMp4:true,
+  clientMode:'relay',body:{},nativeNetworkRecovery:false,nativeLiveNetworkRecovery:false,
+  authoritativeVodTier:'copy',authoritativeVodContainer:'mp4',serverOwnedEpisodeGateway:false,...change,
+ });
+ assert.equal(run({}).mode,'relay');
+ assert.equal(run({resolvedContainerObservation:{container:'mp4'}}).mode,'transcode');
+ assert.equal(run({resolvedContainerObservation:{container:'mp4'},clientMode:'transcode',body:{gatewayAutoMode:true}}).mode,'transcode');
+ assert.equal(run({serverPromotedProviderMp4:false,nativeNetworkRecovery:true,resolvedContainerObservation:{container:'mp4'}}).mode,'relay');
+ assert.equal(run({serverPromotedProviderMp4:false,clientMode:'direct',resolvedContainerObservation:{container:'mp4'}}).mode,'direct');
+});

@@ -4269,6 +4269,10 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 // Historical name: the finite broker is container-independent.
                 pathPrefix: 'finite-mkv-seek',
                 finiteWindowBytes: claims.nativeContainer === 'ts' ? 128 * 1024 : 8 * 1024 * 1024,
+                // A browser alternates distant audio/video packet ranges too.
+                // Complete/cache its first bounded chunk before an abandoned
+                // speculative 8 MiB read would incur the provider release delay.
+                finiteFirstWindowBytes: claims.nativeContainer === 'ts' ? 0 : 256 * 1024,
                 finiteAlignFirstWindow: claims.nativeContainer !== 'ts',
                 // Native TS binary seeking commonly corrects backwards by a
                 // few packets. Keep a bounded preceding slice in this session.
@@ -4277,7 +4281,8 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 // A TS decoder may still request its longer keyframe pre-roll
                 // after reading the first body. Finish this bounded transfer
                 // before growing steady playback to the normal 8 MiB windows.
-                finiteInitialSequentialWindowBytes: claims.nativeContainer === 'ts' ? 2 * 1024 * 1024 : 0,
+                finiteInitialSequentialWindowBytes: claims.nativeContainer === 'ts' ? 2 * 1024 * 1024 : 256 * 1024,
+                finiteSequentialGrowthBytes: 2 * 1024 * 1024,
                 // Native extractors read the header, then tail/index, then the
                 // resume position. Complete a bounded header before the first
                 // seek so its prefix can be reused without a second provider
@@ -6101,7 +6106,11 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
     }
     if (finiteSeek && (res.destroyed || res.writableEnded)) return;
     if (context.terminalError) return sendStrictLidBrokerError(res, context.terminalError);
-    await waitForStrictLidBrokerSlot(context);
+    // Cached finite bytes do not occupy a provider connection. Delaying them
+    // behind a previous remote teardown prevents libav from completing its
+    // local seek/close, and lets the old speculative range reopen first. Only
+    // actual provider I/O waits below, under the unchanged provider mutex.
+    if (!finiteSeek) await waitForStrictLidBrokerSlot(context);
     // The response can close BEFORE its close listener is installed below.
     if (finiteSeek && finiteSeekDemandClosed(context, null, res)) return;
     if (context.closed || (!finiteSeek && requestId !== context.latestRequestId)) {
@@ -6206,9 +6215,11 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 );
                 const effectiveWindowBytes = finiteWindowIsWarmup
                     ? context.finiteWarmupWindowBytes
+                    : (regularProviderWindowsCompleted === 0 && context.finiteFirstWindowBytes > 0)
+                        ? context.finiteFirstWindowBytes
                     : (regularProviderWindowsCompleted > 0 || forwarded >= context.finiteWindowBytes
                         ? context.finiteInitialSequentialWindowBytes > 0
-                            && forwarded < context.finiteInitialSequentialWindowBytes
+                            && forwarded < (context.finiteSequentialGrowthBytes || context.finiteInitialSequentialWindowBytes)
                             ? context.finiteInitialSequentialWindowBytes : context.finiteSequentialWindowBytes
                         : context.finiteWindowBytes);
                 finiteWindowRange = finiteMkvSeekWindowRange({
@@ -6635,11 +6646,13 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         // Keep materialising the bounded window for the cache
                         // and mono-slot guarantee, but defer local backpressure
                         // only until that provider window is fully drained.
-                        if (localChunk.length && !responseStarted) {
+                        const atomicWindow = context.finiteAtomicWindowBytes > 0
+                            && finiteProviderRange.end - finiteProviderRange.start + 1 <= context.finiteAtomicWindowBytes;
+                        if (!atomicWindow && localChunk.length && !responseStarted) {
                             startFiniteMkvSeekResponse(context, res, range);
                             responseStarted = true;
                         }
-                        if (localChunk.length && !res.write(localChunk)) finiteLocalBackpressured = true;
+                        if (!atomicWindow && localChunk.length && !res.write(localChunk)) finiteLocalBackpressured = true;
                     } else if (!res.write(chunk)) {
                         await waitForStrictLidDrain(res, controller.signal);
                     }
@@ -6726,6 +6739,20 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         attempt.localClosed = true;
                         break;
                     }
+                    // A small split-track window is received and released in
+                    // full before libav sees its first packet. Otherwise libav
+                    // closes after that packet, repeatedly abandoning the rest
+                    // and paying the remote teardown delay. Broad windows still
+                    // stream progress; user cancellation and deadlines still
+                    // abort this bounded read normally.
+                    if (context.finiteAtomicWindowBytes > 0 && windowLength <= context.finiteAtomicWindowBytes) {
+                        if (!responseStarted) {
+                            startFiniteMkvSeekResponse(context, res, range);
+                            responseStarted = true;
+                        }
+                        const localPayload = payload.subarray(Math.max(0, range.start - finiteProviderRange.start));
+                        if (localPayload.length && !res.write(localPayload)) finiteLocalBackpressured = true;
+                    }
                     if (
                         finiteLocalBackpressured
                         && !attempt.localClosed
@@ -6767,6 +6794,22 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     if (!context.terminalError && !timeoutKind
                         && (attempt.localClosed || attempt.stopReason === 'superseded' || attempt.stopReason === 'broker_closed')) {
                         strictRangeCollector?.commit(rangeReuse);
+                        // A split-track demuxer deliberately closes the current
+                        // range after obtaining its packet. Preserve only the
+                        // received, header/identity-validated prefix in this
+                        // session's bounded cache after the provider is drained.
+                        // Never mark it as a completed range or persist it across
+                        // sessions, and never retain timeout/transport failures.
+                        if (finiteSeek && context.finiteCacheAbandonedPrefix === true
+                            && attempt.stopReason === 'superseded'
+                            && !context.closed && diagnosticStage === 'body'
+                            && context.validator?.kind === 'etag'
+                            && finiteProviderRange && finiteBufferedBytes > 0
+                            && finiteBufferedBytes <= finiteProviderRange.end - finiteProviderRange.start + 1) {
+                            const prefix = Buffer.concat(bufferedChunks, finiteBufferedBytes);
+                            finiteMkvSeekCacheStore(context, { start: finiteProviderRange.start,
+                                end: finiteProviderRange.start + prefix.length - 1 }, prefix);
+                        }
                     }
                     throw error;
                 }
@@ -7121,6 +7164,8 @@ async function createStrictLidBroker(options = {}) {
         finiteWarmupWindowConsumed: false,
         finiteWarmupProviderWindows: 0,
         finiteSequentialWindowBytes: 0,
+        finiteSequentialGrowthBytes: pathPrefix === 'finite-mkv-seek' && Number.isSafeInteger(options.finiteSequentialGrowthBytes)
+            ? Math.max(0, Math.min(8 * 1024 * 1024, options.finiteSequentialGrowthBytes)) : 0,
         finiteCacheMaxBytes: 0,
         setTimer: typeof options.setTimer === 'function' ? options.setTimer : setTimeout,
         clearTimer: typeof options.clearTimer === 'function' ? options.clearTimer : clearTimeout,
@@ -7181,8 +7226,19 @@ async function createStrictLidBroker(options = {}) {
         : 0;
     context.finiteInitialSequentialWindowBytes = Number.isSafeInteger(options.finiteInitialSequentialWindowBytes)
         && options.finiteInitialSequentialWindowBytes > 0
-        ? Math.max(context.finiteWindowBytes,
+        ? Math.max(context.finiteSequentialGrowthBytes > 0 ? 64 * 1024 : context.finiteWindowBytes,
             Math.min(context.finiteSequentialWindowBytes, options.finiteInitialSequentialWindowBytes)) : 0;
+    // Disjoint MP4 tracks can alternate after just one packet. Complete a
+    // small first range so the next visit can reuse validated bytes instead
+    // of repeatedly abandoning an 8 MiB window. Sequential reads still grow.
+    context.finiteFirstWindowBytes = pathPrefix === 'finite-mkv-seek'
+        && Number.isSafeInteger(options.finiteFirstWindowBytes) && options.finiteFirstWindowBytes > 0
+        ? Math.max(64 * 1024, Math.min(context.finiteWindowBytes, options.finiteFirstWindowBytes)) : 0;
+    context.finiteCacheAbandonedPrefix = pathPrefix === 'finite-mkv-seek'
+        && options.finiteCacheAbandonedPrefix === true;
+    context.finiteAtomicWindowBytes = pathPrefix === 'finite-mkv-seek'
+        && Number.isSafeInteger(options.finiteAtomicWindowBytes) && options.finiteAtomicWindowBytes > 0
+        ? Math.min(1024 * 1024, options.finiteAtomicWindowBytes) : 0;
     context.finiteResumePrefixTargetBytes = Math.min(
         context.fileSizeBytes,
         context.finiteWindowBytes,
@@ -12567,6 +12623,14 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             session.finiteMp4SeekBroker = true;
             session.finiteMp4BufferObservation = windowedMp4Transport;
             await prepareFiniteMkvSeekBroker(session, sessionRequestAbortController.signal);
+            applyFiniteMp4AccurateResume(session);
+            // A resumed MP4 can earn the same decoded output proof as a cold
+            // retained MP4. This opts into verification, not eligibility:
+            // finalized segments, continuity and sustained rate still decide.
+            if ((videoModeForSession(session) === 'copy' || session.finiteMp4ResumeAligned === true)
+                && !multiAudioHlsEnabled(session) && !exactSubtitleHlsEnabled(session)) {
+                session.finiteVodOutputStartupFormat = 'mp4';
+            }
         }
         applyVaapiVodStartupReadiness(session);
         session.hlsCacheDescriptor = session.videoMode === 'copy'
@@ -15524,11 +15588,18 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         pathPrefix: 'finite-mkv-seek',
         finiteWindowBytes: effectiveWindowBytes,
         finiteSeekLookbehindBytes: finiteTs ? 256 * 1024 : 0,
-        finiteSeekContinuationGraceMs: finiteTs ? 50 : 0,
+        finiteSeekContinuationGraceMs: finiteTs || finiteMp4 ? 50 : 0,
+        // MP4 demuxers may parse cached packets for 100–350 ms before
+        // closing that local range. Use the existing bounded initial grace
+        // so this work cannot speculatively reopen a distant track window.
+        finiteInitialContinuationGraceMs: finiteMp4 ? 500 : 0,
         finiteAbandonedDrainMs: finiteTs || finiteMp4 ? 1500 : 0,
         finiteWarmupCueGraceMs: finiteTs ? 0 : FINITE_MKV_RESUME_CUE_GRACE_MS,
         finiteWarmupWindowBytes: warmupWindowBytes,
         finiteSequentialWindowBytes: sequentialWindowBytes,
+        finiteFirstWindowBytes: finiteMp4 ? 1024 * 1024 : 0,
+        finiteAtomicWindowBytes: finiteMp4 ? 1024 * 1024 : 0,
+        finiteCacheAbandonedPrefix: finiteMp4,
         finiteCacheBytes: FINITE_MKV_SEEK_CACHE_BYTES,
         finiteResumePrefixTargetBytes: finiteTs ? 0 : Math.min(effectiveWindowBytes, INBAND_HEADER_BYTES),
         finiteResumePrefixWeakValidationBytes: FINITE_MKV_RESUME_PREFIX_WEAK_VALIDATION_BYTES,
@@ -16659,7 +16730,22 @@ async function enrichRetainedFiniteVodProfile(session, signal = null) {
         if (format === 'mp4' && fileSizeBytesForSession(session)) {
             session.finiteMp4SeekBroker = true;
             const broker = await prepareFiniteMkvSeekBroker(session, signal);
-            local = await probeCodecProfileUncached(broker.inputUrl, session.userAgent, { signal, loopbackBroker: true });
+            try {
+                local = await probeCodecProfileUncached(broker.inputUrl, session.userAgent, { signal, loopbackBroker: true });
+            } catch (error) {
+                // A pre-graph failure never appears in /debug/sessions. Retain
+                // bounded transport counters before cleanup, without URLs,
+                // account/session identifiers, or FFprobe output.
+                console.warn('[media-gateway] finite MP4 profile preparation failed', JSON.stringify({
+                    providerFetches: broker.providerFetches,
+                    completedProviderFetches: broker.completedProviderFetches,
+                    interruptedProviderFetches: broker.interruptedProviderFetches,
+                    cacheHits: broker.cacheHits,
+                    cacheBytes: broker.cacheBytes,
+                    windowTrace: broker.windowTrace.slice(-12),
+                }));
+                throw error;
+            }
             if (broker.terminalError) throw broker.terminalError;
             local.fileSizeBytes = fileSizeBytesForSession(session);
             session.startupTimings.retainedVodFallback = 'shared-seekable-broker';
@@ -16945,7 +17031,7 @@ function startFfmpeg(session) {
     const forceAlignedHlsVideoEncode = (
         session.forceExactMatroskaH264Reencode === true ||
         session.forceAlignedMultiAudioVideoEncode === true ||
-        session.finiteTsResumeAligned === true
+        session.finiteTsResumeAligned === true || session.finiteMp4ResumeAligned === true
     );
     const localSpoolInput = session.authoritativeSpool?.path || null;
     const seekableMkvInput = !localSpoolInput && usesFiniteMkvSeekBroker(session);
@@ -17035,6 +17121,7 @@ function startFfmpeg(session) {
     } else {
         args.push(
             '-c:v', 'copy',
+            ...finiteMp4CopyVideoBitstreamArgs(session),
             ...audioArgs
         );
     }
@@ -17457,6 +17544,7 @@ function inputProbeArgsForSession(session) {
     session.startupTimings.finiteTsFastInput = session.finiteTsFastInput;
     session.startupTimings.finiteTsDurationScanSkipped = finiteTsKnownDuration;
     session.startupTimings.finiteTsResumeAligned = session.finiteTsResumeAligned === true;
+    session.startupTimings.finiteMp4ResumeAligned = session.finiteMp4ResumeAligned === true;
     if (session.finiteTsFastInput) {
         // Two long (e.g. 12-second) segments already cover this reserve.
         // Short segments still need enough finalized media and rate evidence.
@@ -19409,6 +19497,25 @@ function freezeMkvH264FastStart(session) {
     return assessment;
 }
 
+function applyFiniteMp4AccurateResume(session) {
+    if (session?.finiteMp4SeekBroker !== true || !(Number(session.seekOffset) > 0)
+        || !knownVodInputProbeEligible(session) || privateResumeFormat(session) !== 'mp4'
+        || multiAudioHlsEnabled(session) || exactSubtitleHlsEnabled(session)
+        || VIDEO_ENCODER_CONFIG.backend !== 'vaapi' || VIDEO_ENCODER_PREFLIGHT.ready !== true) return false;
+    const profile = asRecord(session.codecProfile);
+    const width = Number(profile.videoWidth ?? profile.video_width ?? profile.width);
+    const height = Number(profile.videoHeight ?? profile.video_height ?? profile.height);
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0
+        || width > 1920 || height > 1080) return false;
+    // Indexed input seeking decodes the preceding keyframe and discards preroll
+    // up to the requested timestamp. Copy cannot do this: it can leave seconds
+    // of leading audio before the next IDR. Encode both streams at the same seek.
+    session.videoMode = 'encode';
+    session.videoModeReason = 'finite_mp4_accurate_resume';
+    session.finiteMp4ResumeAligned = true;
+    return true;
+}
+
 function applyVaapiVodStartupReadiness(session) {
     if (
         (!isFiniteMkvVodSession(session) && !session.finiteVodOutputStartupFormat) ||
@@ -20565,6 +20672,18 @@ function audioModeForSession(session) {
     return shouldCopyAudio(session) ? 'copy' : 'transcode';
 }
 
+function finiteMp4CopyVideoBitstreamArgs(session) {
+    const profile = asRecord(session.codecProfile);
+    const codec = normalizeCodecToken(session.videoCodec || profile.videoCodec || profile.video_codec || profile.video);
+    if (session.finiteMp4SeekBroker !== true || videoModeForSession(session) !== 'copy'
+        || !['h264', 'avc', 'avc1'].includes(codec)) return [];
+    // MP4 carries SPS/PPS out of band. Auto Annex-B conversion can leave SEI
+    // and non-IDR packets ahead of the first parameter sets in a TS segment.
+    // Preserve every frame and timestamp; prepend the actual demuxer extradata
+    // after converting it to Annex B. The normal output decode proof still runs.
+    return ['-bsf:v', 'h264_mp4toannexb,dump_extra=freq=all'];
+}
+
 function videoModeForSession(session) {
     if (session.videoMode === 'encode' || session.videoMode === 'copy') return session.videoMode;
     return (
@@ -20625,7 +20744,7 @@ function mappedSubtitleStreamIndexForSession(session) {
 
 function shouldCopyAudio(session) {
     if (session?.privateResumeLease) return false;
-    if (session?.finiteTsResumeAligned === true) return false;
+    if (session?.finiteTsResumeAligned === true || session?.finiteMp4ResumeAligned === true) return false;
     // Input seeking trims decoded video to the requested frame, but copied
     // AAC can retain packets from the preceding MKV cue. Decode audio too so
     // both streams start together; origin and all-copy graphs stay unchanged.
@@ -21968,7 +22087,7 @@ async function waitForPlaylist(session, timeoutMs, abortSignal = null) {
                 session.startupTimings.sustainedMediaProductionRateX = video.sustainedMediaProductionRateX;
                 if ((session.finiteTsFastInput === true || session.finiteVodOutputStartupFormat) && FINITE_TS_FAST_START_ENABLED
                     && !multiAudioHlsEnabled(session) && !exactSubtitleHlsEnabled(session)
-                    && (videoModeForSession(session) === 'copy' || session.finiteTsResumeAligned === true)
+                    && (videoModeForSession(session) === 'copy' || session.finiteTsResumeAligned === true || session.finiteMp4ResumeAligned === true)
                     && !session.finiteTsStartupEvidence) {
                     const proofStartedAt = Date.now();
                     session.finiteTsStartupEvidence = video.inspection.discontinuityCount === 0

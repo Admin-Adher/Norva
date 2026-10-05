@@ -1,0 +1,18 @@
+{
+  "date":"2026-10-05",
+  "title":"March of the Penguins",
+  "provider":"Promax 4K OTT",
+  "operatorUiStarts":7,
+  "results":[
+    {"label":"fr1","started":true,"ttffMs":6302,"resume":true},
+    {"label":"fr2","started":true,"ttffMs":7143,"initialUserFailureConcordantWithContainerCorrection":true},
+    {"label":"fr3","initialStatus":409,"gatewayReadyBeforeRejection":true,"secondStarted":true,"secondTtffMs":41601},
+    {"label":"en","started":true,"ttffMs":4313},
+    {"label":"ar","started":false,"firstError":"codec_probe_timeout","secondError":"Playlist was not generated","secondGatewayStatus":502,"zeroBytesProved":false}
+  ],
+  "finding":"Prepared playback receipt compares original MKV URL hash after its own attested MP4 correction; deployed guard reproduced locally with other guards mocked valid.",
+  "codeChanged":false,
+  "deployed":false,
+  "finalUi":"French 1 selected, playback stopped",
+  "report":"2026-10-05-promax-penguins-launch-audit.md"
+}

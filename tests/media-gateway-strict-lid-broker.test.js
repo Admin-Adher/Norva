@@ -11,6 +11,33 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const gatewayPath = path.join(root, 'services/media-gateway/src/index.js');
 const gatewaySource = fs.readFileSync(gatewayPath, 'utf8');
+test('MP4 copied header filter preserves decoded frames and timestamps', { skip: process.env.NORVA_MP4_HEADER_PROOF !== '1' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'norva-mp4-headers-'));
+  const run = args => {
+    const result = spawnSync('ffmpeg', ['-hide_banner', '-v', 'error', '-nostdin', '-y', ...args], { encoding: 'utf8', timeout: 15000 });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, '');
+    return result.stdout.split('\n').filter(line => line && !line.startsWith('#')).join('\n');
+  };
+  try {
+    const input = path.join(dir, 'input.mp4');
+    run(['-f', 'lavfi', '-i', 'testsrc2=size=160x128:rate=25:duration=2', '-c:v', 'libx264', '-threads', '1', '-g', '25', '-pix_fmt', 'yuv420p', input]);
+    const start = gatewaySource.indexOf('function finiteMp4CopyVideoBitstreamArgs(session) {');
+    const end = gatewaySource.indexOf('function videoModeForSession(session) {', start);
+    const argsFor = vm.runInNewContext(`(${gatewaySource.slice(start, end)})`, {
+      asRecord: value => value || {}, normalizeCodecToken: value => value,
+      videoModeForSession: () => 'copy',
+    });
+    for (const label of ['baseline', 'headers']) run(['-i', input, '-c:v', 'copy',
+      ...(label === 'headers' ? Array.from(argsFor({ finiteMp4SeekBroker: true, videoCodec: 'h264' })) : []),
+      '-f', 'mpegts', path.join(dir, label + '.ts')]);
+    const proof = label => run(['-xerror', '-err_detect', 'explode', '-threads', '1', '-i', path.join(dir, label + '.ts'), '-map', '0:v:0', '-f', 'framehash', '-']);
+    const baseline = proof('baseline');
+    assert.equal(baseline.split('\n').length, 50);
+    assert.equal(proof('headers'), baseline);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
 const { StrictLidRangeReuse, createStrictRangeCollector } = require('../services/media-gateway/src/strict-lid-range-reuse');
 
 function brokerHarness(diagnosticLogs = null) {
@@ -3530,3 +3557,153 @@ for (const initialGrace of [0, 500]) test(`native MP4 tail then cached prefix re
   } else assert.equal(calls.some(range => range.startsWith('bytes=8-')), true);
 });
 
+
+test('disjoint MP4 packet reads reuse complete small ranges without provider overlap', {timeout:10000}, async t => {
+  const data=Buffer.alloc(20*1024*1024,0x35);const ranges=[];let active=0,maxActive=0;
+  const provider=http.createServer((req,res)=>{
+    const m=/^bytes=(\d+)-(\d+)$/.exec(req.headers.range);const start=Number(m[1]),end=Number(m[2]);
+    ranges.push([start,end]);active++;maxActive=Math.max(maxActive,active);
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1,ETag:'"disjoint-v1"'});
+    let ended=false;const finished=()=>{if(!ended){ended=true;active--;}};
+    let cursor=start;const timer=setInterval(()=>{const next=Math.min(end+1,cursor+64*1024);res.write(data.subarray(cursor,next));cursor=next;if(cursor>end){clearInterval(timer);finished();res.end();}},10);
+    res.once('close',()=>{clearInterval(timer);finished();});
+  });
+  const sourceUrl=await listen(provider);
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,pathPrefix:'finite-mkv-seek',
+    finiteWindowBytes:8*1024*1024,finiteSequentialWindowBytes:8*1024*1024,finiteFirstWindowBytes:256*1024,finiteSeekContinuationGraceMs:50,finiteInitialContinuationGraceMs:500,
+    finiteCacheBytes:16*1024*1024,finiteAbandonedDrainMs:100,releaseDelayMs:0,completedReleaseDelayMs:0,supersededReleaseDelayMs:0});
+  t.after(async()=>{await broker.close();await closeServer(provider);});
+  const packet=start=>new Promise((resolve,reject)=>{
+    const request=http.get(broker.inputUrl,{headers:{Range:`bytes=${start}-${data.length-1}`}},response=>{
+      response.once('data',chunk=>{assert.deepEqual(chunk.subarray(0,608),data.subarray(start,start+608));setTimeout(()=>{request.destroy();resolve();},200);});
+      response.on('error',()=>{});
+    });request.on('error',reject);
+  });
+  for(let i=0;i<5;i++){await packet(1024+i*608);await packet(12*1024*1024+1024+i*608);}
+
+  assert.equal(maxActive,1);assert.equal(ranges.length,2,'each remote track window must finish once and then be reused');
+  assert.ok(ranges.every(([start,end])=>end-start+1<=256*1024));
+  assert.equal(broker.terminalError,null);
+});
+
+test('small MP4 first range grows for sustained sequential delivery',async t=>{
+ const data=Buffer.alloc(2*1024*1024,0x45),ranges=[];
+ const provider=http.createServer((req,res)=>{ranges.push(req.headers.range);sendExactRange(req,res,data);});
+ const sourceUrl=await listen(provider);const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,
+  pathPrefix:'finite-mkv-seek',finiteWindowBytes:1024*1024,finiteSequentialWindowBytes:1024*1024,finiteFirstWindowBytes:256*1024,releaseDelayMs:0,completedReleaseDelayMs:0});
+ t.after(async()=>{await broker.close();await closeServer(provider);});
+ const response=await fetch(broker.inputUrl,{headers:{Range:`bytes=0-${data.length-1}`}});
+ assert.deepEqual(Buffer.from(await response.arrayBuffer()),data);assert.equal(ranges[0],'bytes=0-262143');
+ assert.equal(ranges[1],'bytes=262144-1310719');assert.equal(broker.interruptedProviderFetches,0);
+});
+
+
+test('native MP4 packet bursts remain bounded until sustained delivery is demonstrated',async t=>{
+ const data=Buffer.alloc(3*1024*1024,0x46),ranges=[];
+ const provider=http.createServer((req,res)=>{ranges.push(req.headers.range);sendExactRange(req,res,data);});
+ const sourceUrl=await listen(provider);const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,
+  pathPrefix:'finite-mkv-seek',finiteWindowBytes:1024*1024,finiteSequentialWindowBytes:1024*1024,
+  finiteFirstWindowBytes:256*1024,finiteInitialSequentialWindowBytes:256*1024,finiteSequentialGrowthBytes:1024*1024,
+  releaseDelayMs:0,completedReleaseDelayMs:0});
+ t.after(async()=>{await broker.close();await closeServer(provider);});
+ const response=await fetch(broker.inputUrl,{headers:{Range:`bytes=0-${data.length-1}`}});
+ assert.deepEqual(Buffer.from(await response.arrayBuffer()),data);
+ assert.deepEqual(ranges.slice(0,5),['bytes=0-262143','bytes=262144-524287','bytes=524288-786431','bytes=786432-1048575','bytes=1048576-2097151']);
+ assert.equal(broker.interruptedProviderFetches,0);
+});
+
+
+test('MP4 precise resume emits aligned decoded audio and video on the real GPU', { skip: process.env.NORVA_MP4_HEADER_PROOF !== '1' }, () => {
+    const {execFileSync}=require('node:child_process');
+    const os=require('node:os'),path=require('node:path'),fs=require('node:fs'),vm=require('node:vm');
+    const root=fs.mkdtempSync(path.join(os.tmpdir(),'norva-mp4-resume-'));
+    const gateway=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
+    const begin=gateway.indexOf('function seekArgsForSession('),end=gateway.indexOf('\nfunction ',begin+1);
+    const seek=vm.runInNewContext(`(${gateway.slice(begin,end)})`,{
+        isFiniteMkvVodSession:()=>false,usesFiniteMkvSeekBroker:()=>true,exactSubtitleHlsEnabled:()=>false,
+    })({seekOffset:1.37,finiteMp4SeekBroker:true,finiteMp4ResumeAligned:true},true);
+    const ff=args=>execFileSync('ffmpeg',['-hide_banner','-loglevel','error','-y',...args],{timeout:20000});
+    try {
+        ff(['-f','lavfi','-i','testsrc2=size=320x180:rate=25:duration=8','-f','lavfi','-i','sine=frequency=440:duration=8',
+            '-c:v','libx264','-threads','1','-g','100','-keyint_min','100','-sc_threshold','0','-c:a','aac',root+'/input.mp4']);
+        ff(['-vaapi_device','/dev/dri/renderD128',...seek.preInputSeek,'-i',root+'/input.mp4',...seek.postInputSeek,
+            '-t','4','-vf','format=nv12,hwupload','-c:v','h264_vaapi','-g','50','-bf','0','-c:a','aac','-f','mpegts',root+'/output.ts']);
+        const streams=JSON.parse(execFileSync('ffprobe',['-v','error','-show_entries','stream=codec_type,start_time','-of','json',root+'/output.ts'],{timeout:10000})).streams;
+        const video=Number(streams.find(s=>s.codec_type==='video').start_time),audio=Number(streams.find(s=>s.codec_type==='audio').start_time);
+        assert.ok(Number.isFinite(video)&&Number.isFinite(audio));assert.ok(Math.abs(video-audio)<0.1,`track offset ${video-audio}`);
+        ff(['-xerror','-i',root+'/output.ts','-t','4','-f','null','-']);
+    } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+
+test('split-track MP4 deliberate close reuses only received validated bytes after provider teardown', {timeout:8000},async(t)=>{
+ const data=Buffer.alloc(2*1024*1024,53),calls=[];let active=0,peak=0;
+ const provider=http.createServer((req,res)=>{
+  calls.push(req.headers.range);active++;peak=Math.max(peak,active);const {start,end}=exactRange(req,data.length);
+  res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1,ETag:'"partial-v1"'});
+  let cursor=start;const timer=setInterval(()=>{const next=Math.min(end+1,cursor+16384);res.write(data.subarray(cursor,next));cursor=next;if(cursor>end){clearInterval(timer);res.end()}},20);
+  res.once('close',()=>{clearInterval(timer);active--});
+ });
+ const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+ const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,dispatcher:null,
+  pathPrefix:'finite-mkv-seek',finiteWindowBytes:2*1024*1024,finiteFirstWindowBytes:256*1024,
+  finiteCacheAbandonedPrefix:true,finiteCacheBytes:data.length,finiteAbandonedDrainMs:30,
+  releaseDelayMs:0,supersededReleaseDelayMs:0});t.after(()=>broker.close());
+ const r=await fetch(broker.inputUrl,{headers:{Range:'bytes=0-2097151'}}),reader=r.body.getReader();
+ assert.ok((await reader.read()).value.length>0);await reader.cancel();
+ // The following read queues on the same provider mutex until teardown and
+ // prefix publication; it must never open a second provider connection.
+ await new Promise(resolve=>setTimeout(resolve,100));
+ const copy=await fetch(broker.inputUrl,{headers:{Range:'bytes=0-8191'}});
+ assert.deepEqual(Buffer.from(await copy.arrayBuffer()),data.subarray(0,8192));
+ assert.equal(calls.length,1);assert.equal(peak,1);assert.equal(broker.completedProviderFetches,0);
+ assert.equal(broker.interruptedProviderFetches,1);assert.ok(broker.cacheHits>0);
+ const uncached=await fetch(broker.inputUrl,{headers:{Range:'bytes=524288-532479'}});
+ assert.deepEqual(Buffer.from(await uncached.arrayBuffer()),data.subarray(524288,532480));assert.equal(calls.length,2);
+});
+
+test('MP4 atomic first window drains before demuxer packet cancellation and reuses exact bytes', {timeout:10000}, async(t)=>{
+ const data=Buffer.alloc(2*1024*1024,71);let active=0,peak=0,calls=0,finished=0;
+ const provider=http.createServer((req,res)=>{
+  calls++;active++;peak=Math.max(peak,active);const {start,end}=exactRange(req,data.length);
+  res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1,ETag:'"atomic-v1"'});
+  let cursor=start;const timer=setInterval(()=>{const next=Math.min(end+1,cursor+16384);res.write(data.subarray(cursor,next));cursor=next;if(cursor>end){finished++;clearInterval(timer);res.end()}},5);
+  res.once('close',()=>{clearInterval(timer);active--});
+ });
+ const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+ const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,dispatcher:null,
+  pathPrefix:'finite-mkv-seek',finiteWindowBytes:2*1024*1024,finiteFirstWindowBytes:1024*1024,
+  finiteAtomicWindowBytes:1024*1024,finiteCacheBytes:data.length,finiteInitialContinuationGraceMs:500,
+  releaseDelayMs:0,supersededReleaseDelayMs:2500});t.after(()=>broker.close());
+ const r=await fetch(broker.inputUrl,{headers:{Range:'bytes=0-2097151'}}),reader=r.body.getReader();
+ const first=await reader.read();assert.ok(first.value.length>0);assert.equal(finished,1);await reader.cancel();
+ const cached=await fetch(broker.inputUrl,{headers:{Range:'bytes=524288-1048575'}});
+ assert.deepEqual(Buffer.from(await cached.arrayBuffer()),data.subarray(524288,1048576));
+ assert.equal(calls,1);assert.equal(peak,1);assert.equal(broker.completedProviderFetches,1);assert.equal(broker.interruptedProviderFetches,0);
+});
+
+test('real split-track MP4 demuxing serves cache during remote release grace', {timeout:60000,skip:process.env.NORVA_MP4_HEADER_PROOF !== '1'},async(t)=>{
+ const {execFileSync,execFile}=require('node:child_process'),{promisify}=require('node:util');
+ const dir=fs.mkdtempSync('/tmp/split-demux-');t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ execFileSync('ffmpeg',['-v','error','-f','lavfi','-i','testsrc2=size=640x360:rate=25:duration=12','-f','lavfi','-i','sine=duration=12','-c:v','libx264','-threads','1','-crf','16','-c:a','aac',dir+'/normal.mp4']);
+ const original=fs.readFileSync(dir+'/normal.mp4'),copy=Buffer.from(original),tables=[];let mdat;
+ function walk(start,end){for(let p=start;p+8<=end;){const n=original.readUInt32BE(p),type=original.toString('ascii',p+4,p+8);if(n<8||p+n>end)throw Error('atom');if(type==='mdat')mdat={start:p+8,end:p+n};if(type==='stco'){const offsets=[];for(let i=0;i<original.readUInt32BE(p+12);i++)offsets.push({slot:p+16+i*4,offset:original.readUInt32BE(p+16+i*4)});tables.push(offsets)}if(['moov','trak','mdia','minf','stbl'].includes(type))walk(p+8,p+n);p+=n;}}
+ walk(0,original.length);assert.equal(tables.length,2);
+ const sorted=tables.flat().sort((a,b)=>a.offset-b.offset),ends=new Map(sorted.map((v,i)=>[v.offset,sorted[i+1]?.offset||mdat.end]));
+ let cursor=mdat.start;for(const table of tables)for(const entry of table){const chunk=original.subarray(entry.offset,ends.get(entry.offset));chunk.copy(copy,cursor);copy.writeUInt32BE(cursor,entry.slot);cursor+=chunk.length;}assert.equal(cursor,mdat.end);
+ const gap=16*1024*1024,splitAt=copy.readUInt32BE(tables[1][0].slot),padded=Buffer.concat([copy.subarray(0,splitAt),Buffer.alloc(gap),copy.subarray(splitAt)]);
+ padded.writeUInt32BE(copy.readUInt32BE(mdat.start-8)+gap,mdat.start-8);
+ for(const table of tables)for(const entry of table){const slot=entry.slot>=splitAt?entry.slot+gap:entry.slot;const off=copy.readUInt32BE(entry.slot);padded.writeUInt32BE(off>=splitAt?off+gap:off,slot);}
+ fs.writeFileSync(dir+'/split.mp4',padded);execFileSync('ffmpeg',['-v','error','-xerror','-i',dir+'/split.mp4','-t','3','-f','null','-']);
+ const calls=[];let active=0,peak=0;const provider=http.createServer((req,res)=>{active++;peak=Math.max(peak,active);let closed=false;const release=()=>{if(!closed){closed=true;active--}};res.once('close',release);res.once('finish',release);const {start,end}=exactRange(req,padded.length);calls.push({at:Date.now(),range:req.headers.range});
+ res.writeHead(206,{'Content-Length':end-start+1,'Content-Range':`bytes ${start}-${end}/${padded.length}`,ETag:'"split-v1"'});
+ let cursor=start;const timer=setInterval(()=>{const next=Math.min(end+1,cursor+16384);res.write(padded.subarray(cursor,next));cursor=next;if(cursor>end){clearInterval(timer);res.end()}},50);res.once('close',()=>clearInterval(timer));});
+ const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+ const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:padded.length,dispatcher:null,
+  pathPrefix:'finite-mkv-seek',finiteWindowBytes:1024*1024,finiteFirstWindowBytes:64*1024,finiteCacheAbandonedPrefix:true,
+  finiteSequentialWindowBytes:1024*1024,finiteCacheBytes:8*1024*1024,finiteInitialContinuationGraceMs:500,finiteSeekContinuationGraceMs:50,
+  finiteAbandonedDrainMs:1500,completedReleaseDelayMs:0,supersededReleaseDelayMs:2500,releaseDelayMs:2500});t.after(()=>broker.close());
+ const started=Date.now();let failure=null;
+ try{await promisify(execFile)('ffmpeg',['-v','error','-analyzeduration','500000','-probesize','65536','-ss','1.37','-i',broker.inputUrl,'-t','3','-f','null','-'],{timeout:30000});}catch(e){failure={code:e.code,killed:e.killed,stderr:e.stderr?.slice(-400)}}
+ assert.equal(peak,1);assert.equal(failure,null);
+});
