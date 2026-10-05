@@ -3644,8 +3644,8 @@ test('split-track MP4 grows reopened ranges after completed warmup without extra
   pathPrefix:'finite-mkv-seek',finiteWindowBytes:2*1024*1024,finiteFirstWindowBytes:256*1024,
   finiteSteadyFirstWindowBytes:2*1024*1024,finiteCacheBytes:data.length,releaseDelayMs:0});t.after(()=>broker.close());
  for(let i=0;i<4;i++){const start=i*256*1024,r=await fetch(broker.inputUrl,{headers:{Range:`bytes=${start}-${start+256*1024-1}`}});assert.deepEqual(Buffer.from(await r.arrayBuffer()),data.subarray(start,start+256*1024));}
- const r=await fetch(broker.inputUrl,{headers:{Range:`bytes=${1024*1024}-${3*1024*1024-1}`}});
- assert.deepEqual(Buffer.from(await r.arrayBuffer()),data.subarray(1024*1024,3*1024*1024));
- assert.equal(calls.length,5);assert.equal(calls[4],`bytes=${1024*1024}-${3*1024*1024-1}`);
+ const r=await fetch(broker.inputUrl,{headers:{Range:`bytes=${2*1024*1024}-${4*1024*1024-1}`}});
+ assert.deepEqual(Buffer.from(await r.arrayBuffer()),data.subarray(2*1024*1024,4*1024*1024));
+ assert.equal(calls.length,5);assert.equal(calls[4],`bytes=${2*1024*1024}-${4*1024*1024-1}`);
  assert.equal(peak,1);assert.equal(broker.interruptedProviderFetches,0);
 });
