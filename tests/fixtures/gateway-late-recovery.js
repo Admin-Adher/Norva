@@ -13,6 +13,17 @@ async function verifyGatewayLateRecovery(WatchPage, Hls, tick) {
         || startup.video.currentTime !== 0.880333 || startup.gatewayBufferedAheadSeconds() < 6) {
         throw Error('positive initial timestamp deadlocked the startup gate');
     }
+    // A Breed Apart: a fresh paused timeline begins at 3.569333, not zero.
+    startup.video.played = { length: 0 };
+    startup.video.currentTime = 0;
+    startup.video.seekable = { length: 1, start: () => 3.569333 };
+    startup.video.buffered = { length: 1, start: () => 3.569333, end: () => 100 };
+    startupHls.levels[0].details = { live: true, startSN: 0,
+        fragments: [{ sn: 0, start: 3.569333, duration: 2 }] };
+    if (!await startup.waitForGatewayStartupBuffer(1, startupHls, { minimumSeconds: 96, timeoutMs: 1000 })
+        || startup.video.currentTime !== 3.569333) {
+        throw Error('attested first-fragment origin did not unblock the full reserve');
+    }
     for (const userPaused of [false, true]) {
         let plays = 0, waits = 0;
         const page = Object.create(WatchPage.prototype);

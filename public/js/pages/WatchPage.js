@@ -6081,13 +6081,17 @@ class WatchPage {
         this._gatewayStartupAdaptiveEvidence = null;
         while (Date.now() < deadline) {
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== hls) return false;
-            // A resumed HLS file can begin slightly after zero (Bolt: 0.880333s).
-            // While paused, hls.js has not jumped to that first playable sample:
-            // waiting for a range containing zero then deadlocks a full buffer.
-            // Align only a fresh, paused origin to an already buffered sample,
-            // with the entire normal reserve present. Never cross a later gap,
-            // override a pending seek/user pause, or shorten the startup floor.
             const startupVideo = this.video;
+            const levels = Array.isArray(hls?.levels) ? hls.levels : [];
+            const currentLevel = Number.isInteger(hls?.currentLevel) && hls.currentLevel >= 0
+                ? hls.currentLevel : 0;
+            const details = levels[currentLevel]?.details || levels[0]?.details || null;
+            let origin = null;
+            let bufferedAhead = this.gatewayBufferedAheadSeconds();
+            // Measure a fresh origin without moving the playhead before its
+            // reserve is earned. Native buffered/seekable ranges attest the
+            // playable start; a first EVENT/VOD fragment prevents treating a
+            // slid playlist or a later playback hole as a new origin.
             if (startupVideo?.paused === true && !startupVideo.ended && !startupVideo.seeking
                 && Number(startupVideo.currentTime) === 0 && Number(startupVideo.readyState) >= 2
                 && this._playStartedReported !== true && !this._gatewayUserPaused
@@ -6097,15 +6101,32 @@ class WatchPage {
                     if (ranges.length > 0) {
                         const start = Number(ranges.start(0));
                         const end = Number(ranges.end(0));
-                        if (Number.isFinite(start) && start > 0 && start <= 1
-                            && Number.isFinite(end) && end - start >= minimumSeconds) {
-                            startupVideo.currentTime = start;
+                        const first = details?.fragments?.[0];
+                        const seekable = startupVideo.seekable;
+                        const attestedFirstOrigin = startupVideo.played?.length === 0
+                            && seekable?.length > 0
+                            && Math.abs(Number(seekable.start(0)) - start) <= 0.25
+                            && Number.isInteger(details?.startSN) && details.startSN >= 0 && details.startSN <= 1
+                            && first?.sn === details.startSN
+                            && Number.isFinite(first?.duration) && first.duration > 0 && first.duration <= 12.25
+                            && Number.isFinite(first?.start) && first.start <= start
+                            && start < first.start + first.duration;
+                        if (Number.isFinite(start) && start > 0 && start <= 12.25
+                            && (start <= 1 || attestedFirstOrigin)
+                            && Number.isFinite(end) && end > start) {
+                            origin = start;
+                            bufferedAhead = end - start;
                         }
                     }
-                } catch (_) { /* A live TimeRanges change must keep the gate closed. */ }
+                } catch (_) { /* Changing ranges do not attest an origin. */ }
             }
-            const bufferedAhead = this.gatewayBufferedAheadSeconds();
-            if (bufferedAhead >= minimumSeconds) return true;
+            const admit = () => {
+                if (origin !== null) {
+                    try { startupVideo.currentTime = origin; } catch (_) { return false; }
+                }
+                return true;
+            };
+            if (bufferedAhead >= minimumSeconds) return admit();
 
             // The viewer may explicitly press Play while a deliberately deep
             // slow-source gate is still filling. Once media time is genuinely
@@ -6123,11 +6144,6 @@ class WatchPage {
             // A genuinely complete short item cannot reach the normal movie
             // threshold. Admit it only after virtually all declared media is
             // already resident in the browser buffer.
-            const levels = Array.isArray(hls?.levels) ? hls.levels : [];
-            const currentLevel = Number.isInteger(hls?.currentLevel) && hls.currentLevel >= 0
-                ? hls.currentLevel
-                : 0;
-            const details = levels[currentLevel]?.details || levels[0]?.details || null;
             if (options.adaptive === true && this.video?.paused && Number(this.video.currentTime) <= 0.25) {
                 const now = Date.now();
                 const durations = (Array.isArray(details?.fragments) ? details.fragments : [])
@@ -6144,9 +6160,9 @@ class WatchPage {
                 // Exclude the first burst (already present at the Gateway) and
                 // require several later appends over real elapsed time. Disjoint
                 // ranges, buffer regressions and long gaps restart observation.
-                if (!growth || bufferedAhead < growth.lastBuffer - 0.25
+                if (!growth || growth.origin !== origin || bufferedAhead < growth.lastBuffer - 0.25
                     || now - growth.lastAt > maximumGapMs || now - growth.at > observationMs) {
-                    growth = bufferedAhead > 0 ? { at: now, buffer: bufferedAhead,
+                    growth = bufferedAhead > 0 ? { origin, at: now, buffer: bufferedAhead,
                         lastBuffer: bufferedAhead, lastAt: now, appends: 0 } : null;
                 } else if (bufferedAhead >= growth.lastBuffer + 0.25) {
                     growth.lastBuffer = bufferedAhead;
@@ -6165,13 +6181,13 @@ class WatchPage {
                         bufferedSeconds: bufferedAhead, rateX: Number(rate.toFixed(3)),
                     };
                     this.recordPlaybackStartupPhase?.('adaptiveBufferReady', playbackAttemptId);
-                    return true;
+                    return admit();
                 }
             }
             const totalDuration = Number(details?.totalduration);
             if (details?.live === false && Number.isFinite(totalDuration) && totalDuration > 0) {
                 const completeTarget = Math.max(1, Math.min(minimumSeconds, totalDuration) - 0.5);
-                if (bufferedAhead >= completeTarget) return true;
+                if (bufferedAhead >= completeTarget) return admit();
             }
             await new Promise(resolve => setTimeout(resolve, 100));
         }
@@ -7182,6 +7198,10 @@ class WatchPage {
             this.video.load();
         }
 
+        // A seek replaces the HLS graph. Startup evidence and observers belong
+        // to that graph, not to the previously playing session.
+        this.beginPlaybackTelemetry(null, playbackAttemptId);
+
         let playbackHint = {
             ...(MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(playbackIdentity.playbackItem, { container, streamType: itemType })
@@ -7811,6 +7831,9 @@ class WatchPage {
     }
 
     onPlay() {
+        // A queued event from a torn-down element must not report a successful
+        // start for a failed replacement session.
+        if (this.video?.paused || this.video?.error) return;
         // Update play/pause button icons
         this.playPauseBtn?.querySelector('.icon-play')?.classList.add('hidden');
         this.playPauseBtn?.querySelector('.icon-pause')?.classList.remove('hidden');
