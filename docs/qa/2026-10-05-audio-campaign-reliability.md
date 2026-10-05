@@ -60,7 +60,7 @@ At **08:21 Paris**, the same initial manifest of **56,751 variants / 43,125 titl
 | Unknown variants | 48,115 | -81 |
 | Unknown titles | 38,216 | -73 |
 
-The intermediate predeployment readings at 08:15–08:17 were 26,029 checked / 8,620 identified / 48,131 unknown. The subsequent +49 checks and +16 identifications straddle deployment and must not all be attributed to it. At 08:26 Paris, strict audit remains **43 complete validations / 87 complete inconclusive compatible analyses**; these sets overlap and are not added to the historical counter. The five owner-listening confirmations are separate and their stored evidence is unchanged.
+The intermediate predeployment readings at 08:15–08:17 were 26,029 checked / 8,620 identified / 48,131 unknown. The subsequent +49 checks and +16 identifications straddle deployment and must not all be attributed to it. At 08:25 Paris, strict audit remains **43 complete validations / 87 complete inconclusive compatible analyses**; these sets overlap and are not added to the historical counter. The five owner-listening confirmations are separate and their stored evidence is unchanged.
 
 The four target-copy audit at 08:21 confirms Bolt still verified and Lost/Ochi/Mars still incomplete with their original 6 October retry/quarantine deadlines and evidence preserved. No new manual job or sampling pass was admitted. Three of the six requested exact copies remain established: Innocent es and Prey en by human listening, Bolt en by strict validation.
 
