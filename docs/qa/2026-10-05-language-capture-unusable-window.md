@@ -54,6 +54,10 @@ l'acquisition. Ce cas doit terminer le travail comme **incomplet et indisponible
 avec le délai existant de la fonction d'échec. Les pannes VAD, les annulations
 et les reports de calcul restent transitoires. Aucun reçu de langue ne peut être
 créé pour l'extrait incomplet ; aucun ancien reçu n'est prolongé ou réécrit.
+Le helper Edge applique son délai existant de vingt-quatre heures avant l'appel
+SQL. Ce délai n'annonce pas une relance automatique : l'admission automatique
+conserve le résultat terminal du même profil. Une demande manuelle ultérieure
+doit respecter ce délai et les autres gardes ordinaires.
 
 Les seuils de langue, les vingt secondes requises, les strates, les ancres,
 les durées de conservation, la mono-connexion et la priorité lecture restent
@@ -70,7 +74,7 @@ leurs nombres ne s'additionnent pas.
 
 Le nouveau test fait passer un PCM synthétique de même durée par le sampler,
 le mapping Gateway, la réponse HTTP et le worker Edge réels. Il vérifie un
-échec terminal incomplet, le recours au délai SQL existant, aucun appel
+échec terminal incomplet, le recours au délai d'échec existant, aucun appel
 Whisper, aucune acquisition supplémentaire, aucun ACK et aucun nouveau reçu.
 Les cas VAD indisponible, invalide ou échoué conservent leur report court.
 Une capture de quarante secondes sans parole reste analysable à l'ancre ;

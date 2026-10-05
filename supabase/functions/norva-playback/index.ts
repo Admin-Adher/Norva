@@ -5423,7 +5423,7 @@ function languageValidationTaskRetryAt(error: unknown) {
   const details = error instanceof HttpError ? recordOrEmpty(error.details) : {};
   const blockedUntil = stringOrNull(details.blockedUntil);
   if (blockedUntil && Number.isFinite(Date.parse(blockedUntil))) return blockedUntil;
-  // null delegates to the fail RPC's existing one-day retry policy. It must
+  // null delegates to failLanguageValidationJob's existing daily retry policy. It must
   // precede the short local-inference retry prefix below.
   if (code === "LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE") return null;
   // Local retries must occur inside the private audio TTL, not the historical

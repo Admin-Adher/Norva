@@ -307,7 +307,7 @@ test('short no-speech PCM flows through actual sampler, Gateway and Edge as inco
     assert.equal(f.failures.length, 1);
     assert.equal(f.failures[0].errorCode, 'LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE');
     assert.equal(f.failures[0].terminal, true);
-    assert.equal(f.failures[0].retryAt, null, 'use fail RPC existing one-day default, not 30-second capture retry');
+    assert.equal(f.failures[0].retryAt, null, 'use existing daily failure default, not 30-second capture retry');
     for (const event of ['fetch:capture', 'fetch:ack', 'rpc:checkpoint_catalog_file_audio_validation_window',
         'rpc:reset_catalog_file_audio_validation_windows', 'rpc:claim_provider_account_language_validation']) {
         assert.equal(f.events.includes(event), false, event);
