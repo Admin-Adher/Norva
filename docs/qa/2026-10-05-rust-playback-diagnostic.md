@@ -29,3 +29,27 @@ Cause immédiate établie : la réponse livrée a perdu son en-tête MKV et les 
 L'allowlist conserve désormais INVALID_MKV_INPUT dans les deux passages de sanitisation. Le Web et le démarrage natif via WebView affichent une explication localisée en dix langues et les trois actions explicites existantes. Ce code est terminal : aucun retry automatique ou conversion cachée. Une erreur de données ne pose pas le marqueur « refus récent », réservé aux vrais refus d'accès. Les gardes de fermeture, identité, propriétaire, langues et sélection restent celles du parcours de récupération. Ce changement corrige le traitement de toutes les copies produisant ce code, pas leurs octets source.
 
 Tests locaux : 98 tests réussis (chaîne Edge/cloudApi/UI, reprise native, fermeture/handoff), plus groupe initial 108 tests recoupés. Premier build i18n a détecté le champ source manquant dans la nouvelle entrée ; corrigé avant build réussi. Aucun déploiement à ce stade.
+
+## Périmètre confirmé par Adrien
+
+Adrien confirme ne pas disposer du panneau de stockage/livraison MAX OTT ni d'un contact technique. Il demande de terminer le message et l'accès intuitif aux autres versions, en reconnaissant que Norva ne peut pas réparer ces fichiers. L'objectif livré est donc le traitement sûr de l'erreur et le choix explicite d'une autre copie. Aucun contact externe n'est envoyé et aucun remplacement de source n'est revendiqué.
+
+## Intégration et vérifications
+
+PR661 intégrée dans main par 794bbf1265197dd03e1cd9d83019a8849508f6de, code dac0f030635d5b306925db30295bff1c3d3938e5. Les 17 check-runs observés sont réussis, paquets Windows/Phone/TV compris. Android37274114892 : quatre configurations téléphone (gestes/trois boutons et police1/1.3) ont réussi le parcours réel WebView en portrait/paysage, texte zoom100/130, français/anglais, refus et entrée invalide. Les deux contrôles TV portent sur consentement/D-pad, pas sur un décodeur média. TV1.3 a d'abord échoué « Decline reachable » (granted au lieu de denied) puis un unique rerun111648834096 a réussi sans changement de code/seuil ; cause exacte non établie. La première demande de rerun avait été refusée par GitHub car la matrice tournait encore, donc n'avait exécuté aucun test.
+
+Régression Gateway :123 tests réussis,1 verrou Linux ignoré sur Windows,0 échec (124 tests déclarés). Aucun code Gateway modifié. Tests navigateur locaux réussis sur les deux codes,8 scénarios web et4 natifs par code, sans fournisseur. Capture local-invalid-media.png. Serveur et onglet de preuve locaux arrêtés.
+
+## Déploiement Edge
+
+Un seul helper changé sur194 fichiers : _shared/catalog-visibility-response.mjs, SHA-2569fcabd100118c9344f60373f10920a338affe8ece9841d72a5fd2f2c646e6333. Les193 autres fichiers et leurs permissions sont conservés. Runtime /home/adrien/.norva/rust-invalid-media-edge-20261005/runtime-functions ; préserver lors des prochains déploiements. Canary du sanitiseur en réseau none, UID1000 ; canary santé Edge sur réseau Edge normal. Tous arrêtés/retirés, aucun média fournisseur.
+
+Admissions suspendues06:52:34.711469–06:53:15.297448UTC (40,585979s), drainage naturel d'un travail en vol, aucun bail forcé. Edge principal recréé06:53:07.407 et secondaire06:53:11.263. Santé et194empreintes vérifiées06:53:46.918 ; Gateways inchangés sains, cron/admission/worker restaurés et même dispatcher permanent. Marqueur apply consommé, ne pas rejouer. Aucune migrationSQL, configuration fournisseur, langue, modèle, concurrence, quarantaine ou délai modifié. La planification Codex supprimée reste supprimée.
+
+## Vérification finale en production — 09:00–09:04 Paris
+
+Publication Cloudflare37275042943 réussie à06:59:05UTC. Navigateur rechargé : WatchPage ed3f44bf90, standalone acd6de4485 et i18n967117f53a effectivement chargés. Une seule lecture explicite de l'original Rust, sélection active vérifiée, commence07:00:28.671 et échoue07:00:30.779 sans première image. Le message réel est désormais « Les données reçues pour cette copie sont illisibles. Vous pouvez choisir une autre version. », avec Autres versions (action principale et focus), Réessayer cette version et Retour à la fiche. Aucun code interne exposé.
+
+Le clic Autres versions ferme le parcours de lecture et ouvre la fiche Rust avec11 choix, langue audio, sous-titres lorsqu'ils sont connus, fournisseur et conteneur. Focus sur une autre version ; aucune sélection ni lecture alternative automatique. Le navigateur est laissé sur ces choix. Ces11 choix ne sont pas une certification de lecture ni un inventaire exhaustif des18 variantes sous-jacentes liées aux deux titres internes.
+
+Audit read-only07:04:38 : une seule nouvelle session Rust depuis le déploiement, état failed, aucune nouvelle tentative automatique après l'échec ; aucune session Gateway persistée ou première image. Les trois sessions diagnostiques antérieures sont expired. Captures locales production-invalid-media.png et production-other-versions.png. La copie originale reste illisible ; le traitement UX des copies produisant INVALID_MKV_INPUT est corrigé et vérifié. Aucun contact fournisseur ni nouvelle sonde opérateur pendant cette vérification.
