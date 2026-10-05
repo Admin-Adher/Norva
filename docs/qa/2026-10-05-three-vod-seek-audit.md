@@ -54,3 +54,11 @@ La garde calcule désormais la réserve depuis une origine positive attestée, s
 Le remplacement Gateway après seek démarre aussi un nouveau contexte de télémétrie après fermeture de l'ancien flux. Les événements play d'un élément en pause ou en erreur ne sont plus considérés comme un démarrage réussi. Aucune modification du lecteur réseau, du fournisseur, du codec ou des seuils.
 
 Validation locale : 191 tests WatchPage réussis, dont reproduction de l'origine 3,569333, réserve insuffisante, début de liste manquant, plages discordantes, pause, lecture antérieure et croissance adaptative. La fixture partagée Android contient aussi le cas 3,569333. À ce stade, validation émulateur et rejeu de production restent à effectuer.
+
+## Rejeu de PR665 et second défaut isolé
+
+PR665 fusionnée c6d63d84d903ac8ff962aa91330955fa59899b50, tête c11c97a058f9d9e70d34175fd06f9c4465259adc. Matrice Android37353483495 : six jobs réussis sur le même code applicatif 80ae4a1e2 (tête suivante : manifeste généré seul). Ancienne matrice37353124479 annulée après adaptation de la preuve seekable native. Contrats, Phone/TV/Windows réussis. Cloudflare37354269505 réussi ; suite5968 tests,5941 réussis,27 ignorés,0 échec. DOM réel WatchPage.js?v=5ed456ed1d.
+
+À18:16:59UTC, A Breed Apart repris1857s : t27,260/pausedfalse/ready4. Ajustement du curseur a envoyé95s puis119s ; deux remplacements ordinaires successifs, pas simultanéité média revendiquée. À18:18:25, flux119s tampon[1,517333;17,534333], t0/pausedtrue ; politique1,57x non éligible, préparation serveur58,816s. À18:19:51, tampon[1,517333;111,544333], t1,517333 : alignement effectif après réserve, mais pausedtrue. Le second seek avait lu la pause technique créée par le premier et capturé autoplayfalse. L'alignement est vérifié, pas la reprise automatique dans ce cas.
+
+Correctif complémentaire : conserver l'intention de lecture durant le remplacement et le remplissage, bornée à la tentative courante. Une pause explicite reste prioritaire, le début d'une nouvelle tentative efface l'intention et un play valide la termine. La fixture WebView reproduit lecture active -> démontage/paused -> second seek, pause explicite, autre titre et rebuffer automatique. Aucun changement de concurrence, route, seuil ou données média.
