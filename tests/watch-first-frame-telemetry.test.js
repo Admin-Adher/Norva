@@ -283,3 +283,13 @@ test('engine audio enrichment is deferred until after first frame', async () => 
   await Promise.resolve();
   assert.deepEqual(calls, ['https://media.example/raw/token']);
 });
+
+
+test('stale play events from paused or failed media cannot report playback success', () => {
+  for (const video of [{ paused: true }, { paused: false, error: { code: 3 } }]) {
+    const { page, events } = makeTelemetryPage(video);
+    page.onPlay();
+    assert.equal(page._playStartedReported, false);
+    assert.equal(events.length, 0);
+  }
+});

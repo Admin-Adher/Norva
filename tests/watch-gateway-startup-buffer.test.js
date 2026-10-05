@@ -975,3 +975,60 @@ test('Gateway audio switch never treats a missing mapped index as stream zero or
         'the requested index is intent, never proof of the stream mapped by Gateway',
     );
 });
+
+
+test('fresh first-fragment origin admits A Breed Apart only with matching seekable evidence', async () => {
+    const measure = loadMethod('gatewayBufferedAheadSeconds', 'normalizeGatewayStartupPolicy');
+    for (const scenario of [
+        { name: 'full reserve', allowed: true },
+        { name: 'missing first fragment', sn: 8 },
+        { name: 'seekable mismatch', seekStart: 8 },
+        { name: 'previously played', played: 1 },
+        { name: 'outside first fragment', fragmentStart: 0 },
+        { name: 'insufficient reserve', end: 31.596333 },
+        { name: 'user pause', userPaused: true },
+        { name: 'pending seek', pending: 12 },
+    ]) {
+        let now = 0;
+        const gate = loadMethod('waitForGatewayStartupBuffer', 'playHls', {
+            Date: { now: () => now }, setTimeout: fn => { now += 100; fn(); },
+        });
+        const start = 3.569333;
+        const sn = scenario.sn ?? 0;
+        const hls = { levels: [{ details: { live: true, startSN: sn,
+            fragments: [{ sn, start: scenario.fragmentStart ?? start, duration: 2 }] } }] };
+        const video = { currentTime: 0, paused: true, readyState: 4,
+            played: { length: scenario.played ?? 0 },
+            seekable: { length: 1, start: () => scenario.seekStart ?? 0, end: () => 100 },
+            buffered: { length: 1, start: () => start, end: () => scenario.end ?? start + 96 } };
+        const page = { video, hls, _gatewayUserPaused: scenario.userPaused,
+            _pendingLocalSeekTarget: scenario.pending, isStalePlaybackAttempt: () => false,
+            gatewayBufferedAheadSeconds() { return measure.call(this); } };
+        assert.equal(await gate.call(page, 1, hls, { minimumSeconds: 96, timeoutMs: 1000 }),
+            scenario.allowed === true, scenario.name);
+        assert.equal(video.currentTime, scenario.allowed ? start : 0, scenario.name);
+    }
+});
+
+test('a positive startup origin earns adaptive growth without moving before admission', async () => {
+    let now = 0, movedAt = null, position = 0;
+    const measure = loadMethod('gatewayBufferedAheadSeconds', 'normalizeGatewayStartupPolicy');
+    const gate = loadMethod('waitForGatewayStartupBuffer', 'playHls', {
+        Date: { now: () => now }, setTimeout: fn => { now += 100; fn(); },
+    });
+    const start = 3.569333;
+    const hls = { levels: [{ details: { live: true, startSN: 0,
+        fragments: [0,1,2].map(sn => ({ sn, start: start + sn * 2, duration: 2 })) } }] };
+    const video = { paused: true, readyState: 4, videoWidth: 1280,
+        get currentTime() { return position; }, set currentTime(v) { position = v; movedAt = now; },
+        played: { length: 0 }, seekable: { length: 1, start: () => 0, end: () => 100 },
+        buffered: { length: 1, start: () => start, end: () => start + 6 + Math.floor(now / 500) * 2 } };
+    const page = { video, hls, isStalePlaybackAttempt: () => false,
+        gatewayBufferedAheadSeconds() { return measure.call(this); } };
+    assert.equal(await gate.call(page, 1, hls,
+        { minimumSeconds: 96, timeoutMs: 6000, adaptive: true }), true);
+    assert.ok(movedAt >= 2000);
+    assert.equal(position, start);
+    assert.ok(page._gatewayStartupAdaptiveEvidence.rateX >= 2);
+    assert.ok(page._gatewayStartupAdaptiveEvidence.bufferedSeconds >= 12);
+});
