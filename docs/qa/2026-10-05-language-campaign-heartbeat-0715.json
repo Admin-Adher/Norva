@@ -1,0 +1,1179 @@
+{
+  "date": "2026-10-05",
+  "mode": "read-only",
+  "productionMutations": 0,
+  "providerRequests": 0,
+  "admissions": 0,
+  "comparison": {
+    "manifest": {
+      "unknownCards": 38289,
+      "unknownVariants": 48196,
+      "visible": 56751.0,
+      "deltaUniqueChecked": 275,
+      "uniqueChecked": 25536,
+      "deltaHistoricalIdentified": 71.0,
+      "at": "2026-10-05T05:16:00.293639+00:00",
+      "historicalIdentified": 8555.0
+    },
+    "strict": {
+      "quarantines": [
+        {
+          "source": "Dino",
+          "count": 2,
+          "lastUpdate": "2026-10-04T08:26:15.285909+00:00"
+        },
+        {
+          "source": "MAX OTT",
+          "count": 4,
+          "lastUpdate": "2026-10-05T04:44:07.491719+00:00"
+        }
+      ],
+      "compatibleInconclusive": 84.0,
+      "completeValidations": 43.0,
+      "oldStrngRemainsVerified": true,
+      "at": "2026-10-05T05:16:01.336068+00:00"
+    },
+    "global": {
+      "discovered": {
+        "sources": 54,
+        "owners": 47
+      },
+      "deltaIdentifiedReceipts": 304,
+      "deltaAttempts": 670,
+      "outsideOriginal": {
+        "sourcesInState": 50,
+        "sourcesCalled": 50,
+        "ownersCalled": 46,
+        "attempted": 5914,
+        "identifiedReceipts": 2699,
+        "deferredReceipts": 2923
+      },
+      "at": "2026-10-05T05:15:31.398658+00:00"
+    },
+    "priority": {
+      "owners": 3,
+      "deltaKnownMovieVariants": 0,
+      "visibleVariants": 7136,
+      "knownMovieVariants": 385,
+      "hints": 670
+    },
+    "newValidations": [
+      {
+        "state": "verified",
+        "visible": true,
+        "itemType": "movie",
+        "identified": true,
+        "proofCount": 1,
+        "verifiedAt": "2026-10-05T04:29:09.297766+00:00",
+        "localAttempts": 6,
+        "cacheLanguages": [
+          "fr"
+        ],
+        "expectedTracks": 1,
+        "profileMatches": true,
+        "cacheVerifiedAt": "2026-10-05T04:29:09.297766+00:00",
+        "completedTracks": 1,
+        "fileSizeMatches": true,
+        "identityMatches": true,
+        "providerAttempts": 6,
+        "audioIndicesMatch": true,
+        "generationMatches": true,
+        "cacheProfileMatches": true,
+        "lastProviderProgressAt": "2026-10-05T04:29:09.252569+00:00",
+        "cacheFingerprintMatches": true,
+        "profileTimestampMatches": true,
+        "inInitialManifest": false,
+        "sourceInInitialManifest": false,
+        "sourceLabel": "outside initial sources"
+      },
+      {
+        "state": "verified",
+        "visible": true,
+        "itemType": "movie",
+        "identified": true,
+        "proofCount": 1,
+        "verifiedAt": "2026-10-05T04:57:53.785573+00:00",
+        "localAttempts": 9,
+        "cacheLanguages": [
+          "en"
+        ],
+        "expectedTracks": 1,
+        "profileMatches": true,
+        "cacheVerifiedAt": "2026-10-05T04:57:53.785573+00:00",
+        "completedTracks": 1,
+        "fileSizeMatches": true,
+        "identityMatches": true,
+        "providerAttempts": 6,
+        "audioIndicesMatch": true,
+        "generationMatches": true,
+        "cacheProfileMatches": true,
+        "lastProviderProgressAt": "2026-10-05T04:57:53.735666+00:00",
+        "cacheFingerprintMatches": true,
+        "profileTimestampMatches": true,
+        "inInitialManifest": true,
+        "sourceInInitialManifest": true,
+        "sourceLabel": "Strng IPTV 8K"
+      },
+      {
+        "state": "verified",
+        "visible": true,
+        "itemType": "movie",
+        "identified": true,
+        "proofCount": 1,
+        "verifiedAt": "2026-10-05T05:05:53.178459+00:00",
+        "localAttempts": 10,
+        "cacheLanguages": [
+          "zh"
+        ],
+        "expectedTracks": 1,
+        "profileMatches": true,
+        "cacheVerifiedAt": "2026-10-05T05:05:53.178459+00:00",
+        "completedTracks": 1,
+        "fileSizeMatches": true,
+        "identityMatches": true,
+        "providerAttempts": 6,
+        "audioIndicesMatch": true,
+        "generationMatches": true,
+        "cacheProfileMatches": true,
+        "lastProviderProgressAt": "2026-10-05T05:05:53.109954+00:00",
+        "cacheFingerprintMatches": true,
+        "profileTimestampMatches": true,
+        "inInitialManifest": true,
+        "sourceInInitialManifest": true,
+        "sourceLabel": "Strng IPTV 8K"
+      }
+    ],
+    "incidents": {
+      "since": "2026-10-05T04:15:00Z",
+      "edgeDiagnostics": [
+        {
+          "name": "norva-edge-functions",
+          "events": [
+            {
+              "at": "2026-10-05T05:15:14.132839639Z",
+              "diagnostic": "database-statement-timeout",
+              "allowedCodes": [
+                "57014"
+              ]
+            }
+          ],
+          "lineCount": 2495
+        },
+        {
+          "name": "norva-edge-functions-2",
+          "events": [],
+          "lineCount": 2357
+        }
+      ],
+      "dispatcherHttpErrors": [
+        {
+          "at": "2026-10-05T05:15:14.136Z",
+          "lane": "provider-metadata",
+          "httpError": 500
+        }
+      ],
+      "noNewFinalizerDiagnostic": true,
+      "targetedRpcErrors": [
+        {
+          "at": "2026-10-05T04:21:55.090108290Z",
+          "rpc": "fail_catalog_file_audio_validation_job",
+          "publicRoute": "other",
+          "status": 500
+        },
+        {
+          "at": "2026-10-05T05:15:14.119252360Z",
+          "rpc": "claim_catalog_provider_audio_metadata",
+          "publicRoute": "other",
+          "status": 500
+        }
+      ],
+      "historicalDispatcherHttpCount": 7
+    },
+    "recentStrictEventDetails": {
+      "at": "2026-10-05T05:17:24.800041+00:00",
+      "readOnly": true,
+      "providerRequests": 0,
+      "events": [
+        {
+          "state": "failed",
+          "retryAt": "2026-10-06T04:15:22.228+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "updatedAt": "2026-10-05T04:15:22.229985+00:00",
+          "proofCount": 0,
+          "windowCount": 6,
+          "receiptCount": 6,
+          "localAttempts": 9,
+          "quarantinedAt": null,
+          "expectedTracks": 1,
+          "windowPosition": 6,
+          "completedTracks": 0,
+          "providerAttempts": 7,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T04:15:22.162246+00:00",
+          "sourceLabel": "outside initial sources"
+        },
+        {
+          "state": "failed",
+          "retryAt": "2026-10-06T04:18:22.413+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "updatedAt": "2026-10-05T04:18:22.414584+00:00",
+          "proofCount": 0,
+          "windowCount": 6,
+          "receiptCount": 6,
+          "localAttempts": 6,
+          "quarantinedAt": null,
+          "expectedTracks": 1,
+          "windowPosition": 6,
+          "completedTracks": 0,
+          "providerAttempts": 6,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T04:18:22.367542+00:00",
+          "sourceLabel": "Norva Selection"
+        },
+        {
+          "state": "failed",
+          "retryAt": "2026-10-06T04:23:29.935+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "updatedAt": "2026-10-05T04:23:29.936529+00:00",
+          "proofCount": 0,
+          "windowCount": 6,
+          "receiptCount": 6,
+          "localAttempts": 9,
+          "quarantinedAt": null,
+          "expectedTracks": 1,
+          "windowPosition": 6,
+          "completedTracks": 0,
+          "providerAttempts": 7,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T04:23:29.882747+00:00",
+          "sourceLabel": "outside initial sources"
+        },
+        {
+          "state": "failed",
+          "retryAt": "2026-10-06T04:36:32.807+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "updatedAt": "2026-10-05T04:36:32.808985+00:00",
+          "proofCount": 0,
+          "windowCount": 6,
+          "receiptCount": 6,
+          "localAttempts": 6,
+          "quarantinedAt": null,
+          "expectedTracks": 1,
+          "windowPosition": 6,
+          "completedTracks": 0,
+          "providerAttempts": 6,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T04:36:32.75069+00:00",
+          "sourceLabel": "outside initial sources"
+        },
+        {
+          "state": "failed",
+          "retryAt": "2026-10-06T04:44:07.491719+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_NO_PROGRESS_QUARANTINED",
+          "updatedAt": "2026-10-05T04:44:07.491719+00:00",
+          "proofCount": 0,
+          "windowCount": 6,
+          "receiptCount": 1,
+          "localAttempts": 7,
+          "quarantinedAt": "2026-10-05T04:44:07.491719+00:00",
+          "expectedTracks": 1,
+          "windowPosition": 1,
+          "completedTracks": 0,
+          "providerAttempts": 5,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T04:18:15.562425+00:00",
+          "sourceLabel": "MAX OTT"
+        },
+        {
+          "state": "retry_wait",
+          "retryAt": "2026-10-05T04:44:39.565+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_CHECKPOINT_RESET_REQUIRED",
+          "updatedAt": "2026-10-05T04:44:09.567599+00:00",
+          "proofCount": 0,
+          "windowCount": 0,
+          "receiptCount": 0,
+          "localAttempts": 16,
+          "quarantinedAt": null,
+          "expectedTracks": 1,
+          "windowPosition": 0,
+          "completedTracks": 0,
+          "providerAttempts": 7,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T04:44:09.488063+00:00",
+          "sourceLabel": "Dino"
+        },
+        {
+          "state": "failed",
+          "retryAt": "2026-10-06T04:48:56.396+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "updatedAt": "2026-10-05T04:48:56.398297+00:00",
+          "proofCount": 0,
+          "windowCount": 6,
+          "receiptCount": 6,
+          "localAttempts": 6,
+          "quarantinedAt": null,
+          "expectedTracks": 1,
+          "windowPosition": 6,
+          "completedTracks": 0,
+          "providerAttempts": 6,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T04:48:56.352972+00:00",
+          "sourceLabel": "outside initial sources"
+        },
+        {
+          "state": "failed",
+          "retryAt": "2026-10-06T04:50:35.887+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "updatedAt": "2026-10-05T04:50:35.888862+00:00",
+          "proofCount": 0,
+          "windowCount": 6,
+          "receiptCount": 6,
+          "localAttempts": 6,
+          "quarantinedAt": null,
+          "expectedTracks": 1,
+          "windowPosition": 6,
+          "completedTracks": 0,
+          "providerAttempts": 6,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T04:50:35.835037+00:00",
+          "sourceLabel": "outside initial sources"
+        },
+        {
+          "state": "retry_wait",
+          "retryAt": "2026-10-05T04:52:44.002+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_CHECKPOINT_RESET_REQUIRED",
+          "updatedAt": "2026-10-05T04:52:14.003517+00:00",
+          "proofCount": 0,
+          "windowCount": 0,
+          "receiptCount": 0,
+          "localAttempts": 9,
+          "quarantinedAt": null,
+          "expectedTracks": 1,
+          "windowPosition": 0,
+          "completedTracks": 0,
+          "providerAttempts": 7,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T04:52:13.95584+00:00",
+          "sourceLabel": "outside initial sources"
+        },
+        {
+          "state": "failed",
+          "retryAt": "2026-10-06T04:58:25.428+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "updatedAt": "2026-10-05T04:58:25.430475+00:00",
+          "proofCount": 0,
+          "windowCount": 6,
+          "receiptCount": 6,
+          "localAttempts": 23,
+          "quarantinedAt": null,
+          "expectedTracks": 1,
+          "windowPosition": 6,
+          "completedTracks": 0,
+          "providerAttempts": 16,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T04:58:25.357441+00:00",
+          "sourceLabel": "outside initial sources"
+        },
+        {
+          "state": "failed",
+          "retryAt": "2026-10-06T05:01:08.816+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "updatedAt": "2026-10-05T05:01:08.817654+00:00",
+          "proofCount": 0,
+          "windowCount": 6,
+          "receiptCount": 6,
+          "localAttempts": 18,
+          "quarantinedAt": null,
+          "expectedTracks": 1,
+          "windowPosition": 6,
+          "completedTracks": 0,
+          "providerAttempts": 14,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T05:01:08.757351+00:00",
+          "sourceLabel": "outside initial sources"
+        },
+        {
+          "state": "failed",
+          "retryAt": "2026-10-06T05:04:15.447+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "updatedAt": "2026-10-05T05:04:15.449391+00:00",
+          "proofCount": 0,
+          "windowCount": 6,
+          "receiptCount": 6,
+          "localAttempts": 8,
+          "quarantinedAt": null,
+          "expectedTracks": 1,
+          "windowPosition": 6,
+          "completedTracks": 0,
+          "providerAttempts": 8,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T05:04:15.373679+00:00",
+          "sourceLabel": "outside initial sources"
+        },
+        {
+          "state": "retry_wait",
+          "retryAt": "2026-10-05T05:11:15.979+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_GATEWAY_ERROR",
+          "updatedAt": "2026-10-05T05:06:15.981875+00:00",
+          "proofCount": 0,
+          "windowCount": 6,
+          "receiptCount": 5,
+          "localAttempts": 17,
+          "quarantinedAt": null,
+          "expectedTracks": 1,
+          "windowPosition": 5,
+          "completedTracks": 0,
+          "providerAttempts": 8,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T05:06:12.773727+00:00",
+          "sourceLabel": "Dino"
+        },
+        {
+          "state": "failed",
+          "retryAt": "2026-10-06T05:09:24.326+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "updatedAt": "2026-10-05T05:09:24.328289+00:00",
+          "proofCount": 0,
+          "windowCount": 6,
+          "receiptCount": 6,
+          "localAttempts": 6,
+          "quarantinedAt": null,
+          "expectedTracks": 1,
+          "windowPosition": 6,
+          "completedTracks": 0,
+          "providerAttempts": 6,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T05:09:24.281535+00:00",
+          "sourceLabel": "Norva Selection"
+        },
+        {
+          "state": "retry_wait",
+          "retryAt": "2026-10-05T05:11:55.822+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_CHECKPOINT_RESET_REQUIRED",
+          "updatedAt": "2026-10-05T05:11:25.82426+00:00",
+          "proofCount": 0,
+          "windowCount": 0,
+          "receiptCount": 0,
+          "localAttempts": 10,
+          "quarantinedAt": null,
+          "expectedTracks": 1,
+          "windowPosition": 0,
+          "completedTracks": 0,
+          "providerAttempts": 9,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T05:11:25.773769+00:00",
+          "sourceLabel": "outside initial sources"
+        },
+        {
+          "state": "failed",
+          "retryAt": "2026-10-06T05:15:47.292+00:00",
+          "errorCode": "LANGUAGE_VALIDATION_STRICT_CONSENSUS_INCONCLUSIVE",
+          "updatedAt": "2026-10-05T05:15:47.294037+00:00",
+          "proofCount": 0,
+          "windowCount": 6,
+          "receiptCount": 6,
+          "localAttempts": 13,
+          "quarantinedAt": null,
+          "expectedTracks": 1,
+          "windowPosition": 6,
+          "completedTracks": 0,
+          "providerAttempts": 8,
+          "currentProfileMatches": true,
+          "lastProviderProgressAt": "2026-10-05T05:15:47.217508+00:00",
+          "sourceLabel": "MAX OTT"
+        }
+      ]
+    },
+    "health": {
+      "paused": false,
+      "dispatcher": {
+        "at": 1791177325442,
+        "inFlight": 1,
+        "stopping": false,
+        "discoveryOk": true,
+        "sourceCount": 54,
+        "ownerCount": 47
+      },
+      "leases": {
+        "intake": 0,
+        "strict": 1,
+        "metadata": 1,
+        "sourceSchedule": 0,
+        "lastIntakeExpiry": null,
+        "lastStrictExpiry": "2026-10-05T05:20:28.220065+00:00"
+      },
+      "edgesHealthy": true,
+      "gatewaysHealthy": true,
+      "strictCron": true
+    },
+    "limits": [
+      "Initial-manifest figures concern 56751 variants / 43125 titles of 4 sources of the controlled owner.",
+      "Historical identifications exclude human badges and must not be added to strict validations.",
+      "Strict validation and complete inconclusive sets can overlap.",
+      "Outside-initial receipts are attempts/results, not unique files.",
+      "Three new validations: one outside initial sources, two within initial Strng; all current concordances verified read-only.",
+      "New MAX quarantine is incomplete with only one receipt; it is not a finished analysis.",
+      "HTTP500 and57014 timestamps do not establish internal cause; no failed RPC replayed.",
+      "No admission, provider request or production mutation during source audits; this report is a later documentation change.",
+      "Service health is a snapshot; historical incidents remain documented."
+    ]
+  },
+  "continuation": {
+    "at": "2026-10-05T05:15:52.836608Z",
+    "since": "2026-10-05T04:15:00Z",
+    "until": "2026-10-05T05:15:00Z",
+    "mode": "read-only",
+    "providerRequests": 0,
+    "admissions": 0,
+    "edges": [
+      {
+        "name": "norva-edge-functions",
+        "available": true,
+        "lineCount": 2428,
+        "possiblyTailLimited": false,
+        "counts": {
+          "completed": 10,
+          "deferred": 16,
+          "eligible": 19,
+          "started": 17
+        },
+        "deferredByReason": {
+          "selection": 2,
+          "worker-stopped": 7,
+          "budget": 7
+        },
+        "completedContinuationDuration": {
+          "count": 10,
+          "minMs": 10695,
+          "medianMs": 15672.0,
+          "p90Ms": 39117,
+          "maxMs": 66467
+        },
+        "continuationLatency": {
+          "measured": true,
+          "source": "elapsedMs-attached-to-each-completed-result"
+        },
+        "unparsedContinuationDiagnostics": 0
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "available": true,
+        "lineCount": 2296,
+        "possiblyTailLimited": false,
+        "counts": {
+          "completed": 19,
+          "deferred": 13,
+          "eligible": 28,
+          "started": 27
+        },
+        "deferredByReason": {
+          "budget": 4,
+          "worker-stopped": 8,
+          "selection": 1
+        },
+        "completedContinuationDuration": {
+          "count": 19,
+          "minMs": 12053,
+          "medianMs": 21138,
+          "p90Ms": 42228,
+          "maxMs": 72132
+        },
+        "continuationLatency": {
+          "measured": true,
+          "source": "elapsedMs-attached-to-each-completed-result"
+        },
+        "unparsedContinuationDiagnostics": 0
+      }
+    ],
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "available": true,
+        "lineCount": 228,
+        "possiblyTailLimited": false,
+        "counts": {
+          "capture_saved:OK": 94,
+          "inference_finished:OK": 94,
+          "extract:LID_CAPTURE_EXTRACTION_TIMEOUT": 4,
+          "extract:PROVIDER_FETCH_FAILED": 2,
+          "admission:LANGUAGE_ENRICHMENT_CAPACITY_BUSY": 11
+        },
+        "timing": {
+          "capture_saved:OK": {
+            "count": 94,
+            "minMs": 6057,
+            "medianMs": 15705.0,
+            "p90Ms": 33942,
+            "maxMs": 71759
+          },
+          "inference_finished:OK": {
+            "count": 94,
+            "minMs": 1217,
+            "medianMs": 2833.5,
+            "p90Ms": 5991,
+            "maxMs": 56606
+          },
+          "extract:LID_CAPTURE_EXTRACTION_TIMEOUT": {
+            "count": 4,
+            "minMs": 166537,
+            "medianMs": 166908.5,
+            "p90Ms": 167511,
+            "maxMs": 167511
+          },
+          "extract:PROVIDER_FETCH_FAILED": {
+            "count": 2,
+            "minMs": 2991,
+            "medianMs": 3033.5,
+            "p90Ms": 3076,
+            "maxMs": 3076
+          },
+          "admission:LANGUAGE_ENRICHMENT_CAPACITY_BUSY": {
+            "count": 11,
+            "minMs": 0,
+            "medianMs": 0,
+            "p90Ms": 0,
+            "maxMs": 1
+          }
+        },
+        "unparsedDiagnostics": 0
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "available": true,
+        "lineCount": 5,
+        "possiblyTailLimited": false,
+        "counts": {},
+        "timing": {},
+        "unparsedDiagnostics": 0
+      }
+    ],
+    "strictJobs": {
+      "scope": "all-current-durable-jobs-at-audit-snapshot",
+      "activeLeasesNow": 0,
+      "lastVerifiedInWindow": "2026-10-05T05:05:53.178459+00:00",
+      "jobsMarkedVerifiedInWindow": 3,
+      "lastProviderProgressInWindow": "2026-10-05T05:14:36.146782+00:00",
+      "updatedQuarantinedJobsInWindow": 1,
+      "jobsWithProviderProgressInWindow": 26,
+      "completedTracksOfThoseVerifiedJobs": 3
+    },
+    "interpretation": {
+      "completedMeans": "a second sequential step persisted a window checkpoint; not necessarily a verified language",
+      "timingPairs": "No Edge event pairing: completed durations use only the elapsedMs attached directly to each result.",
+      "gatewayStages": "Global stages within this window, not attributed to a particular continuation or provider.",
+      "jobCounts": "Unique current job rows, not captures, provider HTTP requests, unique files, or newly published languages.",
+      "noProgressDoesNotProveFailure": "Continuation requires the same job first and first-step total duration at most 30 seconds."
+    }
+  },
+  "continuationStopsFollowup": {
+    "at": "2026-10-05T05:17:59.273218Z",
+    "since": "2026-10-05T04:15:00Z",
+    "until": "2026-10-05T05:15:00Z",
+    "readOnly": true,
+    "providerRequests": 0,
+    "admissions": 0,
+    "databaseQueries": 0,
+    "edges": [
+      {
+        "name": "norva-edge-functions",
+        "available": true,
+        "lineCount": 2428,
+        "possiblyTailLimited": false,
+        "stops": [
+          {
+            "at": "2026-10-05T04:20:29.383299Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 107,
+            "estimatedInvocationStartedAt": "2026-10-05T04:20:29.276299Z",
+            "gatewayDiagnosticsInSpan": [],
+            "sameEdgeWarningsInSpan": []
+          },
+          {
+            "at": "2026-10-05T04:28:15.198578Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 3382,
+            "estimatedInvocationStartedAt": "2026-10-05T04:28:11.816578Z",
+            "gatewayDiagnosticsInSpan": [
+              {
+                "at": "2026-10-05T04:28:15.126118Z",
+                "stage": "extract",
+                "code": "PROVIDER_FETCH_FAILED",
+                "elapsedMs": 3076
+              }
+            ],
+            "sameEdgeWarningsInSpan": []
+          },
+          {
+            "at": "2026-10-05T04:46:14.488633Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 12,
+            "estimatedInvocationStartedAt": "2026-10-05T04:46:14.476633Z",
+            "gatewayDiagnosticsInSpan": [],
+            "sameEdgeWarningsInSpan": []
+          },
+          {
+            "at": "2026-10-05T04:46:24.956376Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 264,
+            "estimatedInvocationStartedAt": "2026-10-05T04:46:24.692376Z",
+            "gatewayDiagnosticsInSpan": [
+              {
+                "at": "2026-10-05T04:46:24.905594Z",
+                "stage": "admission",
+                "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+                "elapsedMs": 0
+              }
+            ],
+            "sameEdgeWarningsInSpan": []
+          },
+          {
+            "at": "2026-10-05T04:47:15.288066Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 21,
+            "estimatedInvocationStartedAt": "2026-10-05T04:47:15.267066Z",
+            "gatewayDiagnosticsInSpan": [],
+            "sameEdgeWarningsInSpan": []
+          },
+          {
+            "at": "2026-10-05T05:00:17.649550Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 1118,
+            "estimatedInvocationStartedAt": "2026-10-05T05:00:16.531550Z",
+            "gatewayDiagnosticsInSpan": [
+              {
+                "at": "2026-10-05T05:00:17.605735Z",
+                "stage": "admission",
+                "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+                "elapsedMs": 0
+              }
+            ],
+            "sameEdgeWarningsInSpan": []
+          },
+          {
+            "at": "2026-10-05T05:06:16.063271Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 3257,
+            "estimatedInvocationStartedAt": "2026-10-05T05:06:12.806271Z",
+            "gatewayDiagnosticsInSpan": [
+              {
+                "at": "2026-10-05T05:06:15.959557Z",
+                "stage": "extract",
+                "code": "PROVIDER_FETCH_FAILED",
+                "elapsedMs": 2991
+              }
+            ],
+            "sameEdgeWarningsInSpan": []
+          }
+        ],
+        "stopDuration": {
+          "count": 7,
+          "minMs": 12,
+          "medianMs": 264,
+          "p90Ms": 3382,
+          "maxMs": 3382
+        },
+        "malformedEvents": 0,
+        "durationBuckets": {
+          "under1s": 4,
+          "1to5s": 3,
+          "5to30s": 0,
+          "30to120s": 0,
+          "atLeast120s": 0
+        }
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "available": true,
+        "lineCount": 2296,
+        "possiblyTailLimited": false,
+        "stops": [
+          {
+            "at": "2026-10-05T04:30:09.652576Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 237,
+            "estimatedInvocationStartedAt": "2026-10-05T04:30:09.415576Z",
+            "gatewayDiagnosticsInSpan": [
+              {
+                "at": "2026-10-05T04:30:09.609603Z",
+                "stage": "admission",
+                "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+                "elapsedMs": 0
+              }
+            ],
+            "sameEdgeWarningsInSpan": []
+          },
+          {
+            "at": "2026-10-05T04:32:16.458073Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 173,
+            "estimatedInvocationStartedAt": "2026-10-05T04:32:16.285073Z",
+            "gatewayDiagnosticsInSpan": [
+              {
+                "at": "2026-10-05T04:32:16.419717Z",
+                "stage": "admission",
+                "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+                "elapsedMs": 0
+              }
+            ],
+            "sameEdgeWarningsInSpan": []
+          },
+          {
+            "at": "2026-10-05T04:52:28.527614Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 295,
+            "estimatedInvocationStartedAt": "2026-10-05T04:52:28.232614Z",
+            "gatewayDiagnosticsInSpan": [
+              {
+                "at": "2026-10-05T04:52:28.477866Z",
+                "stage": "admission",
+                "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+                "elapsedMs": 0
+              }
+            ],
+            "sameEdgeWarningsInSpan": []
+          },
+          {
+            "at": "2026-10-05T04:58:16.082610Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 362,
+            "estimatedInvocationStartedAt": "2026-10-05T04:58:15.720610Z",
+            "gatewayDiagnosticsInSpan": [
+              {
+                "at": "2026-10-05T04:58:15.995740Z",
+                "stage": "admission",
+                "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+                "elapsedMs": 0
+              }
+            ],
+            "sameEdgeWarningsInSpan": []
+          },
+          {
+            "at": "2026-10-05T04:59:12.224145Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 2303,
+            "estimatedInvocationStartedAt": "2026-10-05T04:59:09.921145Z",
+            "gatewayDiagnosticsInSpan": [
+              {
+                "at": "2026-10-05T04:59:12.167023Z",
+                "stage": "admission",
+                "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+                "elapsedMs": 0
+              }
+            ],
+            "sameEdgeWarningsInSpan": []
+          },
+          {
+            "at": "2026-10-05T05:02:30.457606Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 910,
+            "estimatedInvocationStartedAt": "2026-10-05T05:02:29.547606Z",
+            "gatewayDiagnosticsInSpan": [],
+            "sameEdgeWarningsInSpan": []
+          },
+          {
+            "at": "2026-10-05T05:12:19.735272Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 228,
+            "estimatedInvocationStartedAt": "2026-10-05T05:12:19.507272Z",
+            "gatewayDiagnosticsInSpan": [
+              {
+                "at": "2026-10-05T05:12:19.701058Z",
+                "stage": "admission",
+                "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+                "elapsedMs": 0
+              }
+            ],
+            "sameEdgeWarningsInSpan": []
+          },
+          {
+            "at": "2026-10-05T05:13:22.313227Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 772,
+            "estimatedInvocationStartedAt": "2026-10-05T05:13:21.541227Z",
+            "gatewayDiagnosticsInSpan": [
+              {
+                "at": "2026-10-05T05:13:22.253383Z",
+                "stage": "admission",
+                "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+                "elapsedMs": 1
+              }
+            ],
+            "sameEdgeWarningsInSpan": []
+          }
+        ],
+        "stopDuration": {
+          "count": 8,
+          "minMs": 173,
+          "medianMs": 328.5,
+          "p90Ms": 2303,
+          "maxMs": 2303
+        },
+        "malformedEvents": 0,
+        "durationBuckets": {
+          "under1s": 7,
+          "1to5s": 1,
+          "5to30s": 0,
+          "30to120s": 0,
+          "atLeast120s": 0
+        }
+      }
+    ],
+    "gatewayErrorDiagnostics": [
+      {
+        "at": "2026-10-05T04:21:47.079001Z",
+        "stage": "extract",
+        "code": "LID_CAPTURE_EXTRACTION_TIMEOUT",
+        "elapsedMs": 166537
+      },
+      {
+        "at": "2026-10-05T04:27:49.575908Z",
+        "stage": "extract",
+        "code": "LID_CAPTURE_EXTRACTION_TIMEOUT",
+        "elapsedMs": 166905
+      },
+      {
+        "at": "2026-10-05T04:28:15.126118Z",
+        "stage": "extract",
+        "code": "PROVIDER_FETCH_FAILED",
+        "elapsedMs": 3076
+      },
+      {
+        "at": "2026-10-05T04:30:09.609603Z",
+        "stage": "admission",
+        "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+        "elapsedMs": 0
+      },
+      {
+        "at": "2026-10-05T04:32:16.419717Z",
+        "stage": "admission",
+        "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+        "elapsedMs": 0
+      },
+      {
+        "at": "2026-10-05T04:35:50.238425Z",
+        "stage": "extract",
+        "code": "LID_CAPTURE_EXTRACTION_TIMEOUT",
+        "elapsedMs": 167511
+      },
+      {
+        "at": "2026-10-05T04:44:07.481527Z",
+        "stage": "extract",
+        "code": "LID_CAPTURE_EXTRACTION_TIMEOUT",
+        "elapsedMs": 166912
+      },
+      {
+        "at": "2026-10-05T04:46:24.905594Z",
+        "stage": "admission",
+        "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+        "elapsedMs": 0
+      },
+      {
+        "at": "2026-10-05T04:51:00.477533Z",
+        "stage": "admission",
+        "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+        "elapsedMs": 0
+      },
+      {
+        "at": "2026-10-05T04:52:28.477866Z",
+        "stage": "admission",
+        "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+        "elapsedMs": 0
+      },
+      {
+        "at": "2026-10-05T04:58:15.995740Z",
+        "stage": "admission",
+        "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+        "elapsedMs": 0
+      },
+      {
+        "at": "2026-10-05T04:59:12.167023Z",
+        "stage": "admission",
+        "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+        "elapsedMs": 0
+      },
+      {
+        "at": "2026-10-05T05:00:17.605735Z",
+        "stage": "admission",
+        "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+        "elapsedMs": 0
+      },
+      {
+        "at": "2026-10-05T05:01:00.632732Z",
+        "stage": "admission",
+        "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+        "elapsedMs": 0
+      },
+      {
+        "at": "2026-10-05T05:06:15.959557Z",
+        "stage": "extract",
+        "code": "PROVIDER_FETCH_FAILED",
+        "elapsedMs": 2991
+      },
+      {
+        "at": "2026-10-05T05:12:19.701058Z",
+        "stage": "admission",
+        "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+        "elapsedMs": 0
+      },
+      {
+        "at": "2026-10-05T05:13:22.253383Z",
+        "stage": "admission",
+        "code": "LANGUAGE_ENRICHMENT_CAPACITY_BUSY",
+        "elapsedMs": 1
+      }
+    ],
+    "interpretation": {
+      "workerStopped": "Second worker invocation returned without the durable window checkpoint return tag; not a process-stop diagnostic.",
+      "possiblePaths": [
+        "Capacity unavailable",
+        "Job claim rejected or lost",
+        "Profile/viewer/provider guard",
+        "Capture/inference/report failure",
+        "Already-complete finalization branch"
+      ],
+      "nearbyIsNotAttribution": "Anonymous concurrent Edge/Gateway events have no shared invocation key; matching time spans cannot establish the same job.",
+      "durations": "Direct elapsedMs measures the whole second worker invocation, including guards and cleanup.",
+      "historicalChange": "Different active files, guard states and service latency make the two adjacent windows an uncontrolled comparison."
+    }
+  },
+  "targets": {
+    "at": "2026-10-05T05:16:06.454658+00:00",
+    "baselineAt": "2026-10-05T04:15:37.317670+00:00",
+    "readOnly": true,
+    "providerRequests": 0,
+    "productionMutations": 0,
+    "items": [
+      {
+        "title": "Lost on a Mountain in Maine",
+        "jobsUnchanged": true,
+        "guardsUnchanged": true,
+        "cacheUnchanged": true,
+        "profileTracksUnchanged": true,
+        "profileComplete": true,
+        "automaticallyIdentified": false,
+        "knownCacheLanguages": [],
+        "latestJob": {
+          "state": "failed",
+          "code": "LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE",
+          "retryAt": "2026-10-06T01:14:10.451+00:00",
+          "receipts": 5,
+          "windowPosition": 5,
+          "windowCount": 6,
+          "providerAttempts": 10,
+          "quarantinedAt": null
+        }
+      },
+      {
+        "title": "The Legend of Ochi",
+        "jobsUnchanged": true,
+        "guardsUnchanged": true,
+        "cacheUnchanged": true,
+        "profileTracksUnchanged": true,
+        "profileComplete": true,
+        "automaticallyIdentified": false,
+        "knownCacheLanguages": [],
+        "latestJob": {
+          "state": "failed",
+          "code": "LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE",
+          "retryAt": "2026-10-06T01:17:43.005+00:00",
+          "receipts": 1,
+          "windowPosition": 1,
+          "windowCount": 6,
+          "providerAttempts": 2,
+          "quarantinedAt": null
+        }
+      },
+      {
+        "title": "Bolt from the Blue",
+        "jobsUnchanged": true,
+        "guardsUnchanged": true,
+        "cacheUnchanged": true,
+        "profileTracksUnchanged": true,
+        "profileComplete": true,
+        "automaticallyIdentified": true,
+        "knownCacheLanguages": [
+          "en"
+        ],
+        "latestJob": {
+          "state": "verified",
+          "code": null,
+          "retryAt": null,
+          "receipts": 0,
+          "windowPosition": 0,
+          "windowCount": 0,
+          "providerAttempts": 7,
+          "quarantinedAt": null
+        }
+      },
+      {
+        "title": "I Want to Live on Mars",
+        "jobsUnchanged": true,
+        "guardsUnchanged": true,
+        "cacheUnchanged": true,
+        "profileTracksUnchanged": true,
+        "profileComplete": true,
+        "automaticallyIdentified": false,
+        "knownCacheLanguages": [],
+        "latestJob": {
+          "state": "failed",
+          "code": "LANGUAGE_VALIDATION_NO_PROGRESS_QUARANTINED",
+          "retryAt": "2026-10-06T02:54:47.376392+00:00",
+          "receipts": 2,
+          "windowPosition": 2,
+          "windowCount": 6,
+          "providerAttempts": 6,
+          "quarantinedAt": "2026-10-05T02:54:47.376392+00:00"
+        }
+      }
+    ],
+    "humanConfirmations": {
+      "registered": 5,
+      "projectedLanguages": {
+        "en": 4,
+        "es": 1
+      },
+      "registeredLanguages": {
+        "en": 4,
+        "es": 1
+      },
+      "currentlyProjectable": 5
+    },
+    "humanConfirmationsUnchanged": true,
+    "limits": [
+      "Receipt counts and persisted job facts are compared; no claim of receipt-byte identity is made from these audits. No provider request, terminal retry, sampling-pass change, or admission."
+    ]
+  },
+  "play": {
+    "observedAroundUtc": "2026-10-05T05:17:00Z",
+    "method": "existing-browser-publishing-overview",
+    "mobileVersionCode": 46,
+    "tvVersionCode": 38,
+    "mobileState": "in_review",
+    "tvState": "in_review",
+    "actionRequired": false,
+    "availabilityProven": false,
+    "mutations": 0
+  },
+  "previousDocumentationChecks": {
+    "pr": 657,
+    "head": "0731c2a0bd1768207574c73cbee7de39a85f8689",
+    "success": 5,
+    "pending": 0,
+    "failed": 0
+  }
+}
