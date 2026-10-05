@@ -3676,3 +3676,29 @@ test('split-track MP4 deliberate close reuses only received validated bytes afte
  const uncached=await fetch(broker.inputUrl,{headers:{Range:'bytes=524288-532479'}});
  assert.deepEqual(Buffer.from(await uncached.arrayBuffer()),data.subarray(524288,532480));assert.equal(calls.length,2);
 });
+
+test('real split-track MP4 demuxing serves cache during remote release grace', {timeout:60000,skip:process.env.NORVA_MP4_HEADER_PROOF !== '1'},async(t)=>{
+ const {execFileSync,execFile}=require('node:child_process'),{promisify}=require('node:util');
+ const dir=fs.mkdtempSync('/tmp/split-demux-');t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ execFileSync('ffmpeg',['-v','error','-f','lavfi','-i','testsrc2=size=640x360:rate=25:duration=12','-f','lavfi','-i','sine=duration=12','-c:v','libx264','-threads','1','-crf','16','-c:a','aac',dir+'/normal.mp4']);
+ const original=fs.readFileSync(dir+'/normal.mp4'),copy=Buffer.from(original),tables=[];let mdat;
+ function walk(start,end){for(let p=start;p+8<=end;){const n=original.readUInt32BE(p),type=original.toString('ascii',p+4,p+8);if(n<8||p+n>end)throw Error('atom');if(type==='mdat')mdat={start:p+8,end:p+n};if(type==='stco'){const offsets=[];for(let i=0;i<original.readUInt32BE(p+12);i++)offsets.push({slot:p+16+i*4,offset:original.readUInt32BE(p+16+i*4)});tables.push(offsets)}if(['moov','trak','mdia','minf','stbl'].includes(type))walk(p+8,p+n);p+=n;}}
+ walk(0,original.length);assert.equal(tables.length,2);
+ const sorted=tables.flat().sort((a,b)=>a.offset-b.offset),ends=new Map(sorted.map((v,i)=>[v.offset,sorted[i+1]?.offset||mdat.end]));
+ let cursor=mdat.start;for(const table of tables)for(const entry of table){const chunk=original.subarray(entry.offset,ends.get(entry.offset));chunk.copy(copy,cursor);copy.writeUInt32BE(cursor,entry.slot);cursor+=chunk.length;}assert.equal(cursor,mdat.end);
+ const gap=16*1024*1024,splitAt=copy.readUInt32BE(tables[1][0].slot),padded=Buffer.concat([copy.subarray(0,splitAt),Buffer.alloc(gap),copy.subarray(splitAt)]);
+ padded.writeUInt32BE(copy.readUInt32BE(mdat.start-8)+gap,mdat.start-8);
+ for(const table of tables)for(const entry of table){const slot=entry.slot>=splitAt?entry.slot+gap:entry.slot;const off=copy.readUInt32BE(entry.slot);padded.writeUInt32BE(off>=splitAt?off+gap:off,slot);}
+ fs.writeFileSync(dir+'/split.mp4',padded);execFileSync('ffmpeg',['-v','error','-xerror','-i',dir+'/split.mp4','-t','3','-f','null','-']);
+ const calls=[];let active=0,peak=0;const provider=http.createServer((req,res)=>{active++;peak=Math.max(peak,active);let closed=false;const release=()=>{if(!closed){closed=true;active--}};res.once('close',release);res.once('finish',release);const {start,end}=exactRange(req,padded.length);calls.push({at:Date.now(),range:req.headers.range});
+ res.writeHead(206,{'Content-Length':end-start+1,'Content-Range':`bytes ${start}-${end}/${padded.length}`,ETag:'"split-v1"'});
+ let cursor=start;const timer=setInterval(()=>{const next=Math.min(end+1,cursor+16384);res.write(padded.subarray(cursor,next));cursor=next;if(cursor>end){clearInterval(timer);res.end()}},50);res.once('close',()=>clearInterval(timer));});
+ const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+ const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:padded.length,dispatcher:null,
+  pathPrefix:'finite-mkv-seek',finiteWindowBytes:1024*1024,finiteFirstWindowBytes:64*1024,finiteSteadyFirstWindowBytes:256*1024,
+  finiteSequentialWindowBytes:1024*1024,finiteCacheBytes:8*1024*1024,finiteInitialContinuationGraceMs:500,finiteSeekContinuationGraceMs:50,
+  finiteAbandonedDrainMs:1500,completedReleaseDelayMs:0,supersededReleaseDelayMs:2500,releaseDelayMs:2500});t.after(()=>broker.close());
+ const started=Date.now();let failure=null;
+ try{await promisify(execFile)('ffmpeg',['-v','error','-analyzeduration','500000','-probesize','65536','-ss','1.37','-i',broker.inputUrl,'-t','3','-f','null','-'],{timeout:30000});}catch(e){failure={code:e.code,killed:e.killed,stderr:e.stderr?.slice(-400)}}
+ assert.equal(peak,1);assert.equal(failure,null);
+});

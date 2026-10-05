@@ -6106,7 +6106,11 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
     }
     if (finiteSeek && (res.destroyed || res.writableEnded)) return;
     if (context.terminalError) return sendStrictLidBrokerError(res, context.terminalError);
-    await waitForStrictLidBrokerSlot(context);
+    // Cached finite bytes do not occupy a provider connection. Delaying them
+    // behind a previous remote teardown prevents libav from completing its
+    // local seek/close, and lets the old speculative range reopen first. Only
+    // actual provider I/O waits below, under the unchanged provider mutex.
+    if (!finiteSeek) await waitForStrictLidBrokerSlot(context);
     // The response can close BEFORE its close listener is installed below.
     if (finiteSeek && finiteSeekDemandClosed(context, null, res)) return;
     if (context.closed || (!finiteSeek && requestId !== context.latestRequestId)) {
