@@ -1,0 +1,67 @@
+{
+  "checkedAt": "2026-10-05T07:31:13.689007+00:00",
+  "pr": 663,
+  "merge": "e103cbf6cffd21dfca46608f1cc47c4236be74ef",
+  "cloudflareRun": 37277816530,
+  "cloudflareResult": "success",
+  "cloudflareUpdatedAt": "2026-10-05T07:29:08Z",
+  "assets": {
+    "mediaUtils": "b9ebb14903",
+    "GenreRails": "7b23b48792",
+    "HomePage": "d3c5be7b97",
+    "MoviesPage": "030204dfd3",
+    "SeriesPage": "c0515cc50e"
+  },
+  "home": {
+    "observedHero": "Proie",
+    "synopsisPresent": true,
+    "actionRailFirst": [
+      "Proie",
+      "Last Bullet",
+      "California King"
+    ],
+    "firstThreeBadges": [
+      "Anglais",
+      "Anglais",
+      "Anglais"
+    ]
+  },
+  "operatorPlaybackStarts": 0,
+  "android": {
+    "run": 37277001232,
+    "phoneConfigurationsPassedFirstAttempt": 4,
+    "tv13PassedFirstAttempt": true,
+    "tv10InitialFailure": "Acceptance persisted: denied instead of granted",
+    "tv10SingleRerunJob": 111657849487,
+    "tv10Rerun": "success"
+  },
+  "scope": "Authorized loaded candidates only; no global unbounded query or evidence changes",
+  "movies": {
+    "sourceFilter": "all",
+    "sort": "default",
+    "actionFirstFive": [
+      "Last Bullet",
+      "Proie",
+      "Pécheurs",
+      "California King",
+      "Innocent Voices [SUB]"
+    ],
+    "actionFirstFiveLanguages": [
+      "en",
+      "en",
+      "en",
+      "en",
+      "es"
+    ],
+    "unknownRustStillPresent": true
+  },
+  "series": {
+    "sourceFilterPreserved": "Dino",
+    "rendered": true,
+    "firstActionTitles": [
+      "Leo Da Vinci",
+      "La confrérie de l’étrange"
+    ],
+    "slowLoadObserved": true
+  }
+}
