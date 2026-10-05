@@ -251,7 +251,15 @@ async function prepareStrictLidSpeechSample({
         const localStartMilliseconds = useVad
             ? Math.max(0, Math.min(Math.round(chosen.startSeconds * 1000), Math.floor((usableDuration - 20) * 1000 + 1e-9)))
             : plan.preferredStartMilliseconds;
-        if (localStartMilliseconds + 20000 > usableDuration * 1000 + 1e-9) return failure('invalid-audio');
+        if (localStartMilliseconds + 20000 > usableDuration * 1000 + 1e-9) {
+            // A successful zero-speech scan cannot supply another authorized
+            // window when the immutable capture ends before the full anchor.
+            // Retrying this same PCM cannot repair it. Failed/unavailable VAD
+            // remains transient; never shift the anchor or pad missing audio.
+            return Object.freeze({ ...failure('invalid-audio'),
+                ...(vadOutcome === 'succeeded' && chosen !== null && chosen.speechSeconds === 0
+                    ? { code: 'LID_CAPTURE_AUDIO_WINDOW_UNAVAILABLE' } : {}) });
+        }
         const selectedSpeech = segments === null ? null : localSpeechMeasurement(segments, localStartMilliseconds / 1000, 20);
         const selection = Object.freeze({
             protocol: 1, searchStartMilliseconds: plan.searchStartMilliseconds,

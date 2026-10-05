@@ -5090,6 +5090,13 @@ async function computeCapturedLanguageWindow(options: LanguageCaptureWindowOptio
   const current = await revalidateLanguageValidationClaim(db, claim);
   const inferred = await requestLanguageCaptureWindow({ ...options, current }, "infer", release);
   const windowOrdinal = windowState.position + 1;
+  if (inferred.response.status === 422 && strictLanguageProviderDrainAttested(inferred.payload)
+    && inferred.payload.code === "LID_CAPTURE_AUDIO_WINDOW_UNAVAILABLE") {
+    // A successful VAD scan found no selectable speech, and the capture cannot
+    // contain its full fixed anchor. Preserve prior receipts as an incomplete
+    // analysis and use the existing daily failure delay, not a local retry loop.
+    throw new HttpError(422, "Captured audio window unavailable", { code: "LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE" });
+  }
   const receipt = inferred.response.ok && strictLanguageProviderDrainAttested(inferred.payload)
     ? strictLidWindowCheckpointFromGateway(inferred.payload, windowOrdinal, windowState.count) : null;
   if (!receipt) throw new HttpError(503, "Local audio inference deferred", { code: "LANGUAGE_CAPTURE_INFERENCE_DEFERRED" });
@@ -5407,6 +5414,7 @@ function languageValidationTaskErrorIsTerminal(error: unknown) {
     "LANGUAGE_VALIDATION_DURATION_TOO_SHORT",
     "LANGUAGE_VALIDATION_IDENTITY_REQUIRED",
     "LANGUAGE_VALIDATION_ACCESS_REVOKED",
+    "LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE",
   ]).has(code);
 }
 
@@ -5415,6 +5423,9 @@ function languageValidationTaskRetryAt(error: unknown) {
   const details = error instanceof HttpError ? recordOrEmpty(error.details) : {};
   const blockedUntil = stringOrNull(details.blockedUntil);
   if (blockedUntil && Number.isFinite(Date.parse(blockedUntil))) return blockedUntil;
+  // null delegates to the fail RPC's existing one-day retry policy. It must
+  // precede the short local-inference retry prefix below.
+  if (code === "LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE") return null;
   // Local retries must occur inside the private audio TTL, not the historical
   // day-long provider retry. No new provider attempt is made on a cache hit.
   if (code === "LANGUAGE_CAPTURE_GATEWAY_UNAVAILABLE" || code === "LANGUAGE_CAPTURE_STATUS_UNAVAILABLE") {
