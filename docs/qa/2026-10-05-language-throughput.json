@@ -1,0 +1,1045 @@
+{
+  "version": 1,
+  "date": "2026-10-05",
+  "request": "Accelerate unidentified audio language processing without weakening playback or evidence guards",
+  "codeCommit": "171eb5885f598edda0df1c219d1e6f637ffa2cbf",
+  "finalMigrationCommit": "ff80df66eb284bde398edfefa8d310af06e8db95",
+  "pullRequest": 654,
+  "fixedCohort": {
+    "variants": 56751,
+    "sources": 4,
+    "owners": 1,
+    "atUtc": "2026-10-05T02:09:00Z",
+    "technicalUnique": 23487,
+    "identifiedHistorical": 8033,
+    "unknownVariants": 48718,
+    "unknownTitles": 38543,
+    "strictCompleteValidated": 39,
+    "strictCompleteInconclusiveCompatible": 78,
+    "sincePrevious": {
+      "technicalUnique": 947,
+      "identifiedHistorical": 252,
+      "unknownVariants": -252
+    },
+    "humanBadgesIncluded": false,
+    "strictSetsOverlap": true
+  },
+  "pregenHistoricalAudit": {
+    "at": "2026-10-05T02:22:27.639972+00:00",
+    "readOnly": true,
+    "providerRequests": 0,
+    "currentProcessingRows": [
+      {
+        "kind": "transcript",
+        "stage": "transcribing",
+        "createdAt": "2026-10-05T00:20:08.232472+00:00",
+        "updatedAt": "2026-10-05T00:29:10.184+00:00",
+        "enqueuedAt": "2026-10-05T00:20:08.244+00:00",
+        "extractionStartedAt": "2026-10-05T00:22:17.582+00:00",
+        "whisperStartedAt": "2026-10-05T00:22:23.595+00:00",
+        "firstVttAt": "2026-10-05T00:22:24.933+00:00",
+        "audioSec": null,
+        "matchingSources": 1,
+        "matchingAffinities": 1,
+        "otherAccountSourcesOfOwner": 3
+      },
+      {
+        "kind": "transcript",
+        "stage": "queued",
+        "createdAt": "2026-10-05T00:25:07.877013+00:00",
+        "updatedAt": "2026-10-05T00:25:07.904+00:00",
+        "enqueuedAt": "2026-10-05T00:25:07.895+00:00",
+        "extractionStartedAt": null,
+        "whisperStartedAt": null,
+        "firstVttAt": null,
+        "audioSec": null,
+        "matchingSources": 1,
+        "matchingAffinities": 1,
+        "otherAccountSourcesOfOwner": 4
+      },
+      {
+        "kind": "transcript",
+        "stage": "queued",
+        "createdAt": "2026-10-05T00:25:08.081557+00:00",
+        "updatedAt": "2026-10-05T00:25:08.095+00:00",
+        "enqueuedAt": "2026-10-05T00:25:08.091+00:00",
+        "extractionStartedAt": null,
+        "whisperStartedAt": null,
+        "firstVttAt": null,
+        "audioSec": null,
+        "matchingSources": 1,
+        "matchingAffinities": 1,
+        "otherAccountSourcesOfOwner": 4
+      }
+    ],
+    "windowSince": "2026-10-05T01:00:00Z",
+    "buckets15Min": [
+      {
+        "at": "2026-10-05T01:00:00Z",
+        "events": 332,
+        "attempted": 110,
+        "identified": 35,
+        "pregenActive": 115,
+        "capacityDeferred": 161,
+        "providerBusy": 22,
+        "httpErrors": 0
+      },
+      {
+        "at": "2026-10-05T01:15:00Z",
+        "events": 153,
+        "attempted": 267,
+        "identified": 76,
+        "pregenActive": 57,
+        "capacityDeferred": 45,
+        "providerBusy": 17,
+        "httpErrors": 0
+      },
+      {
+        "at": "2026-10-05T01:30:00Z",
+        "events": 279,
+        "attempted": 252,
+        "identified": 68,
+        "pregenActive": 134,
+        "capacityDeferred": 112,
+        "providerBusy": 3,
+        "httpErrors": 0
+      },
+      {
+        "at": "2026-10-05T01:45:00Z",
+        "events": 119,
+        "attempted": 277,
+        "identified": 51,
+        "pregenActive": 17,
+        "capacityDeferred": 63,
+        "providerBusy": 9,
+        "httpErrors": 0
+      },
+      {
+        "at": "2026-10-05T02:00:00Z",
+        "events": 336,
+        "attempted": 146,
+        "identified": 33,
+        "pregenActive": 155,
+        "capacityDeferred": 123,
+        "providerBusy": 31,
+        "httpErrors": 0
+      },
+      {
+        "at": "2026-10-05T02:15:00Z",
+        "events": 43,
+        "attempted": 144,
+        "identified": 22,
+        "pregenActive": 15,
+        "capacityDeferred": 10,
+        "providerBusy": 2,
+        "httpErrors": 1
+      }
+    ],
+    "sourceMatchStats": {
+      "matched": 493,
+      "unresolved": 0
+    },
+    "correlations": {
+      "eventsWithCurrentlyProcessingOwnerAndPostUpdateTime": 493,
+      "postUpdateEventsForDifferentResolvedAccount": 165,
+      "distinctSourcesWithDifferentAccountEvents": 1,
+      "differentAccountSources": [
+        {
+          "ordinal": 1,
+          "events": 165,
+          "firstAt": "2026-10-05T01:03:42.094Z",
+          "lastAt": "2026-10-05T02:22:15.767Z"
+        }
+      ]
+    },
+    "limits": [
+      "Current processing rows alone do not prove process liveness at past event times.",
+      "Provider identity and account affinity are resolved internally; no identifier, URL, transcript or credential emitted.",
+      "Different-account correlation must still preserve source generation, exact provider claim and all current playback guards in any prospective fix."
+    ]
+  },
+  "initialRegressionBenchmark": {
+    "at": "2026-10-05T02:42:05.746271+00:00",
+    "mode": "benchmark-rollback",
+    "migrationSha256": "a3de15b09356f297247e9bbe209afcf7416184c7fb866995a984bc05572b2e87",
+    "proofSha256": "15719c59e478fcd30c15179e5b48e80ee4bf72d1ce74107e1a9148a4789aa8e7",
+    "rollbackVerified": true,
+    "scopeDataUnchangedInTransaction": true,
+    "committedProductionWrites": 0,
+    "providerRequests": 0,
+    "benchmark": {
+      "blocked": 44,
+      "totalMs": 42.717,
+      "maximumMs": 1.182,
+      "notBlocked": 10,
+      "visibleSources": 54,
+      "sourceIdentifiersEmitted": false
+    },
+    "newRpc": {
+      "acl": "{supabase_admin=X/supabase_admin,postgres=X/supabase_admin,service_role=X/supabase_admin}",
+      "owner": "supabase_admin",
+      "volatile": "s",
+      "returnType": "boolean",
+      "anonExecute": false,
+      "configuration": [
+        "search_path=\"\"",
+        "jit=off"
+      ],
+      "definitionMd5": "be2df2623c9bbf73969a8598a0614dc2",
+      "publicExecute": false,
+      "securityDefiner": true,
+      "serviceRoleExecute": true,
+      "authenticatedExecute": false
+    },
+    "existingRpcs": {
+      "md5": "2a3b6b7725a7a98787d21e0e43724888",
+      "count": 1305
+    }
+  },
+  "finalRollbackBenchmark": {
+    "at": "2026-10-05T02:48:31.446969+00:00",
+    "mode": "benchmark-rollback",
+    "migrationSha256": "56fe12a45fd3cbeacb5ddeafb0c4dfcbeaaa21c7e93c2a6b149b42afb14dd56d",
+    "proofSha256": "563fc4005c6259212d6c5ceb0457bef92fc09c19463824e708d97e8055588838",
+    "rollbackVerified": true,
+    "scopeDataUnchangedInTransaction": true,
+    "committedProductionWrites": 0,
+    "providerRequests": 0,
+    "benchmark": {
+      "blocked": 0,
+      "totalMs": 79.096,
+      "maximumMs": 2.414,
+      "notBlocked": 54,
+      "visibleSources": 54,
+      "sourceIdentifiersEmitted": false
+    },
+    "newRpc": {
+      "acl": "{supabase_admin=X/supabase_admin,postgres=X/supabase_admin,service_role=X/supabase_admin}",
+      "owner": "supabase_admin",
+      "volatile": "s",
+      "returnType": "boolean",
+      "anonExecute": false,
+      "configuration": [
+        "search_path=\"\"",
+        "jit=off"
+      ],
+      "definitionMd5": "cf2d3bd4dcfb759a870f027a249bedd7",
+      "publicExecute": false,
+      "securityDefiner": true,
+      "serviceRoleExecute": true,
+      "authenticatedExecute": false
+    },
+    "existingRpcs": {
+      "md5": "2a3b6b7725a7a98787d21e0e43724888",
+      "count": 1305
+    }
+  },
+  "marsProfile": {
+    "at": "2026-10-05T02:19:52.155442+00:00",
+    "referenceSha256": "a4b529712d99b24ff61d3aa52f97e449efa95de16f70a1f8639b16e59e80a9e1",
+    "mode": "apply-one",
+    "requests": [
+      {
+        "at": "2026-10-05T02:19:52.155237+00:00",
+        "target": "mars",
+        "operation": "profile",
+        "sent": true,
+        "httpStatus": 200,
+        "elapsedMs": 9798,
+        "response": {
+          "attempted": 1,
+          "persisted": 1,
+          "results": [
+            {
+              "status": "persisted"
+            }
+          ]
+        },
+        "noAutomaticRetry": true
+      }
+    ]
+  },
+  "marsAdmission": {
+    "at": "2026-10-05T02:24:47.461679+00:00",
+    "referenceSha256": "a4b529712d99b24ff61d3aa52f97e449efa95de16f70a1f8639b16e59e80a9e1",
+    "mode": "apply-one",
+    "requests": [
+      {
+        "at": "2026-10-05T02:24:47.461577+00:00",
+        "target": "mars",
+        "operation": "validation",
+        "sent": true,
+        "httpStatus": 202,
+        "elapsedMs": 64,
+        "response": {
+          "status": "pending",
+          "state": "queued",
+          "retryAfterSeconds": 3
+        },
+        "noAutomaticRetry": true
+      }
+    ]
+  },
+  "tests": {
+    "continuationCaptureEdge": 83,
+    "automaticPathOverlapping": 37,
+    "isolatedSql": 52,
+    "mkvContract": 7,
+    "windowsFullSuite": {
+      "tests": 5936,
+      "passed": 5876,
+      "failed": 5,
+      "skipped": 55,
+      "failures": [
+        "outdated MKV call signature assertion, fixed",
+        "three tests require Git at unavailable Program Files path",
+        "one Bash executable unavailable"
+      ]
+    },
+    "firstCloudSuite": {
+      "passed": 5912,
+      "failed": 1,
+      "skipped": 27,
+      "failure": "outdated MKV call signature assertion, fixed"
+    },
+    "finalLinuxCloud": {
+      "total": 5940,
+      "passed": 5913,
+      "failed": 0,
+      "skipped": 27,
+      "job": 111595911640
+    },
+    "finalChecks": [
+      {
+        "name": "Build Android Phone APK",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Android TV APK",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Windows Portable",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Android TV compile and tests",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Android Phone compile and tests",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Mocked Web and mobile journey",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Contracts and Edge type-check",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Disposable Supabase database",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Notification channel policy",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Vercel Preview Comments",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "GoTrue and customer notice acceptance",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Verify cloud contracts",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "deployment": {
+    "revision": "171eb5885f598edda0df1c219d1e6f637ffa2cbf",
+    "startedAt": "2026-10-05T02:54:57.296324+00:00",
+    "leasesForced": false,
+    "changedFiles": 2,
+    "preservedFiles": 192,
+    "pausedAt": "2026-10-05T02:54:57.375453+00:00",
+    "replicas": [
+      {
+        "name": "norva-edge-functions",
+        "healthy": true,
+        "playbackSha256": "bb6c34ff53c1ba81da6bdf9a8c7133b1eb6e80accf22e05e883c8bc6b1d59717"
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "healthy": true,
+        "playbackSha256": "bb6c34ff53c1ba81da6bdf9a8c7133b1eb6e80accf22e05e883c8bc6b1d59717"
+      }
+    ],
+    "gatewaysUnchanged": true,
+    "completedAt": "2026-10-05T02:55:16.953774+00:00",
+    "restoredAt": "2026-10-05T02:55:17.258718+00:00",
+    "admissionsRestored": true,
+    "workerRestored": true,
+    "dispatcherPreserved": true,
+    "status": "verified",
+    "pauseSeconds": 19.883265,
+    "runtime": "/home/adrien/.norva/language-throughput-20261005/edge/runtime-functions",
+    "gatewayChanges": 0
+  },
+  "limits": [
+    "No global throughput multiplier established",
+    "M3U owner guard preserved",
+    "No unknown cross-alias account inference",
+    "Permanent campaign remains active",
+    "HIT refusal and media corruptions remain unresolved",
+    "Four completed second steps are new durable window checkpoints, not four published languages.",
+    "The fixed-cohort gain since02:08 includes time before deployment and cannot measure patch gain.",
+    "No post-deployment concurrent pregen on separate accounts observed yet; no measured gain claimed for that guard.",
+    "Mars terminal NO_PROGRESS_QUARANTINED precedes new Edge deployment; quarantine kept through2026-10-06T02:54:47Z.",
+    "Existing logs/SQL57014 incidents retained despite short fresh Edge windows."
+  ],
+  "mergeCommit": "6d01dfb922be37cc7acfb4289e7f0682a9cd7853",
+  "testedHead": "7486e3aa8ee5a8badfe96946f0e91766274596b2",
+  "fixedCohortAfter": {
+    "observedAt": "2026-10-05T04:56:45.126742+02:00",
+    "scope": "initial immutable manifest only: 56751 variants / 43125 titles, 4 sources of controlled owner",
+    "uniqueChecked": 24102,
+    "deltaCheckedSince0208": 615,
+    "historicalIdentified": 8163.0,
+    "deltaIdentifiedSince0208": 130.0,
+    "unknownVariants": 48588,
+    "unknownCards": 38484,
+    "visibleInitial": 56751.0,
+    "strictCompleteValidations": 39.0,
+    "strictCompatibleInconclusive": 78.0,
+    "outsideOriginal": {
+      "sourcesInState": 50,
+      "sourcesCalled": 50,
+      "ownersCalled": 46,
+      "attempted": 4513,
+      "identifiedReceipts": 2019,
+      "deferredReceipts": 2577
+    },
+    "outsideOriginalDeltaSince0213": {
+      "identifiedReceipts": 158,
+      "attempted": 298
+    },
+    "newMaxQuarantine": {
+      "totalQuarantined": 3,
+      "previousTotal": 2,
+      "lastUpdate": "2026-10-05T02:54:47.376392+00:00",
+      "afterSqlBeforeEdgeDeployment": true,
+      "causeNotEstablished": true
+    },
+    "limitations": [
+      "Historical identifications exclude human badges and are not all strict LID certificates.",
+      "Strict validation/inconclusive sets can overlap.",
+      "Outside-manifest receipts are cumulative attempts/results, not unique variants.",
+      "Delta since02:08 spans mostly time before02:55 deployment and cannot measure patch gain.",
+      "New Edge log windows start02:55; zero new errors does not erase historical SQL57014.",
+      "The capacity script initially failed before execution because its remote path was absent; uploaded identical read-only script and ran once successfully."
+    ]
+  },
+  "sqlDeployment": {
+    "at": "2026-10-05T02:53:59.843486+00:00",
+    "mode": "apply-reviewed",
+    "migrationSha256": "56fe12a45fd3cbeacb5ddeafb0c4dfcbeaaa21c7e93c2a6b149b42afb14dd56d",
+    "proofSha256": "563fc4005c6259212d6c5ceb0457bef92fc09c19463824e708d97e8055588838",
+    "existingRpcsUnchanged": true,
+    "newReadOnlyFunctions": 1,
+    "dataRowWrites": 0,
+    "providerRequests": 0,
+    "scopeDataUnchangedInTransaction": true,
+    "servicesRestarted": 0,
+    "workersPaused": 0,
+    "newRpc": {
+      "acl": "{supabase_admin=X/supabase_admin,postgres=X/supabase_admin,service_role=X/supabase_admin}",
+      "owner": "supabase_admin",
+      "volatile": "s",
+      "returnType": "boolean",
+      "anonExecute": false,
+      "configuration": [
+        "search_path=\"\"",
+        "jit=off"
+      ],
+      "definitionMd5": "cf2d3bd4dcfb759a870f027a249bedd7",
+      "publicExecute": false,
+      "securityDefiner": true,
+      "serviceRoleExecute": true,
+      "authenticatedExecute": false
+    },
+    "existingRpcs": {
+      "md5": "2a3b6b7725a7a98787d21e0e43724888",
+      "count": 1305
+    }
+  },
+  "postverify": {
+    "at": "2026-10-05T02:55:45.290594+00:00",
+    "revision": "171eb5885f598edda0df1c219d1e6f637ffa2cbf",
+    "replicas": [
+      {
+        "name": "norva-edge-functions",
+        "startedAt": "2026-10-05T02:55:09.302458649Z",
+        "healthy": true,
+        "playbackSha256": "bb6c34ff53c1ba81da6bdf9a8c7133b1eb6e80accf22e05e883c8bc6b1d59717",
+        "all194SourceHashesMatch": true
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "startedAt": "2026-10-05T02:55:13.136046511Z",
+        "healthy": true,
+        "playbackSha256": "bb6c34ff53c1ba81da6bdf9a8c7133b1eb6e80accf22e05e883c8bc6b1d59717",
+        "all194SourceHashesMatch": true
+      }
+    ],
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "healthy": true,
+        "image": "sha256:d378abf26bbbe0f2ec25af3eec7f75c24a9b4fc459109786d532892c9c5170dc"
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "healthy": true,
+        "image": "sha256:d378abf26bbbe0f2ec25af3eec7f75c24a9b4fc459109786d532892c9c5170dc"
+      }
+    ],
+    "admissions": {
+      "cron": {
+        "id": 159,
+        "active": true
+      },
+      "paused": false
+    },
+    "stopAbsent": true,
+    "dispatcherRunning": true,
+    "workerRunning": true
+  },
+  "productionContinuation": {
+    "at": "2026-10-05T03:00:25.980985Z",
+    "since": "2026-10-05T02:55:17Z",
+    "until": "2026-10-05T03:00:25.980985Z",
+    "mode": "read-only",
+    "providerRequests": 0,
+    "admissions": 0,
+    "edges": [
+      {
+        "name": "norva-edge-functions",
+        "available": true,
+        "lineCount": 190,
+        "possiblyTailLimited": false,
+        "counts": {
+          "completed": 2,
+          "deferred": 1,
+          "eligible": 2,
+          "started": 2
+        },
+        "deferredByReason": {
+          "budget": 1
+        },
+        "completedContinuationDuration": {
+          "count": 2,
+          "minMs": 12303,
+          "medianMs": 17660.5,
+          "p90Ms": 23018,
+          "maxMs": 23018
+        },
+        "continuationLatency": {
+          "measured": true,
+          "source": "elapsedMs-attached-to-each-completed-result"
+        },
+        "lastEvents": [
+          {
+            "at": "2026-10-05T02:58:25.230046Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T02:58:25.263320Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T02:58:48.281559Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 23018
+          },
+          {
+            "at": "2026-10-05T02:59:12.131951Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T02:59:12.162600Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T02:59:24.465766Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 12303
+          },
+          {
+            "at": "2026-10-05T02:59:41.508521Z",
+            "event": "deferred",
+            "reason": "budget"
+          }
+        ],
+        "unparsedContinuationDiagnostics": 0
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "available": true,
+        "lineCount": 180,
+        "possiblyTailLimited": false,
+        "counts": {
+          "completed": 2,
+          "deferred": 1,
+          "eligible": 4,
+          "started": 4
+        },
+        "deferredByReason": {
+          "worker-stopped": 1
+        },
+        "completedContinuationDuration": {
+          "count": 2,
+          "minMs": 23741,
+          "medianMs": 25154.5,
+          "p90Ms": 26568,
+          "maxMs": 26568
+        },
+        "continuationLatency": {
+          "measured": true,
+          "source": "elapsedMs-attached-to-each-completed-result"
+        },
+        "lastEvents": [
+          {
+            "at": "2026-10-05T02:56:25.411767Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T02:56:25.445831Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T02:56:52.014190Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 26568
+          },
+          {
+            "at": "2026-10-05T02:57:27.110018Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T02:57:27.139985Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T02:57:50.880770Z",
+            "event": "completed",
+            "reason": "checkpoint",
+            "elapsedMs": 23741
+          },
+          {
+            "at": "2026-10-05T03:00:13.371389Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T03:00:13.400515Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T03:00:20.169545Z",
+            "event": "eligible"
+          },
+          {
+            "at": "2026-10-05T03:00:20.188985Z",
+            "event": "started"
+          },
+          {
+            "at": "2026-10-05T03:00:20.863162Z",
+            "event": "deferred",
+            "reason": "worker-stopped",
+            "elapsedMs": 674
+          }
+        ],
+        "unparsedContinuationDiagnostics": 0
+      }
+    ],
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "available": true,
+        "lineCount": 26,
+        "possiblyTailLimited": false,
+        "counts": {
+          "capture_saved:OK": 12,
+          "inference_finished:OK": 11
+        },
+        "timing": {
+          "capture_saved:OK": {
+            "count": 12,
+            "minMs": 10248,
+            "medianMs": 18042.0,
+            "p90Ms": 21758,
+            "maxMs": 23755
+          },
+          "inference_finished:OK": {
+            "count": 11,
+            "minMs": 1190,
+            "medianMs": 2180,
+            "p90Ms": 4465,
+            "maxMs": 25419
+          }
+        },
+        "lastSuccessfulStages": [
+          {
+            "at": "2026-10-05T02:58:48.132251Z",
+            "stage": "inference_finished",
+            "elapsedMs": 1382
+          },
+          {
+            "at": "2026-10-05T02:59:10.870962Z",
+            "stage": "capture_saved",
+            "elapsedMs": 10264
+          },
+          {
+            "at": "2026-10-05T02:59:12.118989Z",
+            "stage": "inference_finished",
+            "elapsedMs": 1190
+          },
+          {
+            "at": "2026-10-05T02:59:15.983444Z",
+            "stage": "capture_saved",
+            "elapsedMs": 15304
+          },
+          {
+            "at": "2026-10-05T02:59:22.721210Z",
+            "stage": "capture_saved",
+            "elapsedMs": 10330
+          },
+          {
+            "at": "2026-10-05T02:59:24.450514Z",
+            "stage": "inference_finished",
+            "elapsedMs": 1649
+          },
+          {
+            "at": "2026-10-05T02:59:41.499168Z",
+            "stage": "inference_finished",
+            "elapsedMs": 25419
+          },
+          {
+            "at": "2026-10-05T03:00:11.129745Z",
+            "stage": "capture_saved",
+            "elapsedMs": 10411
+          },
+          {
+            "at": "2026-10-05T03:00:13.358708Z",
+            "stage": "inference_finished",
+            "elapsedMs": 2180
+          },
+          {
+            "at": "2026-10-05T03:00:15.733642Z",
+            "stage": "capture_saved",
+            "elapsedMs": 14901
+          },
+          {
+            "at": "2026-10-05T03:00:20.160888Z",
+            "stage": "inference_finished",
+            "elapsedMs": 4325
+          },
+          {
+            "at": "2026-10-05T03:00:23.870018Z",
+            "stage": "capture_saved",
+            "elapsedMs": 10248
+          }
+        ],
+        "unparsedDiagnostics": 0
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "available": true,
+        "lineCount": 2,
+        "possiblyTailLimited": false,
+        "counts": {},
+        "timing": {},
+        "lastSuccessfulStages": [],
+        "unparsedDiagnostics": 0
+      }
+    ],
+    "strictJobs": {
+      "scope": "all-current-durable-jobs-at-audit-snapshot",
+      "activeLeasesNow": 0,
+      "lastVerifiedInWindow": null,
+      "jobsMarkedVerifiedInWindow": 0,
+      "lastProviderProgressInWindow": "2026-10-05T03:00:20.163566+00:00",
+      "updatedQuarantinedJobsInWindow": 0,
+      "jobsWithProviderProgressInWindow": 2,
+      "completedTracksOfThoseVerifiedJobs": 0
+    },
+    "interpretation": {
+      "completedMeans": "a second sequential step persisted a window checkpoint; not necessarily a verified language",
+      "timingPairs": "No Edge event pairing: completed durations use only the elapsedMs attached directly to each result.",
+      "gatewayStages": "Global stages within this window, not attributed to a particular continuation or provider.",
+      "jobCounts": "Unique current job rows, not captures, provider HTTP requests, unique files, or newly published languages.",
+      "noProgressDoesNotProveFailure": "Continuation requires the same job first and first-step total duration at most 30 seconds."
+    }
+  },
+  "targetFollowup": {
+    "at": "2026-10-05T02:57:52.923683+00:00",
+    "readOnly": true,
+    "providerRequests": 0,
+    "admissions": 0,
+    "profileRequests": 0,
+    "items": [
+      {
+        "title": "Lost on a Mountain in Maine",
+        "identifiedAutomatically": false,
+        "exactProfile": true,
+        "cache": {
+          "audio": [
+            {
+              "codec": "aac",
+              "index": 1,
+              "default": true,
+              "channels": 6
+            }
+          ],
+          "verifiedAt": null,
+          "profileMatches": true
+        },
+        "jobs": [
+          {
+            "code": "LANGUAGE_VALIDATION_QUEUE_EXPIRED",
+            "pass": 0,
+            "retry": "2026-10-04T13:43:46.330484+00:00",
+            "state": "expired",
+            "windows": 1,
+            "receipts": 1,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": "2026-10-04T13:28:41.183804+00:00",
+            "providerAttempts": 1
+          },
+          {
+            "code": "LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE",
+            "pass": 0,
+            "retry": "2026-10-06T01:14:10.451+00:00",
+            "state": "failed",
+            "windows": 5,
+            "receipts": 5,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": "2026-10-04T22:27:38.011108+00:00",
+            "providerAttempts": 10
+          }
+        ]
+      },
+      {
+        "title": "The Legend of Ochi",
+        "identifiedAutomatically": false,
+        "exactProfile": true,
+        "cache": {
+          "audio": [
+            {
+              "codec": "aac",
+              "index": 1,
+              "default": true,
+              "channels": 6
+            }
+          ],
+          "verifiedAt": null,
+          "profileMatches": true
+        },
+        "jobs": [
+          {
+            "code": "LANGUAGE_CAPTURE_AUDIO_WINDOW_UNAVAILABLE",
+            "pass": 0,
+            "retry": "2026-10-06T01:17:43.005+00:00",
+            "state": "failed",
+            "windows": 1,
+            "receipts": 1,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": "2026-10-05T01:16:18.091236+00:00",
+            "providerAttempts": 2
+          },
+          {
+            "code": "LANGUAGE_VALIDATION_QUEUE_EXPIRED",
+            "pass": 0,
+            "retry": "2026-10-04T18:57:40.118916+00:00",
+            "state": "expired",
+            "windows": 0,
+            "receipts": 0,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": null,
+            "providerAttempts": 1
+          }
+        ]
+      },
+      {
+        "title": "Bolt from the Blue",
+        "identifiedAutomatically": true,
+        "exactProfile": true,
+        "cache": {
+          "audio": [
+            {
+              "lang": "en",
+              "codec": "aac",
+              "index": 1,
+              "default": true,
+              "channels": 6
+            }
+          ],
+          "verifiedAt": "2026-10-05T01:40:27.654948+00:00",
+          "profileMatches": true
+        },
+        "jobs": [
+          {
+            "code": "PROFILE_CHANGED",
+            "pass": 0,
+            "retry": null,
+            "state": "failed",
+            "windows": 0,
+            "receipts": 0,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": null,
+            "providerAttempts": 0
+          },
+          {
+            "code": null,
+            "pass": 0,
+            "retry": null,
+            "state": "verified",
+            "windows": 0,
+            "receipts": 0,
+            "selected": false,
+            "verifiedAt": "2026-10-05T01:40:27.654948+00:00",
+            "lastProgress": "2026-10-05T01:40:27.595704+00:00",
+            "providerAttempts": 7
+          }
+        ]
+      },
+      {
+        "title": "I Want to Live on Mars",
+        "identifiedAutomatically": false,
+        "exactProfile": true,
+        "cache": {
+          "audio": [
+            {
+              "codec": "aac",
+              "index": 1,
+              "default": true,
+              "channels": 2
+            }
+          ],
+          "verifiedAt": null,
+          "profileMatches": true
+        },
+        "jobs": [
+          {
+            "code": "LANGUAGE_VALIDATION_NO_PROGRESS_QUARANTINED",
+            "pass": 0,
+            "retry": "2026-10-06T02:54:47.376392+00:00",
+            "state": "failed",
+            "windows": 2,
+            "receipts": 2,
+            "selected": false,
+            "verifiedAt": null,
+            "lastProgress": "2026-10-05T02:26:58.388842+00:00",
+            "providerAttempts": 6
+          }
+        ]
+      }
+    ],
+    "humanConfirmations": {
+      "registered": 5,
+      "currentlyProjectable": 5,
+      "registeredLanguages": {
+        "en": 4,
+        "es": 1
+      },
+      "projectedLanguages": {
+        "en": 4,
+        "es": 1
+      }
+    },
+    "mars": {
+      "quarantinedAt": "2026-10-05T02:54:47.376392+00:00",
+      "retryAt": "2026-10-06T02:54:47.376392+00:00",
+      "quarantineBeforeNewEdgeDeployment": true,
+      "acceptedWindows": 1,
+      "requiredConsensusWindows": 4,
+      "notIdentified": true
+    },
+    "limits": [
+      "No exact catalogue API requested because Mars is not verified.",
+      "A verified Bolt job has cleared temporary receipt tokens after finalization; zero current tokens does not mean zero analyzed windows.",
+      "Lost/Ochi/Mars guards and previous evidence preserved; no retry or sampling pass changed.",
+      "Human confirmations are separate from the automatic identified counter."
+    ]
+  },
+  "marsReceiptFollowup": {
+    "at": "2026-10-05T02:59:46.558914+00:00",
+    "title": "I Want to Live on Mars",
+    "readOnly": true,
+    "providerRequests": 0,
+    "newCaptures": 0,
+    "newInferences": 0,
+    "productionMutations": 0,
+    "passes": [
+      {
+        "pass": 0,
+        "windows": [
+          {
+            "ordinal": 1,
+            "disposition": "insufficient",
+            "language": null,
+            "confident": false,
+            "confidence": 0.681105,
+            "wordCount": 10,
+            "uniqueWordCount": 9,
+            "speechMilliseconds": 3380,
+            "selector": "silero-vad-max-speech-v1"
+          },
+          {
+            "ordinal": 2,
+            "disposition": "accepted",
+            "language": "en",
+            "confident": true,
+            "confidence": 0.996697,
+            "wordCount": 77,
+            "uniqueWordCount": 41,
+            "speechMilliseconds": 17020,
+            "selector": "silero-vad-max-speech-v1"
+          }
+        ],
+        "authenticatedReceipts": 2,
+        "dispositions": {
+          "insufficient": 1,
+          "accepted": 1
+        },
+        "acceptedLanguages": {
+          "en": 1
+        }
+      }
+    ]
+  }
+}
