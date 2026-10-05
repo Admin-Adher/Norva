@@ -7,18 +7,29 @@ set local statement_timeout='30s';
 create function public.catalog_source_account_pregen_active(p_user_id uuid,p_source_id uuid)
 returns boolean language plpgsql stable security definer set search_path='' set jit=off as $f$
 declare
- target_affinity text; related_owners uuid[]; related_keys text[];
+ target_affinity text; target_type text; related_owners uuid[]; related_keys text[];
  job record; candidate record; seen integer:=0; candidate_seen integer; related_count integer;
  matched boolean; admitted_at timestamptz;
 begin
  perform public.norva_credential_require_service_role();
  if p_user_id is null or p_source_id is null then return true; end if;
- select a.affinity_hash into target_affinity
+ select a.affinity_hash,base.source_type into target_affinity,target_type
  from public.cloud_catalog_visible_sources s
+ join public.cloud_sources base on base.id=s.id and base.user_id=s.user_id
  join public.cloud_source_catalog_heads h on h.source_id=s.id and h.user_id=s.user_id
    and h.active_generation_id is not null
- join public.cloud_source_provider_account_affinities a on a.source_id=s.id and a.user_id=s.user_id
+ left join public.cloud_source_provider_account_affinities a on a.source_id=s.id and a.user_id=s.user_id
  where s.id=p_source_id and s.user_id=p_user_id;
+ if not found then return true; end if;
+ -- M3U sources can contain several accounts and have no source-level Xtream
+ -- affinity. Preserve their existing owner guard; the exact URL/account guards
+ -- still run before any provider request. Do not infer a shared M3U account.
+ if target_type='m3u' then
+  return exists(select 1 from public.catalog_generated_subtitles g
+    where g.claimed_by=p_user_id and g.status='processing'
+      and g.updated_at>statement_timestamp()-interval '2 hours');
+ end if;
+ if target_type is distinct from 'xtream' then return true; end if;
  if target_affinity is null then return true; end if;
 
  -- Include aliases/owners already bound to this exact account. Do not invent

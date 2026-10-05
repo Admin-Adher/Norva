@@ -7,7 +7,7 @@ begin if ok is distinct from true then raise exception 'Assertion failed: %',lab
 create function pg_temp.id(n integer) returns uuid language sql immutable as $$select ('00000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
 create function pg_temp.source(n integer,owner integer,account integer,identity integer) returns void language plpgsql as $$
 begin
- insert into public.cloud_sources values(pg_temp.id(n),pg_temp.id(owner));
+ insert into public.cloud_sources(id,user_id) values(pg_temp.id(n),pg_temp.id(owner));
  insert into public.cloud_catalog_visible_sources values(pg_temp.id(n),pg_temp.id(owner));
  insert into public.cloud_source_catalog_heads values(pg_temp.id(n),pg_temp.id(owner),pg_temp.id(900));
  insert into public.cloud_source_provider_account_affinities values(pg_temp.id(n),pg_temp.id(owner),lpad(account::text,64,'0'),now()-interval '3 hours');
@@ -123,6 +123,26 @@ select pg_temp.assert(pg_temp.blocked(),'129 candidate sources fail closed');
 truncate public.catalog_generated_subtitles;
 select pg_temp.source(30000+n,5,100,3000+n) from generate_series(1,129) n;
 select pg_temp.assert(pg_temp.blocked(),'129 related account aliases fail closed');
+truncate public.catalog_generated_subtitles;
+select pg_temp.source(20,6,106,1006);
+update public.cloud_sources set source_type='m3u' where id=pg_temp.id(20);
+delete from public.cloud_source_provider_account_affinities where source_id=pg_temp.id(20);
+select pg_temp.assert(not pg_temp.blocked(6,20),'M3U idle without affinity retains legacy allow');
+select pg_temp.job(3,1003);
+select pg_temp.assert(not pg_temp.blocked(6,20),'M3U unrelated owner processing retains legacy allow');
+update public.catalog_generated_subtitles set provider_key=pg_temp.id(1006)::text;
+select pg_temp.assert(not pg_temp.blocked(6,20),'M3U does not invent cross-owner alias equivalence');
+select pg_temp.job(6,9999);
+select pg_temp.assert(pg_temp.blocked(6,20),'M3U same-owner unknown processing retains legacy block');
+update public.catalog_generated_subtitles set stage='queued';
+select pg_temp.assert(pg_temp.blocked(6,20),'M3U same-owner queued retains legacy block');
+update public.catalog_generated_subtitles set updated_at=now()-interval '2 hours 1 second';
+select pg_temp.assert(not pg_temp.blocked(6,20),'M3U legacy TTL preserved');
+delete from public.cloud_catalog_visible_sources where id=pg_temp.id(20);
+select pg_temp.assert(pg_temp.blocked(6,20),'M3U hidden source remains closed');
+insert into public.cloud_catalog_visible_sources values(pg_temp.id(20),pg_temp.id(6));
+update public.cloud_sources set source_type='unsupported' where id=pg_temp.id(20);
+select pg_temp.assert(pg_temp.blocked(6,20),'unknown source type fails closed');
 select pg_temp.assert(not has_function_privilege('anon','public.catalog_source_account_pregen_active(uuid,uuid)','EXECUTE'),'anonymous ACL denied');
 select pg_temp.assert(not has_function_privilege('authenticated','public.catalog_source_account_pregen_active(uuid,uuid)','EXECUTE'),'authenticated ACL denied');
 select pg_temp.assert(has_function_privilege('service_role','public.catalog_source_account_pregen_active(uuid,uuid)','EXECUTE'),'service role ACL allowed');

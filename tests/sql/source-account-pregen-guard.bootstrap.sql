@@ -5,7 +5,7 @@ create role service_role;
 create function public.norva_credential_require_service_role() returns void language plpgsql as $$
 begin if current_setting('request.jwt.claim.role',true) is distinct from 'service_role' then
  raise exception 'service role required' using errcode='42501'; end if; end $$;
-create table public.cloud_sources(id uuid primary key,user_id uuid not null);
+create table public.cloud_sources(id uuid primary key,user_id uuid not null,source_type text default 'xtream');
 create table public.cloud_catalog_visible_sources(id uuid primary key,user_id uuid not null);
 create table public.cloud_source_catalog_heads(source_id uuid primary key,user_id uuid,active_generation_id uuid);
 create table public.cloud_source_provider_account_affinities(source_id uuid primary key,user_id uuid,affinity_hash text,updated_at timestamptz);
