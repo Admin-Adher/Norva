@@ -62,3 +62,26 @@ PR665 fusionnée c6d63d84d903ac8ff962aa91330955fa59899b50, tête c11c97a058f9d9e
 À18:16:59UTC, A Breed Apart repris1857s : t27,260/pausedfalse/ready4. Ajustement du curseur a envoyé95s puis119s ; deux remplacements ordinaires successifs, pas simultanéité média revendiquée. À18:18:25, flux119s tampon[1,517333;17,534333], t0/pausedtrue ; politique1,57x non éligible, préparation serveur58,816s. À18:19:51, tampon[1,517333;111,544333], t1,517333 : alignement effectif après réserve, mais pausedtrue. Le second seek avait lu la pause technique créée par le premier et capturé autoplayfalse. L'alignement est vérifié, pas la reprise automatique dans ce cas.
 
 Correctif complémentaire : conserver l'intention de lecture durant le remplacement et le remplissage, bornée à la tentative courante. Une pause explicite reste prioritaire, le début d'une nouvelle tentative efface l'intention et un play valide la termine. La fixture WebView reproduit lecture active -> démontage/paused -> second seek, pause explicite, autre titre et rebuffer automatique. Aucun changement de concurrence, route, seuil ou données média.
+
+## Publication du second correctif et contrôles bornés
+
+PR666 fusionnée par 2e9bc0fcd66a821b718a243432c2f23791be8203, code53c9f80b767995bded2d3eda5179b353e674f360. 192 tests locaux WatchPage réussis ; groupe ciblé de36 recoupé. Build37355434128 : contrats et paquets Phone/TV/Windows réussis. Matrice37355435607 : six configurations réussies au relevé final. Premier échec TVfont1.3 conservé : ConsentDpadInstrumentedTest attendait granted, a reçu denied. Une demande de relance ciblée après fin du workflow a été faite ; le relevé final retourne six jobs réussis, dont TVfont1.3 job111919866259. Aucun seuil de test modifié. Ce test TV ne certifie pas le décodage vidéo.
+
+Rejeux sous PR665 (avant la publication PR666), même copie exacte, une lecture à la fois :
+
+- Until Dawn : reprise659s prête serveur13,594s, politique adaptative non éligible1,249x ; attente de la réserve normale, puis lecture automatique. Saut1857s prêt17,577s, politique éligible2,243x. À18:30:57, t9,414841/pausedfalse/ready4/errornull ; à18:31:42, t54,401211. Sept segments fermés relus sans I/O fournisseur à18:31:33 :335 paquets vidéo, intervalle maximal0,042s ;655 paquets audio, maximum0,021334s, zéro intervalle>65ms. Environ14s de sortie examinées, pas une certification du film. La variation de préparation réseau ne constitue pas un gain causal prouvé du correctif client.
+- What Happens After the Massacre? : saut1441s prêt serveur27,028s, politique éligible5,063x. À18:35:47, t10,306642/pausedfalse/ready4/errornull ; à18:36:14, t37,454018. Sept segments fermés à18:36:09 :138 paquets vidéo sur9,218s, un intervalle3,545s ;434 paquets audio, maximum0,021334s. La reprise fonctionne, mais un gel vidéo résiduel demeure. Diagnostics EBML et références manquantes encore présents ; les données endommagées préalablement constatées ne sont pas réparées.
+
+Lectures clôturées naturellement par retour Films à18:31:42 et18:36:14UTC. Les confirmations de langue et la campagne audio sont inchangées. Aucun codec, route, Gateway, Edge, concurrence ou garde fournisseur modifié.
+
+Publication Cloudflare37357094996 réussie, job111922153659 :5968 tests,5941 réussis,27 ignorés,zéro échec. Navigateur rechargé hors lecture, DOM réel WatchPage.js?v=9cbeb7d244. Cette livraison concerne le lecteur Web/WebView ; aucun nouveau paquet Google Play envoyé.
+
+### Rejeu final PR666 — A Breed Apart
+
+Nouvelle version9cbeb7d244 chargée. Reprise120s : play_started18:39:13, serveur31,378s. Puis sauts successifs : sessions ordinaires créées18:39:32 et18:39:36 ; la première est remplacée avant première image, la dernière vise1814s. Son play_started est enregistré18:40:23,775, first_frame18:40:23,880 (TTFF48,430s), préparation serveur42,635s. Aucun clic Lecture nécessaire après les sauts. DOM18:41:18 : t54,541331/pausedfalse/ready4/errornull ; DOM18:41:46 : t83,156522/pausedfalse/ready4/errornull. La progression correspond aux28,615s écoulées. La perte d'intention de lecture est corrigée dans ce rejeu, sans annoncer une réduction garantie de la préparation.
+
+Limite résiduelle : sept segments fermés relus18:41:39 sans nouveau média fournisseur contiennent262 paquets vidéo sur13,972s, intervalle maximal2,127s, deux intervalles>250ms ; audio657 paquets, maximum0,021334s. Capture visuelle18:41:46 montre encore des blocs vidéo altérés. La lecture avance mais cette copie n'est PAS certifiée fluide. Les deux préfixes endommagés identifiés pendant l'audit restent une limite distincte, sans attribution certaine entre livraison fournisseur et proxy commun.
+
+Retour Films18:41:55 environ, audit18:42 : les trois sessions de ce rejeu sont expired. Aucune session de test laissée active. Reçus `breed-intent-final.safe.json`, `breed-intent-packets.safe.json`, `breed-intent-closeout.safe.json` et `fix-summary.safe.json`. Aucune écriture de langue, relance de campagne, nouvel échantillon fournisseur indépendant ni contournement des gardes.
+
+**Bilan : deux défauts client corrigés et déployés, reprises vérifiées. Préparation parfois longue et corruption vidéo résiduelle non résolues ; ne pas annoncer les trois fichiers entièrement réparés.**
