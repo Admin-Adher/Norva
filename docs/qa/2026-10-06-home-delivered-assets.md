@@ -20,7 +20,7 @@ Three delivery tests pass, including exact-byte/idempotence/CSS-path checks, cha
 
 An isolated build from Git's LF blobs generated 59 assets. The HTTP verifier checked all 59 successfully against a local fixture server. Chromium loaded the real Home renderer using the fingerprinted script and SRI; the empty-cache scheduling fixture displayed its real carousel while series remained unresolved (71 ms with a synthetic immediate API, not a production timing claim). Application Home bytes remain those already tested in four visible Android WebView configurations and two TV smoke jobs, run37515427600; no new native behavior.
 
-Production rollout and repeated user-account verification pending. No provider media request, Edge/Gateway restart, language guard change, or cache/account-data deletion was used.
+Production rollout and repeated user-account verification are recorded below. No provider media request, Edge/Gateway restart, language guard change, or cache/account-data deletion was used.
 ## Publication and real browser verification
 
 PR676 merged as 1098ca30052f4a27258b93865a3d7262e3062405. Full Linux suite: 6,001 tests, 5,971 passed, 30 skipped, zero failures. Cloudflare run37519139134 succeeded. At 19:32:42 UTC its post-publication gate verified all 59 served assets. A second full byte check from the operator host also verified all 59 against the independently prepared Git-LF manifest.
