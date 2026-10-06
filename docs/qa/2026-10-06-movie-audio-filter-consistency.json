@@ -1,0 +1,188 @@
+{
+  "tests": {
+    "sqlIsolatedNew": 31,
+    "sqlExistingRegression": 13,
+    "jsPassed": 42,
+    "failures": 0,
+    "beforeMigrationFailedExpectedAssertion": "exact_cache_normalized_deduplicated",
+    "network": "none",
+    "productionRowsCopied": 0
+  },
+  "apply": {
+    "at": "2026-10-06T18:40:08.420676+00:00",
+    "definitions": {
+      "norva_catalog_movie_effective_audio_languages": "284f244bb312f11b22df373364be5002"
+    },
+    "otherFunctions": {
+      "hash": "88980a2564721ca33cb14f102b294578",
+      "count": 1305
+    },
+    "applied": true,
+    "sha256": "a5808b6105dc7bd38a694f65b5aa8efdef29985496398e7a5cd61d0f5fe8de31",
+    "otherFunctionsAndAttributesUnchanged": true,
+    "evidenceAndJobsUnchangedInSnapshot": true,
+    "providerRequests": 0,
+    "rowWrites": 0,
+    "restarts": 0
+  },
+  "postverify": {
+    "at": "2026-10-06T18:40:18.486076+00:00",
+    "definitions": {
+      "norva_catalog_movie_effective_audio_languages": "284f244bb312f11b22df373364be5002"
+    },
+    "otherFunctions": {
+      "hash": "88980a2564721ca33cb14f102b294578",
+      "count": 1305
+    },
+    "verified": true,
+    "providerRequests": 0,
+    "rowWrites": 0
+  },
+  "primaryApi": {
+    "at": "2026-10-06T18:40:19.802731+00:00",
+    "edge": "norva-edge-functions",
+    "requests": [
+      {
+        "query": "audio=unidentified&q=Mindiyum",
+        "http": 200,
+        "elapsedMs": 3836,
+        "count": 0,
+        "exactMatches": 0,
+        "languages": [],
+        "variants": []
+      },
+      {
+        "query": "audio=catalog-ml&q=Mindiyum",
+        "http": 200,
+        "elapsedMs": 2423,
+        "count": 1,
+        "exactMatches": 1,
+        "languages": [
+          null
+        ],
+        "variants": [
+          {
+            "audioLanguages": [
+              "ml"
+            ],
+            "audioLanguageStatus": null,
+            "audioLanguageVerification": {
+              "status": "observed"
+            },
+            "audioLanguageValidationStatus": "probed"
+          }
+        ]
+      },
+      {
+        "query": "q=Mindiyum",
+        "http": 200,
+        "elapsedMs": 1659,
+        "count": 1,
+        "exactMatches": 1,
+        "languages": [
+          null
+        ],
+        "variants": [
+          {
+            "audioLanguages": [
+              "ml"
+            ],
+            "audioLanguageStatus": null,
+            "audioLanguageVerification": {
+              "status": "observed"
+            },
+            "audioLanguageValidationStatus": "probed"
+          }
+        ]
+      },
+      {
+        "query": "audio=unidentified&q=Vivid",
+        "http": 200,
+        "elapsedMs": 3692,
+        "count": 2,
+        "exactMatches": 0,
+        "languages": [],
+        "variants": []
+      }
+    ],
+    "providerMediaRequests": 0
+  },
+  "secondaryApi": {
+    "at": "2026-10-06T18:40:43.763529+00:00",
+    "edge": "norva-edge-functions-2",
+    "requests": [
+      {
+        "query": "audio=unidentified&q=Mindiyum",
+        "http": 200,
+        "elapsedMs": 3374,
+        "count": 0,
+        "exactMatches": 0,
+        "languages": [],
+        "variants": []
+      },
+      {
+        "query": "audio=catalog-ml&q=Mindiyum",
+        "http": 200,
+        "elapsedMs": 2959,
+        "count": 1,
+        "exactMatches": 1,
+        "languages": [
+          null
+        ],
+        "variants": [
+          {
+            "audioLanguages": [
+              "ml"
+            ],
+            "audioLanguageStatus": null,
+            "audioLanguageVerification": {
+              "status": "observed"
+            },
+            "audioLanguageValidationStatus": "probed"
+          }
+        ]
+      },
+      {
+        "query": "q=Mindiyum",
+        "http": 200,
+        "elapsedMs": 1906,
+        "count": 1,
+        "exactMatches": 1,
+        "languages": [
+          null
+        ],
+        "variants": [
+          {
+            "audioLanguages": [
+              "ml"
+            ],
+            "audioLanguageStatus": null,
+            "audioLanguageVerification": {
+              "status": "observed"
+            },
+            "audioLanguageValidationStatus": "probed"
+          }
+        ]
+      },
+      {
+        "query": "audio=unidentified&q=Vivid",
+        "http": 200,
+        "elapsedMs": 3143,
+        "count": 2,
+        "exactMatches": 0,
+        "languages": [],
+        "variants": []
+      }
+    ],
+    "providerMediaRequests": 0
+  },
+  "browser": {
+    "unknownSearchCount": 0,
+    "malayalamSearchCount": 1,
+    "unknownTitleCount": 6270,
+    "malayalamFacetCount": 1415,
+    "restoredUnknownFilter": true,
+    "playbackStarted": false
+  },
+  "merge": "b5c278071bb040529904843b20926f6bf0fedf42"
+}

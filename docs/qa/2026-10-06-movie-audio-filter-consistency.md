@@ -24,4 +24,14 @@ Expected function MD5: `284f244bb312f11b22df373364be5002`.
 
 ## Deployment
 
-Pending production application and authenticated API/browser verification. No UI assets or media runtime changes are required.
+Applied at 18:40:08 UTC (20:40 Paris), independently rechecked at 18:40:18 UTC. The target function matches the tested fingerprint. All 1,305 other public functions/procedures and their ACLs, target attributes, evidence tables and jobs match within the same repeatable-read snapshot. No rows written, no provider media calls, no service restart or admission pause.
+
+The first operator attempt rolled back before replacing the function: its JSON aggregation of the full evidence snapshot exceeded PostgreSQL's 256 MiB value limit. A read-only preflight proved the original function remained active. The operator was changed to aggregate compact per-row hashes; a separate admission marker was used and both attempts are retained. The product migration itself was unchanged.
+
+Both authenticated Edge APIs returned HTTP 200: Mindiyum + unidentified count 0; Mindiyum + Malayalam count 1 with the exact variant; unfiltered count 1, still probed/observed rather than strict verified. Vivid still returns two unknown results. Request durations 1.66–3.84 seconds.
+
+Real browser after reload: Mindiyum absent from unidentified; a focused unknown-language search returns no film; Malayalam search shows its correct card. The unidentified list shows 6,270 titles, Malayalam facet 1,415. These are current projection counts, not newly completed speech validations. Browser restored to the user's unidentified filter with no search and no playback started.
+
+PR 672 merged as b5c278071bb040529904843b20926f6bf0fedf42, code 01ce7026a178b01b6b924b2d3a188e77eb328845. Cloud contracts, Edge types, disposable DB, mocked journey, notice checks and Android packages passed before final documentation; remaining checks tracked separately. Proof container stopped. No UI assets or media runtime changed.
+
+Safe receipts and screenshots: `.codex-artifacts/catalog-audio-filter-20261006/`. PR attachment was rejected at the existing 100-attachment limit; none were removed.
