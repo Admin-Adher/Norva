@@ -3586,6 +3586,37 @@ test('disjoint MP4 packet reads reuse complete small ranges without provider ove
   assert.equal(broker.terminalError,null);
 });
 
+test('stable MKV delivery reduces remote round trips and resets small at each new cue', async t => {
+  const mib = 1024 * 1024, data = Buffer.alloc(48 * mib, 0x53);
+  for (const grow of [false, true]) {
+    const ranges = []; let active = 0, peak = 0;
+    const provider = http.createServer((req, res) => {
+      active++; peak = Math.max(peak, active); ranges.push(exactRange(req, data.length));
+      let released = false;
+      const release = () => { if (!released) { released = true; active--; } };
+      res.once('finish', release); res.once('close', release);
+      setTimeout(() => sendExactRange(req, res, data), 100);
+    });
+    const sourceUrl = await listen(provider);
+    const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: data.length,
+      pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 2 * mib,
+      finiteInitialSequentialWindowBytes: 2 * mib, finiteSequentialGrowthBytes: 4 * mib,
+      finiteSequentialWindowBytes: (grow ? 8 : 2) * mib, finiteCacheBytes: 32 * mib,
+      completedReleaseDelayMs: 0, releaseDelayMs: 0 });
+    try {
+      const read = async (start, end) => Buffer.from(await (await fetch(broker.inputUrl,
+        { headers: { Range: `bytes=${start}-${end}` } })).arrayBuffer());
+      assert.deepEqual(await read(0, 20 * mib - 1), data.subarray(0, 20 * mib));
+      assert.equal(ranges.length, grow ? 4 : 10);
+      const beforeCue = ranges.length;
+      assert.deepEqual(await read(40 * mib, 44 * mib - 1), data.subarray(40 * mib, 44 * mib));
+      assert.equal(ranges.length - beforeCue, 2);
+      assert.equal(ranges[beforeCue].end - ranges[beforeCue].start + 1, 2 * mib);
+      assert.equal(peak, 1); assert.equal(broker.interruptedProviderFetches, 0);
+    } finally { await broker.close(); await closeServer(provider); }
+  }
+});
+
 test('small MP4 first range grows for sustained sequential delivery',async t=>{
  const data=Buffer.alloc(2*1024*1024,0x45),ranges=[];
  const provider=http.createServer((req,res)=>{ranges.push(req.headers.range);sendExactRange(req,res,data);});
@@ -3660,6 +3691,47 @@ test('split-track MP4 deliberate close reuses only received validated bytes afte
  assert.equal(broker.interruptedProviderFetches,1);assert.ok(broker.cacheHits>0);
  const uncached=await fetch(broker.inputUrl,{headers:{Range:'bytes=524288-532479'}});
  assert.deepEqual(Buffer.from(await uncached.arrayBuffer()),data.subarray(524288,532480));assert.equal(calls.length,2);
+});
+
+for (const closeOld of [true, false]) test(`an older MP4 continuation ${closeOld ? 'closes' : 'stays readable'} after a queued cue finishes`, {timeout:10000}, async t => {
+  const data = Buffer.alloc(8 * 65536, 71), calls = [];
+  let cueStarted;
+  const cue = new Promise(resolve => { cueStarted = resolve; });
+  const provider = http.createServer((req, res) => {
+    const range = exactRange(req, data.length);
+    calls.push(range.start);
+    if (range.start === 4 * 65536) {
+      cueStarted();
+      setTimeout(() => sendExactRange(req, res, data), 600);
+    } else sendExactRange(req, res, data);
+  });
+  const sourceUrl = await listen(provider); t.after(() => closeServer(provider));
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: data.length, dispatcher: null,
+    pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 65536, finiteFirstWindowBytes: 65536,
+    finiteAtomicWindowBytes: 65536, finiteCacheBytes: data.length,
+    finiteInitialContinuationGraceMs: 200, releaseDelayMs: 0, supersededReleaseDelayMs: 2500 });
+  t.after(() => broker.close());
+  const original = await fetch(broker.inputUrl, { headers: { Range: 'bytes=0-524287' } });
+  const reader = original.body.getReader();
+  const firstBytes = (await reader.read()).value.length;
+  assert.ok(firstBytes > 0);
+  const next = fetch(broker.inputUrl, { headers: { Range: 'bytes=262144-327679' } });
+  await cue;
+  assert.deepEqual(Buffer.from(await (await next).arrayBuffer()), data.subarray(262144, 327680));
+  // libav closes the old socket after consuming the newly delivered cue.
+  await new Promise(resolve => setTimeout(resolve, 60));
+  if (closeOld) {
+    await reader.cancel();
+    await new Promise(resolve => setTimeout(resolve, 250));
+    assert.deepEqual(calls, [0, 262144]);
+  } else {
+    // A newer range alone is not permission to truncate the original reader.
+    let count = firstBytes;
+    for (;;) { const part = await reader.read(); if (part.done) break; count += part.value.length; }
+    assert.equal(count, data.length);
+    assert.equal(broker.terminalError, null);
+  }
+  assert.equal(broker.interruptedProviderFetches, 0);
 });
 
 test('MP4 atomic first window drains before demuxer packet cancellation and reuses exact bytes', {timeout:10000}, async(t)=>{

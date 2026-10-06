@@ -3851,7 +3851,7 @@ test('ffprobe timeout preserves terminal 458/407 stderr, waits for pipe close, a
     }
 });
 
-for (const finiteTs of [false, true]) test(`finite ${finiteTs ? 'TS' : 'MKV'} seek preparation drains the retained provider before opening one pinned broker`, async () => {
+for (const [finiteTs, grow] of [[false, false], [true, false], [false, true]]) test(`finite ${finiteTs ? 'TS' : 'MKV'} ${grow ? 'growing' : 'bounded'} seek preparation drains the retained provider before opening one pinned broker`, async () => {
     const source = readGateway();
     const block = sourceBetween(
         source,
@@ -3879,12 +3879,12 @@ for (const finiteTs of [false, true]) test(`finite ${finiteTs ? 'TS' : 'MKV'} se
         {
             Number,
             FFMPEG_USER_AGENT: 'Norva-Test/1',
-            playbackStartupWindowPolicy: createPlaybackStartupWindowPolicy({ enabled: false }),
+            playbackStartupWindowPolicy: createPlaybackStartupWindowPolicy({ enabled: grow, allAuthenticatedOwners: grow }),
             canUsePrivateResumeCache: createPrivateResumeOwnerGate({ enabled: false }),
             sharedPlaybackRanges: new SharedPlaybackRanges({ enabled: false }),
             hybridPlaybackRanges,
             PROVIDER_SLOT_RELEASE_DELAY_MS: 2500,
-            FINITE_MKV_SEEK_WINDOW_BYTES: 2 * 1024 * 1024,
+            FINITE_MKV_SEEK_WINDOW_BYTES: (grow ? 8 : 2) * 1024 * 1024,
             FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES: 1 * 1024 * 1024,
             FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES: 256 * 1024,
             FINITE_MKV_RESUME_CUE_GRACE_MS: 50,
@@ -3947,7 +3947,7 @@ for (const finiteTs of [false, true]) test(`finite ${finiteTs ? 'TS' : 'MKV'} se
         userAgent: 'Norva/Seek',
         seekOffset: 2062,
         fileSizeBytes: 3_633_791_388,
-        codecProfile: { audioTracks: [{ index: 1 }, { index: 2 }] },
+        codecProfile: { audioTracks: grow ? [{ index: 1 }] : [{ index: 1 }, { index: 2 }] },
         vodInputValidator: { header: 'If-Range', value: '"v1"', kind: 'etag' },
         vodInputEffectiveUrlSha256: 'a'.repeat(64),
         vodInputEffectiveUrlIdentitySha256: 'b'.repeat(64),
@@ -3968,6 +3968,8 @@ for (const finiteTs of [false, true]) test(`finite ${finiteTs ? 'TS' : 'MKV'} se
     assert.equal(brokerOptions.effectiveUrlSha256, session.vodInputEffectiveUrlSha256);
     assert.equal(brokerOptions.effectiveUrlIdentitySha256, session.vodInputEffectiveUrlIdentitySha256);
     assert.equal(brokerOptions.pathPrefix, 'finite-mkv-seek');
+    assert.equal(brokerOptions.finiteInitialSequentialWindowBytes, grow ? 2 * 1024 * 1024 : 0);
+    assert.equal(brokerOptions.finiteSequentialGrowthBytes, grow ? 4 * 1024 * 1024 : 0);
     if (finiteTs) {
         assert.equal(brokerOptions.onFiniteResumePrefix, null);
         assert.equal(brokerOptions.finiteResumePrefixCandidate, null);
@@ -3977,18 +3979,18 @@ for (const finiteTs of [false, true]) test(`finite ${finiteTs ? 'TS' : 'MKV'} se
         const cancelled = new AbortController(); cancelled.abort();
         await assert.rejects(harness.prepareFiniteMkvSeekBroker({ ...session, finiteMkvSeekBroker: null }, cancelled.signal), { code: 'VOD_INPUT_ABORTED' });
     }
-    assert.equal(brokerOptions.finiteWindowBytes, 1024 * 1024);
+    assert.equal(brokerOptions.finiteWindowBytes, (grow ? 2 : 1) * 1024 * 1024);
     assert.equal(brokerOptions.finiteSeekLookbehindBytes, finiteTs ? 256 * 1024 : 0);
     assert.equal(brokerOptions.finiteSeekContinuationGraceMs, finiteTs ? 50 : 0);
     assert.equal(brokerOptions.finiteAbandonedDrainMs, finiteTs ? 1500 : 0);
     assert.equal(brokerOptions.finiteWarmupCueGraceMs, finiteTs ? 0 : 50);
     assert.equal(brokerOptions.finiteWarmupWindowBytes, 256 * 1024);
-    assert.equal(brokerOptions.finiteSequentialWindowBytes, 2 * 1024 * 1024);
+    assert.equal(brokerOptions.finiteSequentialWindowBytes, (grow ? 8 : 2) * 1024 * 1024);
     assert.equal(brokerOptions.finiteCacheBytes, 32 * 1024 * 1024);
-    assert.equal(session.startupTimings.finiteMkvSeekMultiAudioWindow, true);
+    assert.equal(session.startupTimings.finiteMkvSeekMultiAudioWindow, !grow);
     assert.equal(session.startupTimings.finiteMkvSeekWarmupCueGraceMs, finiteTs ? 0 : 50);
     assert.equal(session.startupTimings.finiteMkvSeekWarmupWindowBytes, 256 * 1024);
-    assert.equal(session.startupTimings.finiteMkvSeekSequentialWindowBytes, 2 * 1024 * 1024);
+    assert.equal(session.startupTimings.finiteMkvSeekSequentialWindowBytes, (grow ? 8 : 2) * 1024 * 1024);
     assert.equal(typeof brokerOptions.dispatcherFactory, 'function');
     assert.equal(typeof brokerOptions.dispatcherFallbackFactory, 'function');
     assert.deepEqual({ ...brokerOptions.dispatcherFactory() }, { slot: 3, nodeTransport: 'http' });
