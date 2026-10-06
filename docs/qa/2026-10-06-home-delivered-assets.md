@@ -20,4 +20,15 @@ Three delivery tests pass, including exact-byte/idempotence/CSS-path checks, cha
 
 An isolated build from Git's LF blobs generated 59 assets. The HTTP verifier checked all 59 successfully against a local fixture server. Chromium loaded the real Home renderer using the fingerprinted script and SRI; the empty-cache scheduling fixture displayed its real carousel while series remained unresolved (71 ms with a synthetic immediate API, not a production timing claim). Application Home bytes remain those already tested in four visible Android WebView configurations and two TV smoke jobs, run37515427600; no new native behavior.
 
-Production rollout and repeated user-account verification pending. No provider media request, Edge/Gateway restart, language guard change, or cache/account-data deletion was used.
+Production rollout and repeated user-account verification are recorded below. No provider media request, Edge/Gateway restart, language guard change, or cache/account-data deletion was used.
+## Publication and real browser verification
+
+PR676 merged as 1098ca30052f4a27258b93865a3d7262e3062405. Full Linux suite: 6,001 tests, 5,971 passed, 30 skipped, zero failures. Cloudflare run37519139134 succeeded. At 19:32:42 UTC its post-publication gate verified all 59 served assets. A second full byte check from the operator host also verified all 59 against the independently prepared Git-LF manifest.
+
+The active account was reloaded three times. All three produced a visible carousel and 18 catalogue cards, with no terminal Home error panel. The third replay observed the hero 2,783 ms after reload invocation in a single tool call. This is a browser observation including tool overhead, not a guaranteed cold-cache benchmark. The first replay's initial selector wait ended too early; the following DOM inspection confirmed the carousel. The second timing included an inter-tool gap and is not used as a performance figure. Account/catalogue storage was not deleted.
+
+The loaded script is now `/js/pages/HomePage.f9041e3f63f66d27.js`, full expected SHA256 `f9041e3f63f66d273d65e3baa31ca9c99b04fafb51fd13028b5a3f528fc7cdfd`, rather than the poisoned query URL. Repeated final DOM inspection after the request budget expired showed 18 cards, carousel rotation, loading=false and no terminal error.
+
+Personalized Home still timed out at 19:33:56, 19:34:41 and 19:35:00 UTC. The verified implementation preserves the independently loaded cards/hero through those failures. This corrects the wrong-code delivery and blank/error Home path; it does not claim that slow personalized backend reads themselves have been repaired.
+
+Isolated screenshot: `.codex-artifacts/home-runtime-recovery-20261006/fingerprinted-cold-home.png`. Production screenshot capture failed in the browser tool; DOM and delivered-byte checks are preserved instead. The temporary fixture tab/server were closed. The user's browser remains on Home. The earlier report is amended to explicitly retract its URL-only production-code validation.

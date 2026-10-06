@@ -36,3 +36,6 @@ Cloudflare deployment 37516906916 succeeded on merge d113e65ed755126a9095660a685
 At 19:13:00.230 UTC personalized Home still reached its 10-second budget. Useful genre cards and carousel remained rendered and rotated. Thus the first-available scheduling defect is corrected, while slow personalized backend reads remain a measured limitation. This does not claim that all cold launches or all catalogue APIs now finish within a fixed duration. No visibility check, source gate, account fence or timeout was bypassed.
 
 Two production screenshot attempts failed in the browser tool; the verified DOM receipt and the isolated-browser screenshot remain available. The user browser is left on Home. Temporary fixture resources are closed after verification.
+## Subsequent correction of the live verification
+
+The user's later failure and byte-level checks showed that the new query-version URL still served the previous Home implementation from the CDN. The DOM URL and visible carousel above therefore did NOT establish that PR674 executed in production. That conclusion is superseded by docs/qa/2026-10-06-home-delivered-assets.md. PR676 adds real content filenames, SRI and a post-deployment full-byte check. The isolated scheduling tests remain valid; the live deployment claim required this additional correction.
