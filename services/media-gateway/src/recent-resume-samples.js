@@ -56,6 +56,9 @@ function captureSamples(entries) {
 }
 
 const RECENT_INPUT_MAX_BYTES = 8 * 1024 * 1024;
+// Input-only entries have no HLS assets. They may use the existing per-file
+// cache allowance, still reserved inside the unchanged aggregate budget.
+const RECENT_MULTI_INPUT_MAX_BYTES = 64 * 1024 * 1024;
 const RECENT_HEADER_MAX_BYTES = 8 * 1024 * 1024;
 
 // Completed input only. Prefer caller-ordered headers/index before recent body
@@ -64,7 +67,7 @@ const RECENT_HEADER_MAX_BYTES = 8 * 1024 * 1024;
 // them only after its exact private binding and fresh sample proof succeed.
 function captureInputWindows(entries, fileSizeBytes, maximum = RECENT_INPUT_MAX_BYTES) {
     if (!Number.isSafeInteger(fileSizeBytes) || fileSizeBytes < 1
-        || !Number.isSafeInteger(maximum) || maximum < 1 || maximum > RECENT_INPUT_MAX_BYTES
+        || !Number.isSafeInteger(maximum) || maximum < 1 || maximum > RECENT_MULTI_INPUT_MAX_BYTES
         || !Array.isArray(entries)) return [];
     const selected = []; let bytes = 0;
     for (const entry of entries.slice(0, 512)) {
@@ -88,4 +91,4 @@ function captureInputWindows(entries, fileSizeBytes, maximum = RECENT_INPUT_MAX_
 }
 
 module.exports = { SAMPLE_BYTES, RECENT_TTL_MS, sampleProof, samplesMatch, captureSamples,
-    RECENT_INPUT_MAX_BYTES, RECENT_HEADER_MAX_BYTES, captureInputWindows };
+    RECENT_INPUT_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES, RECENT_HEADER_MAX_BYTES, captureInputWindows };
