@@ -88,8 +88,8 @@ test('Home timeouts abort the underlying rails fetch and route cancellation drai
 });
 
 test('an uncached Home progressively paints the generation-fenced genre read model', () => {
-  assert.match(home, /\/media\/genre-rails\?type=movie&limit=12/);
-  assert.match(home, /\/media\/genre-rails\?type=series&limit=12/);
+  assert.match(home, /\['movie', 'series'\]\.map\(itemType/);
+  assert.match(home, /\/media\/genre-rails\?type=\$\{itemType\}&limit=12/);
   assert.match(home, /Promise\.race\(\[/);
   assert.match(home, /norva\.home\.fast-rails\.v1/);
   assert.match(home, /this\.renderCloudRails\(earlyRails\)/);
