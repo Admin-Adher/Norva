@@ -85,3 +85,24 @@ test('already cancelled request opens no provider broker', async () => {
     assert.equal(await validateRecentResume({ plan:{kind:'sampled-recent-v1',ranges:samples().map(s=>({start:s.start,length:N}))},
         signal:controller.signal,createBroker:async()=>{throw Error('must not open');} }),null);
 });
+
+for (const hit of [false,true]) test(`Gateway recreates indexed input after sampled validation: ${hit ? 'hit' : 'miss'}`, async () => {
+    const fs=require('node:fs'),vm=require('node:vm');
+    const source=fs.readFileSync(require('node:path').join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
+    const start=source.indexOf('async function tryStartPrivateResumeWindow('),end=source.indexOf('\nfunction usesFiniteMkvSeekBroker',start);
+    const calls=[],session={seekOffset:20,startupTimings:{}};
+    const run=vm.runInNewContext('('+source.slice(start,end)+')',{
+        AbortController,Date,Error,Number,
+        privateResumeHlsBindingForSession:()=>binding,privateResumeFormat:()=> 'mkv',canUseRecentResumeSamples:()=>true,
+        privateResumeHlsCache:{hasCandidate:()=>true,revalidationPlan:()=>({kind:'sampled-recent-v1'}),
+            acquire:()=>{calls.push('acquire');return hit?{start:10,end:70,aheadSeconds:50,validationMode:'sampled-recent-v1'}:null;}},
+        revalidateRecentResumeSession:async()=>{calls.push('validation-drained');return observed();},
+        prepareFiniteMkvSeekBroker:async()=>{calls.push('indexed-input');return {};},
+        startSessionWithProviderRetry:async()=>{calls.push('encoder');return true;},
+        observeSessionStartOffset:async()=>{},abortedVodInputPumpError:()=>Error('aborted'),
+    });
+    assert.equal(await run(session),hit);
+    assert.deepEqual(calls.slice(0,3),['validation-drained','indexed-input','acquire']);
+    assert.equal(calls.includes('encoder'),hit);
+    if(hit){await session.privateResumeContinuationPromise;assert.equal(session.privateResumeContinuationReady,true);}
+});
