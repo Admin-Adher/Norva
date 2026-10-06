@@ -1,0 +1,91 @@
+{
+  "scope": "Adrien-only recent-resume pilot; same exact Breaking Bad S1E3 copy, different positions",
+  "limitations": [
+    "four samples are a partial freshness proof",
+    "different positions prevent a universal speedup claim",
+    "Conclave target mismatch remains protected"
+  ],
+  "codePrs": [
+    684,
+    685
+  ],
+  "deployedRevision": "1fe1af00c3bc80fc32ff51c8f10af215544ea678",
+  "image": "sha256:59ccc86a6dae39c89605ca725d0731f5b41d9b042c25f294229409616bdb03b1",
+  "measurements": [
+    {
+      "label": "multi-input-breaking-cold",
+      "exactFileHash": "582239c1dc9bba51a6ca8c5063571430",
+      "createdAt": "2026-10-06T23:09:51.477203+00:00",
+      "position": 1559,
+      "ttffMs": 18327,
+      "sessionToPlayMs": 35768,
+      "serverReadyMs": 15483,
+      "ffmpegReadyMs": 7800,
+      "inputHit": false,
+      "validationMs": null,
+      "seededBytes": 0,
+      "audioRenditions": 3,
+      "subtitleRenditions": 2
+    },
+    {
+      "label": "multi-input-breaking-warm",
+      "exactFileHash": "582239c1dc9bba51a6ca8c5063571430",
+      "createdAt": "2026-10-06T23:11:41.997292+00:00",
+      "position": 1617,
+      "ttffMs": 20663,
+      "sessionToPlayMs": 23177,
+      "serverReadyMs": 18251,
+      "ffmpegReadyMs": 13294,
+      "inputHit": true,
+      "validationMs": 4911,
+      "seededBytes": 8388608,
+      "audioRenditions": 3,
+      "subtitleRenditions": 2
+    },
+    {
+      "label": "multi-body-cold",
+      "exactFileHash": "582239c1dc9bba51a6ca8c5063571430",
+      "createdAt": "2026-10-06T23:21:09.906118+00:00",
+      "position": 1730,
+      "ttffMs": 19907,
+      "sessionToPlayMs": 24367,
+      "serverReadyMs": 17112,
+      "ffmpegReadyMs": 8801,
+      "inputHit": false,
+      "validationMs": null,
+      "seededBytes": 0,
+      "audioRenditions": 3,
+      "subtitleRenditions": 2
+    },
+    {
+      "label": "multi-body-warm",
+      "exactFileHash": "582239c1dc9bba51a6ca8c5063571430",
+      "createdAt": "2026-10-06T23:22:47.862907+00:00",
+      "position": 1789,
+      "ttffMs": 10546,
+      "sessionToPlayMs": 11359,
+      "serverReadyMs": 7902,
+      "ffmpegReadyMs": 1013,
+      "inputHit": true,
+      "validationMs": 6845,
+      "seededBytes": 31628469,
+      "audioRenditions": 3,
+      "subtitleRenditions": 2
+    },
+    {
+      "label": "multi-body-warm2",
+      "exactFileHash": "582239c1dc9bba51a6ca8c5063571430",
+      "createdAt": "2026-10-06T23:25:08.367527+00:00",
+      "position": 1902,
+      "ttffMs": 7942,
+      "sessionToPlayMs": 8867,
+      "serverReadyMs": 5551,
+      "ffmpegReadyMs": 1018,
+      "inputHit": true,
+      "validationMs": 4479,
+      "seededBytes": 66953103,
+      "audioRenditions": 3,
+      "subtitleRenditions": 2
+    }
+  ]
+}
