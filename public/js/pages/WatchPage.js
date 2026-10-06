@@ -1321,12 +1321,25 @@ class WatchPage {
         return true;
     }
 
+    captureCloudResumePosition() {
+        // Capture the current session's decoded clock before teardown. A seek
+        // destination or a stale history checkpoint is not an observed position.
+        const video = this.video;
+        if (!['movie', 'series'].includes(this.contentType) || !this.currentCloudPlaybackSessionId
+            || !video || video.error || video.ended || video.seeking || Number(video.readyState) < 2
+            || !(Number(video.videoWidth) > 0) || !(Number(video.currentTime) > 0)
+            || Number(this._pendingLocalSeekTarget) > 0 || this._pendingHlsAudioSwitch) return null;
+        const position = Number(this.streamStartOffset || 0) + Number(video.currentTime);
+        return Number.isFinite(position) && position > 0 && position < 86400 ? position : null;
+    }
+
     persistPlaybackStateAndSessionsForExit() {
+        const resumePosition = this.captureCloudResumePosition();
         this.persistPlaybackStateForExit();
         // A full navigation/tab close aborts media bytes in the browser, but the
         // cloud coordinator otherwise keeps the logical provider slot until TTL.
         // keepalive lets the tiny expiry POST outlive page teardown.
-        this.stopCloudPlaybackSessions({ keepalive: true }).catch(() => {});
+        this.stopCloudPlaybackSessions({ keepalive: true, resumePosition }).catch(() => {});
     }
 
     getResumeRestorePosition(position, duration = 0) {
@@ -4075,13 +4088,17 @@ class WatchPage {
             return;
         }
 
+        const resumeSessionId = this.currentCloudPlaybackSessionId;
         this.currentCloudPlaybackSessionId = null;
         this.activeCloudPlaybackSessionIds.clear();
 
         await Promise.allSettled(Array.from(sessionIds).map(async (sessionId) => {
+            // Old/unclosed sessions must never receive the current file's clock.
+            const expiryOptions = { ...options };
+            if (sessionId !== resumeSessionId) delete expiryOptions.resumePosition;
             console.log('[WatchPage] Expiring cloud playback session:', sessionId);
             try {
-                const result = await playbackApi.expireSession(sessionId, options);
+                const result = await playbackApi.expireSession(sessionId, expiryOptions);
                 if (strict && (String(result?.session?.id || '') !== String(sessionId)
                     || result?.session?.status !== 'expired'
                     || !Number.isInteger(result?.gatewayErrors) || result.gatewayErrors !== 0)) {
@@ -6153,7 +6170,15 @@ class WatchPage {
             // A genuinely complete short item cannot reach the normal movie
             // threshold. Admit it only after virtually all declared media is
             // already resident in the browser buffer.
-            if (options.adaptive === true && this.video?.paused && Number(this.video.currentTime) <= 0.25) {
+            // A freshly applied server seek may start at a positive local
+            // preroll (15 s in the observed MKV replay). It can earn the same
+            // growth proof as zero, provided nothing has played or moved yet.
+            const adaptivePosition = Number(startupVideo?.currentTime);
+            const freshPausedPosition = startupVideo?.paused && !startupVideo.ended
+                && Number.isFinite(adaptivePosition) && adaptivePosition >= 0
+                && (adaptivePosition <= 0.25 || (startupVideo.played?.length === 0
+                    && this._playStartedReported !== true && !this._gatewayUserPaused));
+            if (options.adaptive === true && freshPausedPosition) {
                 const now = Date.now();
                 const durations = (Array.isArray(details?.fragments) ? details.fragments : [])
                     .slice(-8).map(fragment => Number(fragment.duration));
@@ -6169,9 +6194,10 @@ class WatchPage {
                 // Exclude the first burst (already present at the Gateway) and
                 // require several later appends over real elapsed time. Disjoint
                 // ranges, buffer regressions and long gaps restart observation.
-                if (!growth || growth.origin !== origin || bufferedAhead < growth.lastBuffer - 0.25
+                if (!growth || growth.origin !== origin || growth.position !== adaptivePosition
+                    || bufferedAhead < growth.lastBuffer - 0.25
                     || now - growth.lastAt > maximumGapMs || now - growth.at > observationMs) {
-                    growth = bufferedAhead > 0 ? { origin, at: now, buffer: bufferedAhead,
+                    growth = bufferedAhead > 0 ? { origin, position: adaptivePosition, at: now, buffer: bufferedAhead,
                         lastBuffer: bufferedAhead, lastAt: now, appends: 0 } : null;
                 } else if (bufferedAhead >= growth.lastBuffer + 0.25) {
                     growth.lastBuffer = bufferedAhead;
@@ -6720,6 +6746,7 @@ class WatchPage {
             this.resetSubtitleSwitchFeedback();
         }
         if (this._stopPromise) return this._stopPromise;
+        const resumePosition = enqueueStoryboard ? this.captureCloudResumePosition() : null;
 
         this._gatewayAutomaticRebuffering = false;
         this.cancelPendingHlsAudioSwitch(false);
@@ -6799,7 +6826,7 @@ class WatchPage {
         // requested while the old Gateway session is being expired.
         const sessionTeardown = Promise.allSettled([
             this.stopTranscodeSession(),
-            this.stopCloudPlaybackSessions()
+            this.stopCloudPlaybackSessions({ resumePosition })
         ]);
         this.baseStreamUrl = null;
         this.currentPlaybackMode = null;

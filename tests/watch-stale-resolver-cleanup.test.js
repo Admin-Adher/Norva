@@ -313,7 +313,7 @@ test('bulk session stop keeps the JWT playback API when a user token is present'
 
     await page.stopCloudPlaybackSessions(options);
 
-    assert.deepStrictEqual(calls, [['jwt', 'session-jwt', options]]);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(calls)), [['jwt', 'session-jwt', options]]);
 });
 
 test('bulk session stop uses device playback when only a device token is present', async () => {
@@ -330,7 +330,7 @@ test('bulk session stop uses device playback when only a device token is present
 
     await page.stopCloudPlaybackSessions(options);
 
-    assert.deepStrictEqual(calls, [['device', 'session-device', options]]);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(calls)), [['device', 'session-device', options]]);
 });
 
 test('session expiry fails closed without an authenticated matching API', async () => {

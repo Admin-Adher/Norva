@@ -85,6 +85,20 @@ async function verifyGatewayLateRecovery(WatchPage, Hls, tick) {
     seeks._gatewayPendingSeekIntent = null;
     seeks._gatewayAutomaticRebuffering = true;
     if (!seeks.captureGatewaySeekAutoplayIntent()) throw Error('buffer recovery seek lost intent');
+    // Actual Android WebView execution of the fresh positive-preroll gate.
+    const began = Date.now();
+    startup.video.currentTime = 15;
+    startup.video.played = { length: 0 };
+    startup.video.buffered = { length: 1, start: () => 0,
+        end: () => 21 + 4 * Math.floor((Date.now() - began) / 400) };
+    startup.video.videoWidth = 1920;
+    startupHls.levels[0].details.fragments = [0,1,2].map(sn => ({sn, start: sn * 2, duration: 2}));
+    if (!await startup.waitForGatewayStartupBuffer(1, startupHls,
+        { minimumSeconds: 96, adaptive: true, timeoutMs: 4000 })
+        || !(startup._gatewayStartupAdaptiveEvidence?.rateX >= 2)) throw Error('fresh preroll cannot earn growth proof');
+    startup.contentType = 'series'; startup.currentCloudPlaybackSessionId = 'fixture';
+    startup.streamStartOffset = 300; startup.video.videoWidth = 1920;
+    if (startup.captureCloudResumePosition() !== 315) throw Error('resume clock lost its absolute origin');
     return 'ok';
 }
 if (typeof module !== 'undefined') module.exports = verifyGatewayLateRecovery;
