@@ -128,7 +128,8 @@ const { FiniteMkvResumePrefixCache } = require('./finiteMkvResumePrefixCache');
 const { FinitePlaybackRangeReuse } = require('./finitePlaybackRangeReuse');
 const { privateResumeBinding, createPrivateResumeOwnerGate } = require('./private-resume-binding');
 const { privateResumeProfile } = require('./private-resume-profile');
-const { captureSamples, SAMPLE_BYTES } = require('./recent-resume-samples');
+const { captureSamples, SAMPLE_BYTES, captureInputWindows, RECENT_INPUT_MAX_BYTES,
+    RECENT_HEADER_MAX_BYTES } = require('./recent-resume-samples');
 const { validateRecentResume } = require('./recent-resume-validation');
 const { PrivateResumeHlsCache, parseResumeMediaPlaylist } = require('./private-resume-hls-cache');
 const { captureSubtitleWindow, parseSubtitlePlaylist } = require('./private-resume-subtitles');
@@ -5850,6 +5851,11 @@ function finiteMkvSeekCacheStore(context, range, payload) {
     if (!Buffer.isBuffer(payload) || !payload.length || payload.length > context.finiteCacheMaxBytes) return;
     if (context.captureRecentSamples && range.start === 0 && payload.length >= SAMPLE_BYTES)
         context.recentHeaderSample = { start: 0, payload: Buffer.from(payload.subarray(0, SAMPLE_BYTES)) };
+    if (context.captureRecentSamples && range.start < RECENT_HEADER_MAX_BYTES) {
+        context.recentInputHeaders = captureInputWindows([...(context.recentInputHeaders || []),
+            { start: range.start, payload: payload.subarray(0, RECENT_HEADER_MAX_BYTES-range.start) }],
+        context.fileSizeBytes, RECENT_HEADER_MAX_BYTES);
+    }
     const key = `${range.start}-${range.end}`;
     const existing = context.finiteCache.get(key);
     if (existing) {
@@ -7314,6 +7320,30 @@ async function createStrictLidBroker(options = {}) {
             return captureSamples([...(context.recentHeaderSample ? [context.recentHeaderSample] : []),
                 ...context.finiteCache.values()]);
         },
+        snapshotRecentInput() {
+            return context.captureRecentSamples ? captureInputWindows([
+                ...(context.recentInputHeaders || []), ...[...context.finiteCache.values()].reverse()], context.fileSizeBytes) : [];
+        },
+        seedRecentInput(proof) {
+            // Called only after lease acquisition has accepted fresh samples.
+            // Never seed strict LID, a different target, or an already used input.
+            if (!context.captureRecentSamples || context.pathPrefix !== 'finite-mkv-seek'
+                || context.providerFetches !== 0 || context.terminalError
+                || proof?.fileSizeBytes !== context.fileSizeBytes
+                || !/^[a-f0-9]{64}$/.test(String(proof?.target || ''))
+                || proof.target !== context.effectiveUrlIdentitySha256) return 0;
+            const windows = captureInputWindows(proof.windows, context.fileSizeBytes,
+                Math.min(RECENT_INPUT_MAX_BYTES, context.finiteCacheMaxBytes));
+            let bytes = 0;
+            for (const window of windows) {
+                finiteMkvSeekCacheStore(context, { start: window.start,
+                    end: window.start+window.payload.length-1 }, window.payload);
+                bytes += window.payload.length;
+            }
+            context.recentInputSeededBytes = bytes;
+            return bytes;
+        },
+        get recentInputSeededBytes() { return context.recentInputSeededBytes || 0; },
         get terminalError() { return context.terminalError; },
         get providerFetches() { return context.providerFetches; },
         get resolvedTargetReuses() { return context.resolvedTargetReuses; },
@@ -7385,6 +7415,7 @@ async function createStrictLidBroker(options = {}) {
                 try { await context.finiteProviderQueue; } catch (_) {}
                 context.finiteCache.clear();
                 context.recentHeaderSample = null;
+                context.recentInputHeaders = [];
                 context.finiteCacheBytes = 0;
                 // `closeStrictLidBrokerAttempt` records the provider panel's
                 // logical slot-release deadline. Do not attest a drained
@@ -15375,6 +15406,7 @@ async function capturePrivateResumeWindow(session) {
     const playlist = await fsp.readFile(exactSubtitleHlsEnabled(session)
         ? session.videoPlaylistPath : session.playlistPath, 'utf8').catch(() => '');
     return privateResumeHlsCache.capture({ binding, observed: privateResumeObservedIdentity(session),
+        inputWindows: session.privateResumeInputWindows,
         position, actualStartOffset, subtitleRenditions: exactSubtitleRenditionsForSession(session),
         // SIGTERM can write ENDLIST on an incomplete movie. A stopped encoder
         // must never turn that marker into evidence of the provider's EOF.
@@ -15483,6 +15515,7 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
         if (!canUseRecentResumeSamples(session.ownerKey)) return false;
         observed = await revalidateRecentResumeSession(session, plan, requestSignal);
         if (requestSignal?.aborted || session.stoppingPromise) throw abortedVodInputPumpError();
+        if (observed) applyFiniteMkvSeekProviderIdentity(session, observed);
         // Validation drained the preparation broker. Both a cache hit's
         // continuation and a miss's normal startup still need indexed input.
         // Never fall through to direct remote FFmpeg after closing that owner.
@@ -15501,6 +15534,10 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
     const lease = privateResumeHlsCache.acquire(binding, position, observed);
     session.startupTimings.privateResumeValidationMs = Date.now() - startedAt;
     if (!lease) return false;
+    if (lease.validationMode === 'sampled-recent-v1') {
+        session.startupTimings.privateResumeInputSeededBytes = session.finiteMkvSeekBroker?.seedRecentInput(
+            lease.inputSnapshot()) || 0;
+    }
     session.startupTimings.privateResumeValidationMode = lease.validationMode;
     session.privateResumeLease = lease;
     session.privateResumeContinuationOffset = lease.end;
@@ -15776,8 +15813,10 @@ function applyFiniteMkvSeekBrokerFailure(session) {
 async function closeFiniteMkvSeekBroker(session) {
     const broker = session?.finiteMkvSeekBroker;
     if (!broker) return;
-    if (session.privateResumeStopPosition > 0 && canUseRecentResumeSamples(session.ownerKey))
+    if (session.privateResumeStopPosition > 0 && canUseRecentResumeSamples(session.ownerKey)) {
         session.privateResumeSamples = broker.snapshotRecentSamples();
+        session.privateResumeInputWindows = broker.snapshotRecentInput();
+    }
     session.finiteMkvSeekBroker = null;
     session.startupTimings = asRecord(session.startupTimings);
     session.startupTimings.finiteMkvSeekProviderFetches = Number(broker.providerFetches || 0);
@@ -22288,6 +22327,7 @@ async function stopSession(session, options = {}) {
         // download/prefetch is started; snapshot already-produced local files.
         await capturePrivateResumeWindow(session).catch(() => false);
         session.privateResumeSamples = null;
+        session.privateResumeInputWindows = null;
         releaseVideoEncoderAdmission(session);
         await session.completeHlsCachePromotionPromise?.catch(() => null);
         await session.sharedMediaCachePublicationPromise?.catch(() => null);

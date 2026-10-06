@@ -1,6 +1,7 @@
 'use strict';
 const crypto = require('node:crypto');
-const { sampleProof, samplesMatch, RECENT_TTL_MS } = require('./recent-resume-samples');
+const { sampleProof, samplesMatch, RECENT_TTL_MS, captureInputWindows,
+    RECENT_INPUT_MAX_BYTES } = require('./recent-resume-samples');
 const { strongResumeIdentity } = require('./private-resume-binding');
 const { captureSubtitleWindow } = require('./private-resume-subtitles');
 const keyFor = binding => crypto.createHash('sha256').update(JSON.stringify(binding)).digest('hex');
@@ -83,6 +84,7 @@ class PrivateResumeHlsCache {
     drop(key, entry) {
         if (this.entries.get(key) !== entry) return;
         this.entries.delete(key); this.bytes -= entry.bytes; entry.live = false; entry.assets.clear();
+        entry.inputWindows = [];
     }
     prune() {
         for (const [key, entry] of this.entries) if (!entry.leases && entry.expiresAt <= this.now()) this.drop(key, entry);
@@ -133,6 +135,11 @@ class PrivateResumeHlsCache {
         return Object.freeze({
             validationMode: entry.recentProof ? 'sampled-recent-v1' : 'strong-etag',
             start: entry.start, end: entry.end, ended: entry.ended, aheadSeconds: entry.end - position,
+            inputSnapshot: () => {
+                ensure();
+                return entry.recentProof ? { fileSizeBytes: binding.fileSizeBytes, target: entry.recentProof.target,
+                    windows: captureInputWindows(entry.inputWindows, binding.fileSizeBytes) } : null;
+            },
             subtitlePlaylist: (name, continuation = [], ended = false) => {
                 ensure(); const prefix = entry.subtitlePlaylists.get(name);
                 return prefix ? mergedSubtitlePlaylist(prefix, continuation, entry.ended || ended) : null;
@@ -144,7 +151,7 @@ class PrivateResumeHlsCache {
             release: () => { if (!released) { released = true; entry.leases--; this.prune(); } },
         });
     }
-    async capture({ binding, observed, position, actualStartOffset, playlist, readAsset, subtitleRenditions = [] } = {}) {
+    async capture({ binding, observed, position, actualStartOffset, playlist, readAsset, subtitleRenditions = [], inputWindows = [] } = {}) {
         if (!binding || !Number.isFinite(position) || position <= 0 || !Number.isFinite(actualStartOffset)
             || actualStartOffset < 0 || typeof readAsset !== 'function') return this.rejectCapture('invalid-capture-input');
         const identity = strongResumeIdentity(observed, binding.fileSizeBytes);
@@ -165,7 +172,9 @@ class PrivateResumeHlsCache {
         if (prior?.leases) return this.rejectCapture('active-lease');
         // Reserve the entire per-file budget before asynchronous reads. Pending
         // captures and leased windows count towards the same hard memory bound.
-        const reservation = 2 * this.perFileBytes; // read buffer + immutable copy
+        const inputBudget = recentProof && Array.isArray(inputWindows) ? Math.min(RECENT_INPUT_MAX_BYTES,
+            inputWindows.slice(0,512).reduce((sum,w) => sum + (Buffer.isBuffer(w?.payload) ? w.payload.length : 0), 0)) : 0;
+        const reservation = 2 * (this.perFileBytes + inputBudget); // read buffer + immutable copy
         while (this.entries.size - (prior ? 1 : 0) >= this.maxEntries || this.bytes + this.reservedBytes + reservation > this.maxBytes) {
             const victim = [...this.entries].find(([, entry]) => !entry.leases && entry !== prior);
             if (!victim) return this.rejectCapture('reservation-budget');
@@ -174,6 +183,7 @@ class PrivateResumeHlsCache {
         this.reservedBytes += reservation;
         const epoch = this.epoch; let bytes = 0, bandwidth = 0; const assets = new Map(), segments = [];
         try {
+            const retainedInput = inputBudget ? captureInputWindows(inputWindows, binding.fileSizeBytes, inputBudget) : [];
             for (const [i, segment] of selected.entries()) {
                 const payload = await readAsset(segment.name, this.perFileBytes - bytes);
                 if (epoch !== this.epoch || !Buffer.isBuffer(payload) || !payload.length
@@ -190,9 +200,11 @@ class PrivateResumeHlsCache {
             if (!subtitles || epoch !== this.epoch) return this.rejectCapture('subtitle-coverage-or-revoked');
             for (const [name, payload] of subtitles.assets) assets.set(name, payload);
             bytes += subtitles.bytes;
+            bytes += retainedInput.reduce((sum,w) => sum+w.payload.length, 0);
             if (this.entries.get(key) !== prior || this.entries.size - (prior ? 1 : 0) >= this.maxEntries) return this.rejectCapture('concurrent-capture');
             if (prior) this.drop(key, prior);
             this.entries.set(key, { binding, identity, recentProof, start, end, ended, segments, assets, bytes, bandwidth,
+                inputWindows: retainedInput,
                 subtitlePlaylists: subtitles.playlists,
                 expiresAt: this.now() + (recentProof ? Math.min(this.ttlMs, RECENT_TTL_MS) : this.ttlMs), leases: 0, live: true });
             this.bytes += bytes; this.stats.stores++;
