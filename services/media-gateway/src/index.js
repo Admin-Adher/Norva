@@ -15483,6 +15483,10 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
         if (!canUseRecentResumeSamples(session.ownerKey)) return false;
         observed = await revalidateRecentResumeSession(session, plan, requestSignal);
         if (requestSignal?.aborted || session.stoppingPromise) throw abortedVodInputPumpError();
+        // Validation drained the preparation broker. Both a cache hit's
+        // continuation and a miss's normal startup still need indexed input.
+        // Never fall through to direct remote FFmpeg after closing that owner.
+        if (!await prepareFiniteMkvSeekBroker(session, requestSignal)) return false;
     } else {
         const broker = await prepareFiniteMkvSeekBroker(session, requestSignal);
         if (!broker) return false;

@@ -113,6 +113,16 @@ class PrivateResumeHlsCache {
         const matches = entry.recentProof ? this.recentRevalidation && samplesMatch(entry.recentProof,
             observed?.samples, observed?.fileSizeBytes, observed?.effectiveUrlIdentitySha256)
             : identity && identity === entry.identity;
+        if (entry.recentProof) {
+            const current = sampleProof(observed?.samples, observed?.fileSizeBytes, observed?.effectiveUrlIdentitySha256);
+            const sameSize = entry.recentProof.fileSizeBytes === observed?.fileSizeBytes;
+            const sameTarget = entry.recentProof.target === observed?.effectiveUrlIdentitySha256;
+            const matchingSamples = current ? current.ranges.filter((r,i) => r.start === entry.recentProof.ranges[i]?.start
+                && r.digest === entry.recentProof.ranges[i]?.digest).length : 0;
+            this.stats.lastSampledValidation = { complete: Boolean(current), sameSize, sameTarget, matchingSamples,
+                outcome: matches ? 'accepted' : !current ? 'fresh-read-unavailable' : !sameSize ? 'size-changed'
+                    : !sameTarget ? 'target-changed' : 'sample-changed' };
+        }
         if (!matches) {
             this.drop(keyFor(binding), entry); this.stats.invalidations++; this.stats.misses++; return null;
         }

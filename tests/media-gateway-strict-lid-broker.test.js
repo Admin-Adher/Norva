@@ -107,7 +107,7 @@ test('recent HLS samples use four fresh serialized broker responses, including a
   let active=0, maxActive=0, identity;
   const provider=http.createServer((req,res)=>{
     active++;maxActive=Math.max(maxActive,active);calls.push(req.headers.range);
-    res.once('finish',()=>{active--;});sendExactRange(req,res,data);
+    res.once('finish',()=>{active--;});sendExactRange(req,res,data,{etag:false});
   });
   const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
   const create=brokerHarness().createStrictLidBroker;
