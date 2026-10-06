@@ -134,6 +134,41 @@ test('recent HLS samples use four fresh serialized broker responses, including a
   assert.equal(calls.length-before,8);assert.equal(active,0);
 });
 
+test('validated recent input avoids repeated header/body downloads while uncovered bytes remain serialized', async t => {
+  const { SAMPLE_BYTES:N, sampleProof, samplesMatch }=require('../services/media-gateway/src/recent-resume-samples');
+  const { validateRecentResume }=require('../services/media-gateway/src/recent-resume-validation');
+  const data=Buffer.alloc(32*N,0x5a),calls=[];let identity,active=0,maxActive=0;
+  const provider=http.createServer((req,res)=>{active++;maxActive=Math.max(active,maxActive);calls.push(req.headers.range);
+    res.once('finish',()=>active--);sendExactRange(req,res,data,{etag:false});});
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const create=brokerHarness().createStrictLidBroker;
+  const config={sourceUrl,fileSizeBytes:data.length,pathPrefix:'finite-mkv-seek',captureRecentSamples:true,
+    finiteWindowBytes:8*N,finiteCacheBytes:32*N,completedReleaseDelayMs:0,supersededReleaseDelayMs:0,
+    onProviderIdentity:x=>identity=x};
+  const initial=await create(config);t.after(()=>initial.close());
+  for(const start of [0,16*N]) {
+    await (await fetch(initial.inputUrl,{headers:{Range:`bytes=${start}-${start+8*N-1}`}})).arrayBuffer();
+    for(let i=0;i<40 && active;i++)await new Promise(r=>setTimeout(r,5));
+  }
+  const proof=sampleProof(initial.snapshotRecentSamples(),data.length,identity.effectiveUrlIdentitySha256);
+  const windows=initial.snapshotRecentInput();await initial.close();
+  const plan={kind:proof.kind,ranges:proof.ranges.map(({start,length})=>({start,length}))};
+  const samples=await validateRecentResume({plan,createBroker:signal=>create({sourceUrl,fileSizeBytes:data.length,
+    abortSignal:signal,completedReleaseDelayMs:0,supersededReleaseDelayMs:0,onProviderIdentity:x=>identity=x})});
+  assert.equal(samplesMatch(proof,samples,data.length,identity.effectiveUrlIdentitySha256),true);
+  const continuation=await create({...config,effectiveUrlIdentitySha256:identity.effectiveUrlIdentitySha256});
+  t.after(()=>continuation.close());
+  assert.equal(continuation.seedRecentInput({fileSizeBytes:data.length,target:'f'.repeat(64),windows}),0);
+  assert.equal(continuation.seedRecentInput({fileSizeBytes:data.length,target:identity.effectiveUrlIdentitySha256,windows}),16*N);
+  const before=calls.length;
+  for(const start of [0,16*N])assert.deepEqual(Buffer.from(await (await fetch(continuation.inputUrl,
+    {headers:{Range:`bytes=${start}-${start+8*N-1}`}})).arrayBuffer()),data.subarray(start,start+8*N));
+  assert.equal(calls.length,before);
+  assert.deepEqual(Buffer.from(await (await fetch(continuation.inputUrl,{headers:{Range:`bytes=${8*N}-${16*N-1}`}})).arrayBuffer()),data.subarray(8*N,16*N));
+  assert.equal(calls.length,before+1);assert.equal(maxActive,1);
+  assert.equal(continuation.seedRecentInput({fileSizeBytes:data.length,target:identity.effectiveUrlIdentitySha256,windows}),0);
+});
+
 test('truncated MP4 terminates an admitted exact-range broker without another provider open', async t => {
   const data = Buffer.alloc(100);
   data.writeUInt32BE(20, 0); data.write('ftyp', 4);

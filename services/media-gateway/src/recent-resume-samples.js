@@ -55,4 +55,37 @@ function captureSamples(entries) {
         ...selected.sort((a, b) => a.start - b.start).map(e => ({ start: e.start, payload: Buffer.from(e.payload) }))];
 }
 
-module.exports = { SAMPLE_BYTES, RECENT_TTL_MS, sampleProof, samplesMatch, captureSamples };
+const RECENT_INPUT_MAX_BYTES = 8 * 1024 * 1024;
+const RECENT_HEADER_MAX_BYTES = 8 * 1024 * 1024;
+
+// Completed input only. Prefer caller-ordered headers/index before recent body
+// ranges; remove overlaps and detach buffers under a strict aggregate ceiling.
+// These bytes have no independent identity authority: the HLS cache exposes
+// them only after its exact private binding and fresh sample proof succeed.
+function captureInputWindows(entries, fileSizeBytes, maximum = RECENT_INPUT_MAX_BYTES) {
+    if (!Number.isSafeInteger(fileSizeBytes) || fileSizeBytes < 1
+        || !Number.isSafeInteger(maximum) || maximum < 1 || maximum > RECENT_INPUT_MAX_BYTES
+        || !Array.isArray(entries)) return [];
+    const selected = []; let bytes = 0;
+    for (const entry of entries.slice(0, 512)) {
+        if (!Number.isSafeInteger(entry?.start) || entry.start < 0 || !Buffer.isBuffer(entry.payload)
+            || !entry.payload.length || entry.start + entry.payload.length > fileSizeBytes) continue;
+        let gaps = [[entry.start, entry.start + entry.payload.length]];
+        for (const prior of selected) {
+            const a = prior.start, b = a + prior.payload.length;
+            gaps = gaps.flatMap(([lo, hi]) => hi <= a || lo >= b ? [[lo, hi]]
+                : [[lo, Math.min(hi, a)], [Math.max(lo, b), hi]].filter(([x,y]) => x < y));
+        }
+        for (const [lo, hi] of gaps) {
+            const length = Math.min(hi - lo, maximum - bytes);
+            if (length <= 0) break;
+            selected.push({ start: lo, payload: Buffer.from(entry.payload.subarray(lo-entry.start, lo-entry.start+length)) });
+            bytes += length;
+        }
+        if (bytes >= maximum) break;
+    }
+    return selected.sort((a,b) => a.start-b.start);
+}
+
+module.exports = { SAMPLE_BYTES, RECENT_TTL_MS, sampleProof, samplesMatch, captureSamples,
+    RECENT_INPUT_MAX_BYTES, RECENT_HEADER_MAX_BYTES, captureInputWindows };

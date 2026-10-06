@@ -9,9 +9,9 @@ const samples = () => [0, 20*N, 40*N, 60*N].map((start, i) => ({ start, payload:
 const binding = privateResumeBinding({ ownerKey: 'a'.repeat(64), sourceUrl: 'https://fixture.invalid/movie',
     sourceId: 'source', sourceRevision: '1', fileSizeBytes: size, profile: 'audio=1;subtitles=2' });
 const observed = () => ({ fileSizeBytes: size, effectiveUrlIdentitySha256: target, samples: samples() });
-const capture = cache => cache.capture({ binding, observed: observed(), position: 10, actualStartOffset: 0,
+const capture = (cache, more = {}) => cache.capture({ binding, observed: observed(), position: 10, actualStartOffset: 0,
     playlist: '#EXTM3U\n#EXT-X-INDEPENDENT-SEGMENTS\n' + Array.from({ length: 20 }, (_,i) => `#EXTINF:4,\nseg-${i}.ts\n`).join(''),
-    readAsset: async () => Buffer.alloc(188, 0x47) });
+    readAsset: async () => Buffer.alloc(188, 0x47), ...more });
 test('sample proof is explicitly partial; no fabricated strong ETag or whole-file hash', () => {
     const proof = sampleProof(samples(), size, target);
     assert.equal(proof.kind, 'sampled-recent-v1'); assert.equal(proof.validator, undefined);
@@ -95,14 +95,49 @@ for (const hit of [false,true]) test(`Gateway recreates indexed input after samp
         AbortController,Date,Error,Number,
         privateResumeHlsBindingForSession:()=>binding,privateResumeFormat:()=> 'mkv',canUseRecentResumeSamples:()=>true,
         privateResumeHlsCache:{hasCandidate:()=>true,revalidationPlan:()=>({kind:'sampled-recent-v1'}),
-            acquire:()=>{calls.push('acquire');return hit?{start:10,end:70,aheadSeconds:50,validationMode:'sampled-recent-v1'}:null;}},
+            acquire:()=>{calls.push('acquire');return hit?{start:10,end:70,aheadSeconds:50,
+                inputSnapshot:()=>({windows:[]}),validationMode:'sampled-recent-v1'}:null;}},
         revalidateRecentResumeSession:async()=>{calls.push('validation-drained');return observed();},
-        prepareFiniteMkvSeekBroker:async()=>{calls.push('indexed-input');return {};},
+        applyFiniteMkvSeekProviderIdentity:()=>{},
+        prepareFiniteMkvSeekBroker:async()=>{calls.push('indexed-input');session.finiteMkvSeekBroker={
+            seedRecentInput:()=>{calls.push('seed');return 100;}};return session.finiteMkvSeekBroker;},
         startSessionWithProviderRetry:async()=>{calls.push('encoder');return true;},
         observeSessionStartOffset:async()=>{},abortedVodInputPumpError:()=>Error('aborted'),
     });
     assert.equal(await run(session),hit);
     assert.deepEqual(calls.slice(0,3),['validation-drained','indexed-input','acquire']);
     assert.equal(calls.includes('encoder'),hit);
+    assert.equal(calls.includes('seed'),hit);
+    if(hit) assert.ok(calls.indexOf('acquire')<calls.indexOf('seed') && calls.indexOf('seed')<calls.indexOf('encoder'));
     if(hit){await session.privateResumeContinuationPromise;assert.equal(session.privateResumeContinuationReady,true);}
+});
+
+test('retained input is bounded, detached, deduplicated and only exposed by a freshly validated lease', async () => {
+    const {captureInputWindows} = require('../services/media-gateway/src/recent-resume-samples');
+    const original = [{start:0,payload:Buffer.alloc(4*N,1)}, {start:2*N,payload:Buffer.alloc(4*N,2)}];
+    const windows = captureInputWindows(original,size,5*N);
+    assert.equal(windows.reduce((n,w)=>n+w.payload.length,0),5*N);
+    assert.deepEqual(windows.map(w=>w.start),[0,4*N]);
+    original[0].payload.fill(7); assert.equal(windows[0].payload[0],1);
+    const cache = new PrivateResumeHlsCache({recentRevalidation:true});
+    await capture(cache,{inputWindows:windows});
+    assert.ok(cache.publicStatus().bytes > 5*N);
+    const lease = cache.acquire(binding,10,observed());
+    const copy = lease.inputSnapshot(); assert.equal(copy.target,target);
+    assert.equal(copy.windows[0].payload[0],1); copy.windows[0].payload.fill(8);
+    assert.equal(lease.inputSnapshot().windows[0].payload[0],1);
+    cache.revokeOwner(binding.ownerKey);
+    assert.throws(()=>lease.inputSnapshot(),/REVOKED/);
+    assert.equal(cache.publicStatus().bytes,0);
+    await capture(cache,{inputWindows:windows});
+    const changed=observed();changed.samples[1].payload[0]++;
+    assert.equal(cache.acquire(binding,10,changed),null);
+    assert.equal(cache.publicStatus().bytes,0);
+});
+
+test('retained input never escapes the existing aggregate memory reservation', async () => {
+    const cache=new PrivateResumeHlsCache({recentRevalidation:true,maxBytes:8*N,perFileBytes:2*N});
+    assert.equal(await capture(cache,{inputWindows:[{start:0,payload:Buffer.alloc(4*N)}]}),false);
+    assert.equal(cache.publicStatus().lastCaptureRejection,'reservation-budget');
+    assert.equal(cache.publicStatus().bytes,0);assert.equal(cache.publicStatus().reservedBytes,0);
 });
