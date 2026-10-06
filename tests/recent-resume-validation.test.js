@@ -1,0 +1,87 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+const { SAMPLE_BYTES: N, RECENT_TTL_MS, sampleProof, samplesMatch, captureSamples } = require('../services/media-gateway/src/recent-resume-samples');
+const { validateRecentResume } = require('../services/media-gateway/src/recent-resume-validation');
+const { PrivateResumeHlsCache } = require('../services/media-gateway/src/private-resume-hls-cache');
+const { privateResumeBinding } = require('../services/media-gateway/src/private-resume-binding');
+const size = 100*N, target = 'b'.repeat(64);
+const samples = () => [0, 20*N, 40*N, 60*N].map((start, i) => ({ start, payload: Buffer.alloc(N, i+1) }));
+const binding = privateResumeBinding({ ownerKey: 'a'.repeat(64), sourceUrl: 'https://fixture.invalid/movie',
+    sourceId: 'source', sourceRevision: '1', fileSizeBytes: size, profile: 'audio=1;subtitles=2' });
+const observed = () => ({ fileSizeBytes: size, effectiveUrlIdentitySha256: target, samples: samples() });
+const capture = cache => cache.capture({ binding, observed: observed(), position: 10, actualStartOffset: 0,
+    playlist: '#EXTM3U\n#EXT-X-INDEPENDENT-SEGMENTS\n' + Array.from({ length: 20 }, (_,i) => `#EXTINF:4,\nseg-${i}.ts\n`).join(''),
+    readAsset: async () => Buffer.alloc(188, 0x47) });
+test('sample proof is explicitly partial; no fabricated strong ETag or whole-file hash', () => {
+    const proof = sampleProof(samples(), size, target);
+    assert.equal(proof.kind, 'sampled-recent-v1'); assert.equal(proof.validator, undefined);
+    assert.equal(samplesMatch(proof, samples(), size, target), true);
+    assert.equal(JSON.stringify(proof).includes('payload'), false);
+    const changed = samples(); changed[2].payload[4]++;
+    assert.equal(samplesMatch(proof, changed, size, target), false);
+    assert.equal(samplesMatch(proof, samples(), size+1, target), false);
+    assert.equal(samplesMatch(proof, samples(), size, 'c'.repeat(64)), false);
+});
+for (const malformed of ['missing', 'overlap', 'length', 'header', 'bounds', 'order']) test(`reject ${malformed} samples`, () => {
+    const list = samples();
+    if (malformed === 'missing') list.pop();
+    if (malformed === 'overlap') list[1].start = N-1;
+    if (malformed === 'length') list[1].payload = Buffer.alloc(N-1);
+    if (malformed === 'header') list[0].start = 1;
+    if (malformed === 'bounds') list[3].start = size;
+    if (malformed === 'order') list.reverse();
+    assert.equal(sampleProof(list, size, target), null);
+});
+test('capture retains only detached bounded samples and requires header and body', () => {
+    const entries = [{ start: 0, payload: Buffer.alloc(N, 1) }, { start: 20*N, payload: Buffer.alloc(8*N, 2) }];
+    const snapshot = captureSamples(entries);
+    assert.equal(snapshot.length, 4); assert.equal(snapshot.reduce((sum,s) => sum+s.payload.length, 0), 4*N);
+    entries[1].payload.fill(9); assert.equal(snapshot[1].payload[0], 2);
+    assert.equal(captureSamples(entries.slice(1)), null);
+    assert.equal(captureSamples(entries.slice(0,1)), null);
+});
+test('recent mode is opt-in; exact private binding, short TTL and revocation apply', async () => {
+    assert.equal(await capture(new PrivateResumeHlsCache()), false);
+    let now = 100;
+    const cache = new PrivateResumeHlsCache({ recentRevalidation: true, now: () => now });
+    assert.equal(await capture(cache), true);
+    const plan = cache.revalidationPlan(binding, 10);
+    assert.equal(plan.ranges.length, 4); assert.equal(plan.ranges[0].digest, undefined);
+    for (const other of [{ ...binding, ownerKey:'c'.repeat(64) }, { ...binding, profileHash:'d'.repeat(64) },
+        { ...binding, sourceUrlHash:'e'.repeat(64) }]) assert.equal(cache.hasCandidate(other,10), false);
+    const lease = cache.acquire(binding, 10, observed());
+    assert.equal(lease.validationMode, 'sampled-recent-v1');
+    assert.equal(cache.publicStatus().sampledHits, 1);
+    cache.revokeOwner(binding.ownerKey); assert.throws(() => lease.playlist(), /REVOKED/); lease.release();
+    assert.equal(await capture(cache), true); now += RECENT_TTL_MS;
+    assert.equal(cache.hasCandidate(binding,10), false);
+});
+test('mismatch or failed validation discards the cached window', async () => {
+    for (const current of [null, { ...observed(), samples: [] }, { ...observed(), effectiveUrlIdentitySha256:'f'.repeat(64) }]) {
+        const cache = new PrivateResumeHlsCache({ recentRevalidation: true }); await capture(cache);
+        assert.equal(cache.acquire(binding, 10, current), null); assert.equal(cache.publicStatus().entries, 0);
+    }
+});
+test('four sequential fresh reads and drain precede successful return', async () => {
+    let active=0, maxActive=0, requests=0, closed=false;
+    const plan = { kind:'sampled-recent-v1', ranges:samples().map(s => ({ start:s.start, length:N })) };
+    const result = await validateRecentResume({ plan,
+        createBroker: async () => ({ inputUrl:'http://fixture.invalid', close:async () => { assert.equal(active,0); closed=true; } }),
+        fetchImpl: async (_,opts) => { requests++; active++; maxActive=Math.max(maxActive,active);
+            assert.match(opts.headers.Range,/^bytes=\d+-\d+$/);
+            return { status:206, arrayBuffer:async () => { active--; return Buffer.alloc(N); } }; } });
+    assert.equal(result.length,4); assert.equal(requests,4); assert.equal(maxActive,1); assert.equal(closed,true);
+});
+test('timeout aborts the current read, drains, and never retries or starts another range', async () => {
+    let requests=0, closed=false, active=false;
+    const result=await validateRecentResume({ plan:{ kind:'sampled-recent-v1', ranges:samples().map(s => ({ start:s.start,length:N })) },budgetMs:10,
+        createBroker:async () => ({ inputUrl:'http://fixture.invalid', close:async () => { assert.equal(active,false); closed=true; } }),
+        fetchImpl:async (_,opts) => { requests++; active=true; return new Promise((_,reject) => {
+            opts.signal.addEventListener('abort',() => { active=false; reject(Error('aborted')); },{once:true}); }); } });
+    assert.equal(result,null); assert.equal(requests,1); assert.equal(closed,true);
+});
+test('already cancelled request opens no provider broker', async () => {
+    const controller=new AbortController(); controller.abort();
+    assert.equal(await validateRecentResume({ plan:{kind:'sampled-recent-v1',ranges:samples().map(s=>({start:s.start,length:N}))},
+        signal:controller.signal,createBroker:async()=>{throw Error('must not open');} }),null);
+});

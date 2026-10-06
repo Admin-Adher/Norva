@@ -126,7 +126,8 @@ for (const result of ['ready', 'failed', 'aborted']) test(`private continuation 
     const run = vm.runInNewContext('(' + source.slice(start, end) + ')', {
         AbortController, Date, Error, Number,
         privateResumeHlsBindingForSession: () => ({}), privateResumeFormat: () => 'mpegts',
-        privateResumeHlsCache: { hasCandidate: () => true, acquire: () => ({ start: 4, end: 60, aheadSeconds: 50 }) },
+        privateResumeHlsCache: { hasCandidate: () => true, revalidationPlan: () => null,
+            acquire: () => ({ start: 4, end: 60, aheadSeconds: 50 }) },
         prepareFiniteMkvSeekBroker: async () => ({ inputUrl: 'http://fixture.invalid' }),
         fileSizeBytesForSession: () => 1_000_000, privateResumeObservedIdentity: () => ({}),
         fetch: async () => ({ status: 206, arrayBuffer: async () => new ArrayBuffer(65536) }),

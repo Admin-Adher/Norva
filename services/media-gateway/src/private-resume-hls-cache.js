@@ -1,5 +1,6 @@
 'use strict';
 const crypto = require('node:crypto');
+const { sampleProof, samplesMatch, RECENT_TTL_MS } = require('./recent-resume-samples');
 const { strongResumeIdentity } = require('./private-resume-binding');
 const { captureSubtitleWindow } = require('./private-resume-subtitles');
 const keyFor = binding => crypto.createHash('sha256').update(JSON.stringify(binding)).digest('hex');
@@ -63,16 +64,16 @@ function mergedSubtitlePlaylist(prefix, continuation = [], ended = false) {
 
 class PrivateResumeHlsCache {
     constructor({ maxBytes = 128 * 1024 * 1024, perFileBytes = 32 * 1024 * 1024,
-        maxEntries = 32, ttlMs = 30 * 60_000, windowSeconds = 48, minimumAheadSeconds = 24, now = Date.now } = {}) {
+        maxEntries = 32, ttlMs = 30 * 60_000, windowSeconds = 48, minimumAheadSeconds = 24, recentRevalidation = false, now = Date.now } = {}) {
         if (![maxBytes, perFileBytes, maxEntries, ttlMs, windowSeconds, minimumAheadSeconds].every(Number.isSafeInteger)
             || maxBytes < 1 || maxBytes > 256 * 1024 * 1024 || perFileBytes < 1 || perFileBytes > maxBytes
             || maxEntries < 1 || maxEntries > 128 || ttlMs < 1 || ttlMs > 30 * 60_000
             || windowSeconds < 1 || windowSeconds > 120 || minimumAheadSeconds < 1 || minimumAheadSeconds > windowSeconds)
             throw new Error('RESUME_CACHE_CONFIG_INVALID');
-        Object.assign(this, { maxBytes, perFileBytes, maxEntries, ttlMs, windowSeconds, minimumAheadSeconds, now });
+        Object.assign(this, { maxBytes, perFileBytes, maxEntries, ttlMs, windowSeconds, minimumAheadSeconds, recentRevalidation, now });
         this.entries = new Map(); this.bytes = 0; this.reservedBytes = 0; this.epoch = 0;
         this.stats = { stores: 0, hits: 0, misses: 0, invalidations: 0, evictions: 0,
-            captureRejects: 0, lastCaptureRejection: null };
+            sampledStores: 0, sampledHits: 0, captureRejects: 0, lastCaptureRejection: null };
     }
     rejectCapture(reason) {
         this.stats.captureRejects++;
@@ -101,17 +102,26 @@ class PrivateResumeHlsCache {
             ? entry : null;
     }
     hasCandidate(binding, position) { return Boolean(this.candidate(binding, position)); }
+    revalidationPlan(binding, position) {
+        const proof = this.candidate(binding, position)?.recentProof;
+        return proof ? { kind: proof.kind, ranges: proof.ranges.map(({ start, length }) => ({ start, length })) } : null;
+    }
     acquire(binding, position, observed) {
         const entry = this.candidate(binding, position);
         if (!entry) { this.stats.misses++; return null; }
         const identity = strongResumeIdentity(observed, binding.fileSizeBytes);
-        if (!identity || identity !== entry.identity) {
+        const matches = entry.recentProof ? this.recentRevalidation && samplesMatch(entry.recentProof,
+            observed?.samples, observed?.fileSizeBytes, observed?.effectiveUrlIdentitySha256)
+            : identity && identity === entry.identity;
+        if (!matches) {
             this.drop(keyFor(binding), entry); this.stats.invalidations++; this.stats.misses++; return null;
         }
         let released = false; entry.leases++; this.stats.hits++;
+        if (entry.recentProof) this.stats.sampledHits++;
         const valid = () => !released && entry.live && this.entries.get(keyFor(binding)) === entry;
         const ensure = () => { if (!valid()) throw new Error('RESUME_CACHE_REVOKED'); };
         return Object.freeze({
+            validationMode: entry.recentProof ? 'sampled-recent-v1' : 'strong-etag',
             start: entry.start, end: entry.end, ended: entry.ended, aheadSeconds: entry.end - position,
             subtitlePlaylist: (name, continuation = [], ended = false) => {
                 ensure(); const prefix = entry.subtitlePlaylists.get(name);
@@ -128,7 +138,9 @@ class PrivateResumeHlsCache {
         if (!binding || !Number.isFinite(position) || position <= 0 || !Number.isFinite(actualStartOffset)
             || actualStartOffset < 0 || typeof readAsset !== 'function') return this.rejectCapture('invalid-capture-input');
         const identity = strongResumeIdentity(observed, binding.fileSizeBytes);
-        if (!identity) return this.rejectCapture('unverified-identity');
+        const recentProof = !identity && this.recentRevalidation && observed?.fileSizeBytes === binding.fileSizeBytes
+            ? sampleProof(observed.samples, observed.fileSizeBytes, observed.effectiveUrlIdentitySha256) : null;
+        if (!identity && !recentProof) return this.rejectCapture('unverified-identity');
         const parsed = parseResumeMediaPlaylist(playlist);
         if (!parsed) return this.rejectCapture('ineligible-playlist');
         const localPosition = position - actualStartOffset;
@@ -170,16 +182,19 @@ class PrivateResumeHlsCache {
             bytes += subtitles.bytes;
             if (this.entries.get(key) !== prior || this.entries.size - (prior ? 1 : 0) >= this.maxEntries) return this.rejectCapture('concurrent-capture');
             if (prior) this.drop(key, prior);
-            this.entries.set(key, { binding, identity, start, end, ended, segments, assets, bytes, bandwidth,
+            this.entries.set(key, { binding, identity, recentProof, start, end, ended, segments, assets, bytes, bandwidth,
                 subtitlePlaylists: subtitles.playlists,
-                expiresAt: this.now() + this.ttlMs, leases: 0, live: true });
-            this.bytes += bytes; this.stats.stores++; return true;
+                expiresAt: this.now() + (recentProof ? Math.min(this.ttlMs, RECENT_TTL_MS) : this.ttlMs), leases: 0, live: true });
+            this.bytes += bytes; this.stats.stores++;
+            if (recentProof) this.stats.sampledStores++;
+            return true;
         } catch (_) { return this.rejectCapture('capture-exception'); }
         finally { this.reservedBytes -= reservation; }
     }
     publicStatus() { this.prune(); return { protocol: 1, ...this.stats, entries: this.entries.size,
         bytes: this.bytes, reservedBytes: this.reservedBytes, maxBytes: this.maxBytes,
         perFileBytes: this.perFileBytes, ttlMs: this.ttlMs, windowSeconds: this.windowSeconds,
+        recentRevalidation: this.recentRevalidation === true, recentTtlMs: RECENT_TTL_MS,
         scope: 'private-owner-source-revision', revalidation: 'current-strong-etag-size-target' }; }
 }
 module.exports = { PrivateResumeHlsCache, parseResumeMediaPlaylist, mergedResumePlaylist, mergedSubtitlePlaylist };

@@ -72,6 +72,7 @@ function brokerHarness(diagnosticLogs = null) {
       clearTimeout,
       console: { ...console, warn: (...args) => diagnosticLogs?.push(args.join(' ')) },
       crypto: require('node:crypto'),
+      ...require('../services/media-gateway/src/recent-resume-samples'),
       createStrictRangeCollector,
       createMp4SizeEvidence: require('../services/media-gateway/src/mp4-size-evidence').createMp4SizeEvidence,
       fetch,
@@ -98,6 +99,40 @@ function brokerHarness(diagnosticLogs = null) {
     },
   );
 }
+
+test('recent HLS samples use four fresh serialized broker responses, including a changed body', async t => {
+  const { SAMPLE_BYTES: N, sampleProof, samplesMatch } = require('../services/media-gateway/src/recent-resume-samples');
+  const { validateRecentResume } = require('../services/media-gateway/src/recent-resume-validation');
+  const data=Buffer.alloc(16*N,0x5a), calls=[];
+  let active=0, maxActive=0, identity;
+  const provider=http.createServer((req,res)=>{
+    active++;maxActive=Math.max(maxActive,active);calls.push(req.headers.range);
+    res.once('finish',()=>{active--;});sendExactRange(req,res,data);
+  });
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const create=brokerHarness().createStrictLidBroker;
+  const initial=await create({sourceUrl,fileSizeBytes:data.length,pathPrefix:'finite-mkv-seek',captureRecentSamples:true,
+    finiteWindowBytes:8*N,finiteCacheBytes:16*N,completedReleaseDelayMs:0,supersededReleaseDelayMs:0,
+    onProviderIdentity:current=>{identity=current;}});
+  t.after(()=>initial.close());
+  const response=await fetch(initial.inputUrl,{headers:{Range:`bytes=0-${8*N-1}`}});await response.arrayBuffer();
+  for(let i=0;i<40 && initial.cacheBytes<8*N;i++) await new Promise(resolve=>setTimeout(resolve,5));
+  const body=await fetch(initial.inputUrl,{headers:{Range:`bytes=${8*N}-${16*N-1}`}});await body.arrayBuffer();
+  for(let i=0;i<40 && initial.cacheBytes<16*N;i++) await new Promise(resolve=>setTimeout(resolve,5));
+  const snapshot=initial.snapshotRecentSamples();assert.equal(snapshot.length,4);
+  const proof=sampleProof(snapshot,data.length,identity.effectiveUrlIdentitySha256);
+  await initial.close();
+  const plan={kind:proof.kind,ranges:proof.ranges.map(({start,length})=>({start,length}))};
+  const validate=()=>validateRecentResume({plan,createBroker:signal=>create({sourceUrl,fileSizeBytes:data.length,
+    abortSignal:signal,completedReleaseDelayMs:0,supersededReleaseDelayMs:0,
+    onProviderIdentity:current=>{identity=current;}})});
+  const before=calls.length;
+  assert.equal(samplesMatch(proof,await validate(),data.length,identity.effectiveUrlIdentitySha256),true);
+  assert.equal(calls.length-before,4);assert.equal(maxActive,1);assert.equal(active,0);
+  data[snapshot[2].start+10]++;
+  assert.equal(samplesMatch(proof,await validate(),data.length,identity.effectiveUrlIdentitySha256),false);
+  assert.equal(calls.length-before,8);assert.equal(active,0);
+});
 
 test('truncated MP4 terminates an admitted exact-range broker without another provider open', async t => {
   const data = Buffer.alloc(100);
