@@ -173,7 +173,7 @@ test('a failed primary request cannot win the race against a useful fast rail', 
     await turn();
     fast.resolve(rail('fast movie'));
     await loading;
-    assert.equal(h.heroes.length, 1);
+    assert.equal(h.heroes.length, 2, 'first useful type paints, then the combined fallback');
     assert.equal(h.paints[0].rails[0].items[0].title, 'fast movie');
 });
 
@@ -189,7 +189,7 @@ test('an empty genre materialisation reads media directly without repeating pers
     await h.page.loadDashboardData();
     assert.equal(paths.filter(path => path.startsWith('/home/rails')).length, 1);
     assert.equal(paths.filter(path => path.includes('direct=1')).length, 2);
-    assert.equal(h.heroes.length, 1);
+    assert.equal(h.heroes.length, 2, 'first useful type paints, then the combined fallback');
 });
 
 test('an initial Selection retries full Home after a visibility race while preserving first cards', async () => {
@@ -205,7 +205,7 @@ test('an initial Selection retries full Home after a visibility race while prese
     await h.page.loadDashboardData();
     assert.equal(retries, 1);
     assert.equal(h.paints[0].rails[0].items[0].title, 'first page');
-    assert.equal(h.heroes.length, 1);
+    assert.equal(h.heroes.length, 2, 'first useful type paints, then the combined fallback');
 });
 
 test('an empty live-only Home response waits for the first real fast rail and cannot erase it', async () => {
@@ -220,7 +220,7 @@ test('an empty live-only Home response waits for the first real fast rail and ca
     assert.equal(h.heroes.length, 0);
     fast.resolve(rail('first movie'));
     await loading;
-    assert.equal(h.heroes.length, 1);
+    assert.equal(h.heroes.length, 2, 'first useful type paints, then the combined fallback');
     assert.equal(h.paints.at(-1).rails[0].items[0].title, 'first movie');
 });
 
@@ -263,4 +263,64 @@ test('fresh source reads bypass both caches, join subsequent callers and preserv
     await stale;
     assert.equal((await window.NorvaCloud.sources.list()).sources[0].id, 'new');
     assert.equal(reads, 2);
+});
+
+for (const firstType of ['movie', 'series']) {
+    test(`cold Home paints ${firstType} while the other media type and personalized rails remain pending`, async () => {
+        const other = deferred(), primary = deferred();
+        const paths = [];
+        const h = homeHarness(async (_, path) => {
+            paths.push(path);
+            if (path.startsWith('/home/rails')) return primary.promise;
+            if (path.startsWith('/media/genre-rails')) return { rails: [] };
+            if (path.startsWith('/channels/recent')) return path.includes(`type=${firstType}`)
+                ? [{ title: firstType }] : other.promise;
+            return [];
+        });
+        const loading = h.page.loadDashboardData({ skipCache: true });
+        await turn();
+        assert.equal(h.heroes.length, 1, 'usable cards paint before the slow sibling settles');
+        assert.equal(h.paints[0].rails[0].items[0].title, firstType);
+        other.resolve([{ title: 'late other type' }]);
+        primary.reject(Error('visibility changed'));
+        await loading;
+        assert.equal(h.paints.at(-1).rails.length, 2);
+        assert.equal(paths.filter(p => p.includes('direct=1')).length, 2, 'one fallback per type');
+    });
+}
+
+test('a stalled genre request does not delay the other type fallback', async () => {
+    const stalled = deferred();
+    const h = homeHarness(async (_, path) => {
+        if (path.startsWith('/home/rails')) throw Error('409');
+        if (path.startsWith('/media/genre-rails')) return path.includes('type=series') ? stalled.promise : { rails: [] };
+        if (path.startsWith('/channels/recent')) return [{ title: 'ready movie' }];
+        return [];
+    });
+    const loading = h.page.loadDashboardData();
+    await turn();
+    assert.equal(h.paints[0].rails[0].items[0].title, 'ready movie');
+    h.page.cancelPendingLoad();
+    stalled.resolve(rail('stale series'));
+    await loading;
+    assert.equal(h.paints.length, 1, 'cancelled late response cannot repaint');
+});
+
+test('first usable rails skip rejection and empty payload without swallowing the remaining result', async () => {
+    const pending = deferred();
+    const h = homeHarness(async () => []);
+    const result = h.page.firstUsableHomeRails([Promise.reject(Error('offline')),Promise.resolve({rails:[]}),pending.promise]);
+    let settled = false; result.then(() => { settled=true; });
+    await turn(); assert.equal(settled,false);
+    pending.resolve(rail('real'));
+    assert.equal((await result).rails[0].items[0].title,'real');
+    assert.equal(await h.page.firstUsableHomeRails([]),null);
+});
+
+test('cold partial rails never render through a source setup gate', async () => {
+    const h = homeHarness(async () => rail('not allowed'));
+    h.page.shouldShowSetupGate=()=>true;
+    let gates=0;h.page.renderSetupGate=()=>{gates++;};
+    await h.page.loadDashboardData();
+    assert.equal(gates,1);assert.equal(h.heroes.length,0);
 });

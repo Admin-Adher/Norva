@@ -22,7 +22,7 @@ public class ProviderVersionCardsInstrumentedTest {
         + "<script src='/js/pages/WatchPage.js'></script>"
         + "<script src='/js/utils/playbackRefusals.js'></script><script src='/js/components/NorvaModal.js'></script>"
         + "<script src='/js/icons.js'></script><script src='/js/pages/HomePage.js'></script><script src='/js/utils/GenreRails.js'></script>"
-        + "<script src='/provider-version-cards.js'></script><script src='/catalog-language-surfaces.js'></script></body></html>";
+        + "<script src='/home-cold-loading.js'></script><script src='/provider-version-cards.js'></script><script src='/catalog-language-surfaces.js'></script></body></html>";
 
     private static String evaluate(android.app.Instrumentation instrumentation, WebView view, String js) throws Exception {
         CountDownLatch latch = new CountDownLatch(1);
@@ -40,6 +40,8 @@ public class ProviderVersionCardsInstrumentedTest {
     @Test public void refusedPlaybackRecoveryAtBothTextZooms() throws Exception { verify(360, 800, false, false, true); }
     @Test public void landscapeRefusedPlaybackRecoveryAtBothTextZooms() throws Exception { verify(844, 390, false, false, true); }
 
+    @Test public void coldHomeDoesNotWaitForSlowSeries() throws Exception { verify(360, 800, false, false, false, true); }
+
     private void verify(int width, int height) throws Exception { verify(width, height, false); }
 
     private void verify(int width, int height, boolean catalogue) throws Exception {
@@ -51,9 +53,13 @@ public class ProviderVersionCardsInstrumentedTest {
     }
 
     private void verify(int width, int height, boolean catalogue, boolean restoration, boolean recovery) throws Exception {
+        verify(width, height, catalogue, restoration, recovery, false);
+    }
+
+    private void verify(int width, int height, boolean catalogue, boolean restoration, boolean recovery, boolean coldHome) throws Exception {
         android.app.Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         android.content.Context context = instrumentation.getTargetContext();
-        android.app.Activity activity = recovery ? instrumentation.startActivitySync(
+        android.app.Activity activity = (recovery || coldHome) ? instrumentation.startActivitySync(
                 new android.content.Intent(context, RecoveryWebViewFixtureActivity.class)
                         .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                         .putExtra("landscape", width > height)) : null;
@@ -91,7 +97,7 @@ public class ProviderVersionCardsInstrumentedTest {
         });
         try {
             assertTrue("Version renderer assets loaded", loaded.await(45, TimeUnit.SECONDS));
-            if (recovery) {
+            if (recovery || coldHome) {
                 AtomicReference<Boolean> visible = new AtomicReference<>(false);
                 for (int i = 0; i < 50 && !visible.get(); i++) {
                     instrumentation.runOnMainSync(() -> visible.set(holder.get().isAttachedToWindow()
@@ -103,12 +109,12 @@ public class ProviderVersionCardsInstrumentedTest {
             }
             for (int zoom : new int[] {100, 130}) {
                 instrumentation.runOnMainSync(() -> holder.get().getSettings().setTextZoom(zoom));
-                for (String locale : restoration ? new String[] {"fr"} : recovery ? new String[] {"fr", "en"} : new String[] {"fr", "en", "hi", "ar", "bn", "fil"}) {
-                    for (String kind : recovery ? new String[] {"movie"} : catalogue ? new String[] {"movies", "series", "home", "genres", "movie-detail", "series-detail"} : new String[] {"movie", "series"}) {
+                for (String locale : (restoration || coldHome) ? new String[] {"fr"} : recovery ? new String[] {"fr", "en"} : new String[] {"fr", "en", "hi", "ar", "bn", "fil"}) {
+                    for (String kind : (recovery || coldHome) ? new String[] {"movie"} : catalogue ? new String[] {"movies", "series", "home", "genres", "movie-detail", "series-detail"} : new String[] {"movie", "series"}) {
                         String fixture = catalogue ? "CatalogLanguageQA" : "ProviderVersionCardsQA";
                         evaluate(instrumentation, holder.get(), "window.versionResult='pending';(async()=>{try{"
                             + "await NorvaI18n.setPreference('"+locale+"');"
-                            + (recovery ? "await ProviderVersionCardsQA.verifyPlaybackRecovery();await ProviderVersionCardsQA.verifyNativePlaybackRecovery();"
+                            + (coldHome ? "await ColdHomeQA.verify();" : recovery ? "await ProviderVersionCardsQA.verifyPlaybackRecovery();await ProviderVersionCardsQA.verifyNativePlaybackRecovery();"
                                 : restoration ? "await ProviderVersionCardsQA.verifyRestoration('"+kind+"');"
                                 : "await "+fixture+".mount('"+kind+"'"+(catalogue ? ",9" : "")+");"
                                     + "await new Promise(r=>setTimeout(r,150));"+fixture+".verify();")

@@ -573,24 +573,28 @@ class HomePage {
                 // already bounded and gives an uncached Home real catalogue
                 // content quickly; the complete personalized rails replace this
                 // provisional paint as soon as they arrive.
-                const fastRailsP = this._paintedFromCache
-                    ? Promise.resolve(null)
-                    : this.boundedHomeTask(async (signal) => {
-                        const [movies, series] = await Promise.allSettled([
-                            window.API.request('GET', '/media/genre-rails?type=movie&limit=12', null, { signal }),
-                            window.API.request('GET', '/media/genre-rails?type=series&limit=12', null, { signal })
-                        ]);
-                        const movieRails = movies.status === 'fulfilled' && Array.isArray(movies.value?.rails)
-                            ? movies.value.rails.slice(0, 2)
-                            : [];
-                        const seriesRails = series.status === 'fulfilled' && Array.isArray(series.value?.rails)
-                            ? series.value.rails.slice(0, 1)
-                            : [];
-                        const rails = [...movieRails, ...seriesRails];
+                // Each media type owns its deadline and fallback. A usable movie
+                // must not wait for a slow/failed series request (or vice versa).
+                const fastTasks = this._paintedFromCache ? [] : ['movie', 'series'].map(itemType =>
+                    this.boundedHomeTask(async (signal) => {
+                        let payload;
+                        try {
+                            payload = await window.API.request('GET',
+                                `/media/genre-rails?type=${itemType}&limit=12`, null, { signal });
+                        } catch (error) {
+                            if (signal?.aborted) throw error;
+                        }
+                        const rails = Array.isArray(payload?.rails)
+                            ? payload.rails.slice(0, itemType === 'movie' ? 2 : 1) : [];
                         return rails.some(rail => rail.items?.length)
                             ? { contract: 'norva.home.fast-rails.v1', rails }
-                            : this.loadFallbackRails(signal);
-                    }, 'fast rails');
+                            : this.loadFallbackRails(signal, itemType);
+                    }, `fast ${itemType} rails`));
+                const fastRailsP = this.firstUsableHomeRails(fastTasks);
+                const completeFastRailsP = Promise.allSettled(fastTasks).then(results => ({
+                    rails: results.flatMap(result => result.status === 'fulfilled'
+                        ? (result.value?.rails || []) : [])
+                }));
 
                 // Register rejection handlers before awaiting health; an aborted
                 // or fast-failing parallel request must never become unhandled.
@@ -646,10 +650,11 @@ class HomePage {
                     }
                 }
 
-                const [historyResult, railsResult, favoritesResult] = await Promise.allSettled([
+                const [historyResult, railsResult, favoritesResult, completeFastResult] = await Promise.allSettled([
                     historyP,
                     railsP,
-                    this.boundedHomeTask(this.renderFavoriteChannels(), 'favorite channels')
+                    this.boundedHomeTask(this.renderFavoriteChannels(), 'favorite channels'),
+                    completeFastRailsP
                 ]);
                 if (!this.isCurrentLoad(generation)) return;
                 this.renderMyList();
@@ -671,24 +676,19 @@ class HomePage {
                             rails: railsResult.value
                         }, { version: window.API?.catalogSignature?.() });
                     } catch (_) { /* best-effort */ }
-                } else if (railsResult.status === 'rejected') {
-                    console.warn('[Dashboard] Home rails unavailable:', railsResult.reason);
-                    // Projection can advance the visibility fence while Home is
-                    // being assembled. Keep the first cards and retry the full
-                    // catalogue while import continues, instead of leaving the
-                    // hero absent until the last item has finished importing.
-                    if (window.NorvaSourceHealth?.catalogAvailability?.(this.sourceSummary)?.backgrounding
-                        || this.isSelectionPreparing()) this.schedulePendingCatalogRefresh();
-                    if (this._paintedFromCache || paintedEarlyRails) {
-                        // The SWR paint already shows real (cached) rails — keep them instead
-                        // of overwriting good content with a degraded fallback, and let the
-                        // service-health banner carry the "temporarily unavailable" message.
-                        this._railsErrorNotice();
-                    } else {
-                        const fallback = await fastRailsP;
-                        if (!this.isCurrentLoad(generation)) return;
+                } else {
+                    // Complete the provisional paint with the other media type if
+                    // personalization fails/returns empty. Keep a warm cache intact.
+                    const fallback = completeFastResult.status === 'fulfilled' ? completeFastResult.value : null;
+                    if (!this._paintedFromCache && (hasRailItems(fallback) || !paintedEarlyRails)) {
                         this.renderCloudRails(fallback || { rails: [] });
                         this.renderHero(history, this.railItems);
+                    }
+                    if (railsResult.status === 'rejected') {
+                        console.warn('[Dashboard] Home rails unavailable:', railsResult.reason);
+                        if (window.NorvaSourceHealth?.catalogAvailability?.(this.sourceSummary)?.backgrounding
+                            || this.isSelectionPreparing()) this.schedulePendingCatalogRefresh();
+                        if (this._paintedFromCache || paintedEarlyRails) this._railsErrorNotice();
                     }
                 }
 
@@ -2148,11 +2148,23 @@ class HomePage {
         });
     }
 
-    async loadFallbackRails(signal) {
+    firstUsableHomeRails(tasks) {
+        return new Promise(resolve => {
+            let remaining = tasks.length;
+            if (!remaining) { resolve(null); return; }
+            const settled = value => {
+                if (value?.rails?.some(rail => rail.items?.length)) resolve(value);
+                if (--remaining === 0) resolve(null);
+            };
+            for (const task of tasks) Promise.resolve(task).then(settled, () => settled(null));
+        });
+    }
+
+    async loadFallbackRails(signal, itemType = null) {
         const railFetchLimit = Math.max(this.homeRailDisplayLimit, this.homeRailFetchLimit);
         const [moviesResult, seriesResult] = await Promise.allSettled([
-            window.API.request('GET', `/channels/recent?type=movie&limit=${railFetchLimit}&direct=1`, null, { signal }),
-            window.API.request('GET', `/channels/recent?type=series&limit=${railFetchLimit}&direct=1`, null, { signal })
+            itemType === 'series' ? Promise.resolve([]) : window.API.request('GET', `/channels/recent?type=movie&limit=${railFetchLimit}&direct=1`, null, { signal }),
+            itemType === 'movie' ? Promise.resolve([]) : window.API.request('GET', `/channels/recent?type=series&limit=${railFetchLimit}&direct=1`, null, { signal })
         ]);
         if (moviesResult.status === 'rejected' && seriesResult.status === 'rejected') {
             throw moviesResult.reason;
