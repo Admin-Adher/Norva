@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# A slower previous publication must not overtake a newer application shell.
+concurrency:
+  group: norva-web-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy to Cloudflare Pages
@@ -88,6 +93,9 @@ jobs:
       - name: Inline landing CSS into entry HTML (removes render-blocking request)
         run: npm run inline:css
 
+      - name: Publish application assets under immutable content filenames
+        run: node scripts/fingerprint-app-assets.cjs
+
       - name: Deploy public/ to Cloudflare Pages (norva-web)
         uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
         with:
@@ -95,3 +103,6 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: '4.102.0'
           command: pages deploy public --project-name=norva-web --branch=main
+
+      - name: Verify delivered application shell and asset bytes
+        run: node scripts/verify-app-deployment.cjs https://norva.tv
