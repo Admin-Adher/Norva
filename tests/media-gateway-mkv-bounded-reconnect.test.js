@@ -3881,6 +3881,7 @@ for (const [finiteTs, grow] of [[false, false], [true, false], [false, true]]) t
             FFMPEG_USER_AGENT: 'Norva-Test/1',
             playbackStartupWindowPolicy: createPlaybackStartupWindowPolicy({ enabled: grow, allAuthenticatedOwners: grow }),
             canUsePrivateResumeCache: createPrivateResumeOwnerGate({ enabled: false }),
+            canUseRecentResumeSamples: () => false,
             sharedPlaybackRanges: new SharedPlaybackRanges({ enabled: false }),
             hybridPlaybackRanges,
             PROVIDER_SLOT_RELEASE_DELAY_MS: 2500,
