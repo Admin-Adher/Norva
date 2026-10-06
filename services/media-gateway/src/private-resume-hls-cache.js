@@ -1,7 +1,7 @@
 'use strict';
 const crypto = require('node:crypto');
 const { sampleProof, samplesMatch, RECENT_TTL_MS, captureInputWindows,
-    RECENT_INPUT_MAX_BYTES } = require('./recent-resume-samples');
+    RECENT_INPUT_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES } = require('./recent-resume-samples');
 const { strongResumeIdentity } = require('./private-resume-binding');
 const { captureSubtitleWindow } = require('./private-resume-subtitles');
 const keyFor = binding => crypto.createHash('sha256').update(JSON.stringify(binding)).digest('hex');
@@ -149,7 +149,8 @@ class PrivateResumeHlsCache {
             inputSnapshot: () => {
                 ensure();
                 return entry.recentProof ? { fileSizeBytes: binding.fileSizeBytes, target: entry.recentProof.target,
-                    windows: captureInputWindows(entry.inputWindows, binding.fileSizeBytes) } : null;
+                    windows: captureInputWindows(entry.inputWindows, binding.fileSizeBytes,
+                        entry.inputOnly ? Math.min(this.perFileBytes, RECENT_MULTI_INPUT_MAX_BYTES) : RECENT_INPUT_MAX_BYTES) } : null;
             },
             subtitlePlaylist: (name, continuation = [], ended = false) => {
                 ensure(); const prefix = entry.subtitlePlaylists.get(name);
@@ -167,7 +168,7 @@ class PrivateResumeHlsCache {
             return this.rejectCapture('input-ineligible');
         const recentProof = sampleProof(observed.samples, observed.fileSizeBytes, observed.effectiveUrlIdentitySha256);
         if (!recentProof || !Array.isArray(inputWindows)) return this.rejectCapture('unverified-input');
-        const limit = Math.min(RECENT_INPUT_MAX_BYTES, this.perFileBytes);
+        const limit = Math.min(RECENT_MULTI_INPUT_MAX_BYTES, this.perFileBytes);
         this.prune(); const key = keyFor(binding), prior = this.entries.get(key);
         if (prior?.leases || (prior && !prior.inputOnly)) return this.rejectCapture('input-entry-in-use');
         // Shares the HLS cache's hard bound. No second cache or extra global

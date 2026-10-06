@@ -129,7 +129,7 @@ const { FinitePlaybackRangeReuse } = require('./finitePlaybackRangeReuse');
 const { privateResumeBinding, createPrivateResumeOwnerGate } = require('./private-resume-binding');
 const { privateResumeProfile } = require('./private-resume-profile');
 const { captureSamples, SAMPLE_BYTES, captureInputWindows, RECENT_INPUT_MAX_BYTES,
-    RECENT_HEADER_MAX_BYTES } = require('./recent-resume-samples');
+    RECENT_HEADER_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES } = require('./recent-resume-samples');
 const { validateRecentResume } = require('./recent-resume-validation');
 const { PrivateResumeHlsCache, parseResumeMediaPlaylist } = require('./private-resume-hls-cache');
 const { captureSubtitleWindow, parseSubtitlePlaylist } = require('./private-resume-subtitles');
@@ -7320,11 +7320,16 @@ async function createStrictLidBroker(options = {}) {
             return captureSamples([...(context.recentHeaderSample ? [context.recentHeaderSample] : []),
                 ...context.finiteCache.values()]);
         },
-        snapshotRecentInput() {
+        snapshotRecentInput(maximum = RECENT_INPUT_MAX_BYTES) {
+            const current = [...context.finiteCache.values()];
+            // MKV cues commonly live at EOF. Keep that small index before
+            // headers and the most recently received body; never fetch it here.
+            const tail = maximum > RECENT_INPUT_MAX_BYTES
+                ? current.filter(w => w.start >= context.fileSizeBytes - 1024 * 1024) : [];
             return context.captureRecentSamples ? captureInputWindows([
-                ...(context.recentInputHeaders || []), ...[...context.finiteCache.values()].reverse()], context.fileSizeBytes) : [];
+                ...tail, ...(context.recentInputHeaders || []), ...current.reverse()], context.fileSizeBytes, maximum) : [];
         },
-        seedRecentInput(proof) {
+        seedRecentInput(proof, maximum = RECENT_INPUT_MAX_BYTES) {
             // Called only after lease acquisition has accepted fresh samples.
             // Never seed strict LID, a different target, or an already used input.
             if (!context.captureRecentSamples || context.pathPrefix !== 'finite-mkv-seek'
@@ -7333,7 +7338,7 @@ async function createStrictLidBroker(options = {}) {
                 || !/^[a-f0-9]{64}$/.test(String(proof?.target || ''))
                 || proof.target !== context.effectiveUrlIdentitySha256) return 0;
             const windows = captureInputWindows(proof.windows, context.fileSizeBytes,
-                Math.min(RECENT_INPUT_MAX_BYTES, context.finiteCacheMaxBytes));
+                Math.min(maximum, context.finiteCacheMaxBytes));
             let bytes = 0;
             for (const window of windows) {
                 finiteMkvSeekCacheStore(context, { start: window.start,
@@ -15426,7 +15431,7 @@ async function trySeedRecentMultiAudioInput(session, signal) {
     session.startupTimings.recentMultiAudioInputValidationMs = Date.now() - startedAt;
     if (!lease) return false;
     try {
-        const bytes = broker?.seedRecentInput(lease.inputSnapshot()) || 0;
+        const bytes = broker?.seedRecentInput(lease.inputSnapshot(), RECENT_MULTI_INPUT_MAX_BYTES) || 0;
         session.startupTimings.recentMultiAudioInputSeededBytes = bytes;
         session.startupTimings.recentMultiAudioInputHit = bytes > 0;
         return bytes > 0;
@@ -15858,7 +15863,8 @@ async function closeFiniteMkvSeekBroker(session) {
     if (!broker) return;
     if (session.privateResumeStopPosition > 0 && canUseRecentResumeSamples(session.ownerKey)) {
         session.privateResumeSamples = broker.snapshotRecentSamples();
-        session.privateResumeInputWindows = broker.snapshotRecentInput();
+        session.privateResumeInputWindows = broker.snapshotRecentInput(multiAudioHlsEnabled(session)
+            ? RECENT_MULTI_INPUT_MAX_BYTES : RECENT_INPUT_MAX_BYTES);
     }
     session.finiteMkvSeekBroker = null;
     session.startupTimings = asRecord(session.startupTimings);

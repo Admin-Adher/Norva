@@ -53,7 +53,7 @@ for(const hit of [true,false]) test(`multi-audio input ${hit?'hit':'miss'} prese
     const calls=[],session={seekOffset:100,startupTimings:{},multiAudioHls:{enabled:true,audioRenditions:[1,2,3]}};
     const topology=JSON.stringify(session.multiAudioHls);
     const run=vm.runInNewContext('('+seedSource+')',{
-        Date,privateResumeMultiAudioInputBinding:()=>binding,
+        Date,RECENT_MULTI_INPUT_MAX_BYTES:64*1024*1024,privateResumeMultiAudioInputBinding:()=>binding,
         privateResumeHlsCache:{inputRevalidationPlan:()=>({}),acquireInput:()=>{calls.push('acquire');return hit?{
             inputSnapshot:()=>({windows:[]}),release:()=>calls.push('release')}:null;}},
         revalidateRecentResumeSession:async()=>{calls.push('fresh-drained');return observed();},
@@ -69,9 +69,25 @@ for(const hit of [true,false]) test(`multi-audio input ${hit?'hit':'miss'} prese
 test('cancelled validation never seeds or acquires an input lease',async()=>{
     const signal={aborted:true};
     const run=vm.runInNewContext('('+seedSource+')',{
-        Date,privateResumeMultiAudioInputBinding:()=>binding,
+        Date,RECENT_MULTI_INPUT_MAX_BYTES:64*1024*1024,privateResumeMultiAudioInputBinding:()=>binding,
         privateResumeHlsCache:{inputRevalidationPlan:()=>({}),acquireInput:()=>assert.fail('acquire')},
         revalidateRecentResumeSession:async()=>observed(),prepareFiniteMkvSeekBroker:()=>assert.fail('prepare'),
         abortedVodInputPumpError:()=>Error('aborted')});
     await assert.rejects(run({seekOffset:100,startupTimings:{}},signal),/aborted/);
+});
+
+test('input-only body uses the configured per-file allowance while HLS defaults stay at eight MiB',()=>{
+    const {captureInputWindows}=require('../services/media-gateway/src/recent-resume-samples');
+    const MiB=1024*1024, largeSize=100*MiB;
+    const chunks=[{start:0,payload:Buffer.alloc(8*MiB,1)},{start:30*MiB,payload:Buffer.alloc(16*MiB,2)}];
+    assert.equal(captureInputWindows(chunks,largeSize).reduce((n,w)=>n+w.payload.length,0),8*MiB);
+    assert.deepEqual(captureInputWindows(chunks,largeSize,65*MiB),[]);
+    const largeBinding={...binding,fileSizeBytes:largeSize};
+    const cache=new PrivateResumeHlsCache({recentRevalidation:true,maxBytes:64*MiB,perFileBytes:24*MiB});
+    const identity={...observed(),fileSizeBytes:largeSize};
+    assert.equal(cache.captureInput({binding:largeBinding,observed:identity,inputWindows:chunks}),true);
+    assert.equal(cache.publicStatus().bytes,24*MiB);assert.equal(cache.publicStatus().reservedBytes,0);
+    const lease=cache.acquireInput(largeBinding,identity);
+    assert.equal(lease.inputSnapshot().windows.reduce((n,w)=>n+w.payload.length,0),24*MiB);
+    lease.release();cache.revokeOwner(binding.ownerKey);assert.equal(cache.publicStatus().bytes,0);
 });
