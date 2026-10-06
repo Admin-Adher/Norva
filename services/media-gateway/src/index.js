@@ -6176,6 +6176,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
         let finiteLocalBackpressured = false;
         let finiteProviderWindowsCompleted = 0;
         let finiteWarmupWindowsCompleted = 0;
+        let settledCueRequestId = requestId;
         while (forwarded < requestedLength) {
             if (attempt.localClosed) break;
             if (context.finiteResumeRanges && !finiteWindowRange) {
@@ -6286,6 +6287,16 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     if (attempt.localClosed || controller.signal.aborted) break;
                 }
                 releaseFiniteProviderSlot = await acquireFiniteMkvSeekProviderSlot(context, controller.signal);
+                // The pre-queue grace may have elapsed while a newer cue was
+                // still fetching. Libav cannot close its old socket until that
+                // cue is delivered. Give only an older continuation the same
+                // bounded grace after acquiring the slot; never truncate a
+                // live local response or wait indefinitely for its close.
+                if (forwarded > 0 && settledCueRequestId !== context.latestRequestId
+                    && context.finiteInitialContinuationGraceMs > 0) {
+                    settledCueRequestId = context.latestRequestId;
+                    await new Promise(resolve => setTimeout(resolve, context.finiteInitialContinuationGraceMs));
+                }
                 if (finiteSeekDemandClosed(context, attempt, res)) break;
                 // Another overlapping local range may have filled this exact
                 // window while this attempt waited for the mono-provider slot.
@@ -15538,7 +15549,13 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         : finiteTs ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, 1024 * 1024) : exactAudioTrackCount > 1
         ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, FINITE_MKV_MULTI_AUDIO_SEEK_WINDOW_BYTES)
         : FINITE_MKV_SEEK_WINDOW_BYTES);
-    const sequentialWindowBytes = finiteMp4 ? FINITE_MKV_SEEK_WINDOW_BYTES
+    // Small windows bound indexed seek waste, but capping the entire ensuing
+    // Matroska read at 2 MiB repeats remote response latency throughout playback.
+    // A single-audio MKV can grow to the ordinary window only after this same
+    // local read has consumed two small windows. Every new cue starts small.
+    const growMkvSequential = finiteMkv && exactAudioTrackCount === 1
+        && effectiveWindowBytes < FINITE_MKV_SEEK_WINDOW_BYTES;
+    const sequentialWindowBytes = finiteMp4 || growMkvSequential ? FINITE_MKV_SEEK_WINDOW_BYTES
         : playbackStartupWindowPolicy.bytes(session.ownerKey, FINITE_MKV_SEEK_WINDOW_BYTES);
     const finiteResumePrefixCandidate = !finiteMkv ? null : finiteMkvResumePrefixCache.get({
         sourceUrl: session.sourceUrl,
@@ -15597,6 +15614,8 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         finiteWarmupCueGraceMs: finiteTs ? 0 : FINITE_MKV_RESUME_CUE_GRACE_MS,
         finiteWarmupWindowBytes: warmupWindowBytes,
         finiteSequentialWindowBytes: sequentialWindowBytes,
+        finiteInitialSequentialWindowBytes: growMkvSequential ? effectiveWindowBytes : 0,
+        finiteSequentialGrowthBytes: growMkvSequential ? 2 * effectiveWindowBytes : 0,
         finiteFirstWindowBytes: finiteMp4 ? 1024 * 1024 : 0,
         finiteAtomicWindowBytes: finiteMp4 ? 1024 * 1024 : 0,
         finiteCacheAbandonedPrefix: finiteMp4,
