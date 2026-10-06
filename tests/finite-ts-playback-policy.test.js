@@ -195,3 +195,19 @@ test('version cards prefer an observed container without mutating provider URL i
     assert.match(win.MediaUtils.versionDescriptor(item).meta,/MKV/);
     item.codecProfile.metadataComplete=true;assert.match(win.MediaUtils.versionDescriptor(item).meta,/MPEG-TS/);
 });
+
+for (const sampled of [false, true]) test(`recent HLS proof reaches Edge and browser: ${sampled ? 'sampled' : 'strong'}`, () => {
+    const {edge,watch}=clients();
+    const policy={protocol:3,eligible:true,pipeline:'video-transcode',reason:'private-resume-window-ready',
+        targetBufferSeconds:6,cachedAheadSeconds:46,fileIdentityRevalidated:!sampled,recentSampleValidation:sampled};
+    const normalized=edge(policy), result=watch.gatewayStartupBufferOptions(normalized);
+    assert.equal(result.minimumSeconds,6); assert.equal(result.policy.recentSampleValidation,sampled);
+    assert.equal(result.policy.fileIdentityRevalidated,!sampled);
+    assert.equal(watch.gatewayRecoveryBufferOptions(normalized).minimumSeconds,12);
+    for(const delta of [{cachedAheadSeconds:23},{cachedAheadSeconds:151},{cachedAheadSeconds:'46'},
+        {targetBufferSeconds:1},{pipeline:'copy'},{eligible:false},{fileIdentityRevalidated:false,recentSampleValidation:false},
+        {fileIdentityRevalidated:true,recentSampleValidation:true}]) {
+        assert.equal(edge({...policy,...delta}),null);
+        assert.equal(watch.gatewayStartupBufferOptions({...policy,...delta}).minimumSeconds,96);
+    }
+});

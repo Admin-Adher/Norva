@@ -9993,12 +9993,15 @@ function mkvH264FastStartItemCasFromPlaybackSession(value: unknown) {
 function normalizeGatewayStartupPolicy(value: unknown) {
   const raw = recordOrEmpty(value);
   if (raw.protocol === 3) {
+    const strong = raw.fileIdentityRevalidated === true;
+    const sampled = raw.recentSampleValidation === true;
     return raw.eligible === true && raw.reason === "private-resume-window-ready"
       && raw.pipeline === "video-transcode" && raw.targetBufferSeconds === 6
-      && raw.fileIdentityRevalidated === true && typeof raw.cachedAheadSeconds === "number"
+      && strong !== sampled && typeof raw.cachedAheadSeconds === "number"
       && Number.isFinite(raw.cachedAheadSeconds) && raw.cachedAheadSeconds >= 24 && raw.cachedAheadSeconds <= 150
       ? { protocol: 3, eligible: true, reason: "private-resume-window-ready", pipeline: "video-transcode",
-        targetBufferSeconds: 6, cachedAheadSeconds: raw.cachedAheadSeconds, fileIdentityRevalidated: true } : null;
+        targetBufferSeconds: 6, cachedAheadSeconds: raw.cachedAheadSeconds,
+        fileIdentityRevalidated: strong, recentSampleValidation: sampled } : null;
   }
   const protocol = Number(raw.protocol);
   const pipeline = stringOr(raw.pipeline, "");
