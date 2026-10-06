@@ -73,7 +73,7 @@ class PrivateResumeHlsCache {
             throw new Error('RESUME_CACHE_CONFIG_INVALID');
         Object.assign(this, { maxBytes, perFileBytes, maxEntries, ttlMs, windowSeconds, minimumAheadSeconds, recentRevalidation, now });
         this.entries = new Map(); this.bytes = 0; this.reservedBytes = 0; this.epoch = 0;
-        this.stats = { stores: 0, hits: 0, misses: 0, invalidations: 0, evictions: 0,
+        this.stats = { stores: 0, hits: 0, misses: 0, invalidations: 0, evictions: 0, inputStores: 0, inputHits: 0,
             sampledStores: 0, sampledHits: 0, captureRejects: 0, lastCaptureRejection: null };
     }
     rejectCapture(reason) {
@@ -99,17 +99,27 @@ class PrivateResumeHlsCache {
         this.prune();
         if (!binding || !Number.isFinite(position) || position < 0) return null;
         const entry = this.entries.get(keyFor(binding));
-        return entry?.live && entry.expiresAt > this.now() && position >= entry.start
+        return !entry?.inputOnly && entry?.live && entry.expiresAt > this.now() && position >= entry.start
             && position < entry.end && (entry.ended || entry.end - position >= this.minimumAheadSeconds)
             ? entry : null;
     }
     hasCandidate(binding, position) { return Boolean(this.candidate(binding, position)); }
+    inputCandidate(binding) {
+        this.prune();
+        const entry = binding && this.entries.get(keyFor(binding));
+        return entry?.inputOnly && entry.live && entry.expiresAt > this.now() ? entry : null;
+    }
+    inputRevalidationPlan(binding) {
+        const proof = this.inputCandidate(binding)?.recentProof;
+        return proof ? { kind: proof.kind, ranges: proof.ranges.map(({ start, length }) => ({ start, length })) } : null;
+    }
     revalidationPlan(binding, position) {
         const proof = this.candidate(binding, position)?.recentProof;
         return proof ? { kind: proof.kind, ranges: proof.ranges.map(({ start, length }) => ({ start, length })) } : null;
     }
-    acquire(binding, position, observed) {
-        const entry = this.candidate(binding, position);
+    acquireInput(binding, observed) { return this.acquire(binding, 0, observed, true); }
+    acquire(binding, position, observed, inputOnly = false) {
+        const entry = inputOnly ? this.inputCandidate(binding) : this.candidate(binding, position);
         if (!entry) { this.stats.misses++; return null; }
         const identity = strongResumeIdentity(observed, binding.fileSizeBytes);
         const matches = entry.recentProof ? this.recentRevalidation && samplesMatch(entry.recentProof,
@@ -129,7 +139,8 @@ class PrivateResumeHlsCache {
             this.drop(keyFor(binding), entry); this.stats.invalidations++; this.stats.misses++; return null;
         }
         let released = false; entry.leases++; this.stats.hits++;
-        if (entry.recentProof) this.stats.sampledHits++;
+        if (entry.inputOnly) this.stats.inputHits++;
+        else if (entry.recentProof) this.stats.sampledHits++;
         const valid = () => !released && entry.live && this.entries.get(keyFor(binding)) === entry;
         const ensure = () => { if (!valid()) throw new Error('RESUME_CACHE_REVOKED'); };
         return Object.freeze({
@@ -146,10 +157,41 @@ class PrivateResumeHlsCache {
             },
               bandwidth: entry.bandwidth,
               assertValid: ensure,
-            playlist: continuation => { ensure(); return mergedResumePlaylist(entry, continuation); },
+            playlist: continuation => { ensure(); if (entry.inputOnly) throw new Error('RESUME_INPUT_ONLY'); return mergedResumePlaylist(entry, continuation); },
             asset: name => { ensure(); const bytes = entry.assets.get(name); return bytes ? Buffer.from(bytes) : null; },
             release: () => { if (!released) { released = true; entry.leases--; this.prune(); } },
         });
+    }
+    captureInput({ binding, observed, inputWindows } = {}) {
+        if (!this.recentRevalidation || !binding || observed?.fileSizeBytes !== binding.fileSizeBytes)
+            return this.rejectCapture('input-ineligible');
+        const recentProof = sampleProof(observed.samples, observed.fileSizeBytes, observed.effectiveUrlIdentitySha256);
+        if (!recentProof || !Array.isArray(inputWindows)) return this.rejectCapture('unverified-input');
+        const limit = Math.min(RECENT_INPUT_MAX_BYTES, this.perFileBytes);
+        this.prune(); const key = keyFor(binding), prior = this.entries.get(key);
+        if (prior?.leases || (prior && !prior.inputOnly)) return this.rejectCapture('input-entry-in-use');
+        // Shares the HLS cache's hard bound. No second cache or extra global
+        // memory allowance. Reserve before detaching the bounded input bytes.
+        const reservation = 2 * limit;
+        while (this.entries.size - (prior ? 1 : 0) >= this.maxEntries
+            || this.bytes + this.reservedBytes + reservation > this.maxBytes) {
+            const victim = [...this.entries].find(([, e]) => !e.leases && e !== prior);
+            if (!victim) return this.rejectCapture('reservation-budget');
+            this.drop(...victim); this.stats.evictions++;
+        }
+        this.reservedBytes += reservation;
+        try {
+            const windows = captureInputWindows(inputWindows, binding.fileSizeBytes, limit);
+            if (!windows.length || windows[0].start !== 0 || windows[0].payload.length < 65536)
+                return this.rejectCapture('input-header-unavailable');
+            const bytes = windows.reduce((n,w) => n + w.payload.length, 0);
+            if (prior) this.drop(key, prior);
+            this.entries.set(key, { binding, recentProof, inputOnly: true, inputWindows: windows,
+                assets: new Map(), subtitlePlaylists: new Map(), bytes, leases: 0, live: true,
+                expiresAt: this.now() + Math.min(this.ttlMs, RECENT_TTL_MS) });
+            this.bytes += bytes; this.stats.inputStores++;
+            return true;
+        } finally { this.reservedBytes -= reservation; }
     }
     async capture({ binding, observed, position, actualStartOffset, playlist, readAsset, subtitleRenditions = [], inputWindows = [] } = {}) {
         if (!binding || !Number.isFinite(position) || position <= 0 || !Number.isFinite(actualStartOffset)

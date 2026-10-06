@@ -12701,6 +12701,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             mediaCacheProducerControl.attach(session, normalizedMediaCacheProducer);
         }
 
+        await trySeedRecentMultiAudioInput(session, sessionRequestAbortController.signal);
         if (await tryStartPrivateResumeWindow(session, sessionRequestAbortController.signal)) {
             session.startupTimings.totalMs = Math.max(0, Date.now() - sessionCreateStartedAt);
             sessionStartupStats.successes += 1;
@@ -15393,6 +15394,45 @@ function privateResumeObservedIdentity(session) {
         samples: canUseRecentResumeSamples(session.ownerKey) ? session.privateResumeSamples : null };
 }
 
+function privateResumeMultiAudioInputBinding(session) {
+    if (!canUsePrivateResumeCache(session?.ownerKey) || !canUseRecentResumeSamples(session?.ownerKey)
+        || !multiAudioHlsEnabled(session) || privateResumeFormat(session) !== 'mkv'
+        || session.mediaCacheProducer || session.completeHlsCacheLease) return null;
+    const identity = asRecord(session.playbackIdentity), tracks = audioRenditionsForSession(session);
+    if (!tracks.length || tracks.length > 12 || tracks.some(t => !Number.isInteger(t.streamIndex))) return null;
+    return privateResumeBinding({ ownerKey: session.ownerKey, sourceUrl: session.sourceUrl,
+        sourceId: identity.sourceId, sourceRevision: identity.sourceRevision,
+        vodIdentityKey: identity.vodIdentityKey, fileSizeBytes: fileSizeBytesForSession(session),
+        profile: JSON.stringify({ protocol: 'recent-multi-input-1', audio: tracks,
+            selected: selectedAudioTrackForSession(session)?.index,
+            audioMode: session.audioMode, passthrough: session.clientAudioPassthrough,
+            subtitles: exactSubtitleRenditionsForSession(session), encoder: VIDEO_ENCODER_CONFIG.backend }) });
+}
+
+async function trySeedRecentMultiAudioInput(session, signal) {
+    if (!(session.seekOffset > 0)) return false;
+    const binding = privateResumeMultiAudioInputBinding(session);
+    if (!binding) return false;
+    const plan = privateResumeHlsCache.inputRevalidationPlan(binding);
+    if (!plan) return false;
+    const startedAt = Date.now();
+    const observed = await revalidateRecentResumeSession(session, plan, signal);
+    if (signal?.aborted || session.stoppingPromise) throw abortedVodInputPumpError();
+    if (observed) applyFiniteMkvSeekProviderIdentity(session, observed);
+    // Both hit and miss continue through ordinary multi-audio encoding.
+    // No HLS lease, fabricated fast-start policy or removed rendition.
+    const broker = await prepareFiniteMkvSeekBroker(session, signal);
+    const lease = privateResumeHlsCache.acquireInput(binding, observed);
+    session.startupTimings.recentMultiAudioInputValidationMs = Date.now() - startedAt;
+    if (!lease) return false;
+    try {
+        const bytes = broker?.seedRecentInput(lease.inputSnapshot()) || 0;
+        session.startupTimings.recentMultiAudioInputSeededBytes = bytes;
+        session.startupTimings.recentMultiAudioInputHit = bytes > 0;
+        return bytes > 0;
+    } finally { lease.release(); }
+}
+
 async function capturePrivateResumeWindow(session) {
     const position = session.privateResumeStopPosition;
     if (!Number.isFinite(position) || position <= 0) return false;
@@ -15400,6 +15440,9 @@ async function capturePrivateResumeWindow(session) {
     // A second exit must not splice a previously spliced playlist into another
     // discontinuity graph. The new encoder's output is independently reusable.
     const actualStartOffset = session.privateResumeContinuationOffset ?? session.actualStartOffset;
+    const inputBinding = privateResumeMultiAudioInputBinding(session);
+    if (inputBinding) return privateResumeHlsCache.captureInput({ binding: inputBinding,
+        observed: privateResumeObservedIdentity(session), inputWindows: session.privateResumeInputWindows });
     const binding = privateResumeHlsBindingForSession(session);
     if (!binding) return privateResumeHlsCache.rejectCapture('session-ineligible');
     if (!Number.isFinite(actualStartOffset)) return privateResumeHlsCache.rejectCapture('invalid-start-clock');
