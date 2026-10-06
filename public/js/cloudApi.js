@@ -1269,6 +1269,13 @@
         return result;
     }
 
+    function playbackExpiryRequest(id, options = {}) {
+        const { resumePosition, ...requestOptions } = options;
+        const body = typeof resumePosition === 'number' && Number.isFinite(resumePosition)
+            && resumePosition > 0 && resumePosition < 86400 ? { resumePosition } : null;
+        return playbackSessionRequest('POST', `/playback/sessions/${encodeURIComponent(id)}/expire`, body, requestOptions);
+    }
+
     async function playbackSessionRequest(method, path, body, options = {}) {
         try {
             return await requestToBase(playbackBase(), method, path, body, options);
@@ -5115,12 +5122,7 @@
             getSession: (id) => playbackSessionRequest('GET', `/playback/sessions/${encodeURIComponent(id)}`),
             heartbeatSession: (id) => playbackHeartbeatRequest(id),
             refreshMediaCacheTicket: (id, objectKey) => playbackMediaCacheTicketRequest(id, objectKey),
-            expireSession: (id, options = {}) => playbackSessionRequest(
-                'POST',
-                `/playback/sessions/${encodeURIComponent(id)}/expire`,
-                null,
-                options
-            ),
+            expireSession: (id, options = {}) => playbackExpiryRequest(id, options),
             reportProviderFailure: (id, failure) => playbackSessionRequest(
                 'POST',
                 `/playback/sessions/${encodeURIComponent(id)}/provider-failure`,
@@ -5211,12 +5213,7 @@
                     objectKey,
                     { token: getDeviceToken() }
                 ),
-                expireSession: (id, options = {}) => playbackSessionRequest(
-                    'POST',
-                    `/playback/sessions/${encodeURIComponent(id)}/expire`,
-                    null,
-                    { ...options, token: getDeviceToken() }
-                ),
+                expireSession: (id, options = {}) => playbackExpiryRequest(id, { ...options, token: getDeviceToken() }),
                 reportProviderFailure: (id, failure) => playbackSessionRequest(
                     'POST',
                     `/playback/sessions/${encodeURIComponent(id)}/provider-failure`,

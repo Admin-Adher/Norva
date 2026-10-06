@@ -62,6 +62,7 @@ test('goBack remains the single teardown owner during its own navigation', () =>
 test('page teardown persists progress and expires cloud sessions with keepalive', () => {
   const calls = [];
   const page = {
+    captureCloudResumePosition() { return 315; },
     persistPlaybackStateForExit() { calls.push(['progress']); },
     stopCloudPlaybackSessions(options) {
       calls.push(['expire', options]);
@@ -79,9 +80,9 @@ test('page teardown persists progress and expires cloud sessions with keepalive'
 
   assert.deepEqual(calls, [
     ['progress'],
-    ['expire', { keepalive: true }],
+    ['expire', { keepalive: true, resumePosition: 315 }],
   ]);
-  assert.ok(source.includes('expireSession(sessionId, options)'));
+  assert.ok(source.includes('expireSession(sessionId, expiryOptions)'));
 });
 
 test('same-route episode handoff saves the outgoing identity without hiding Watch', () => {

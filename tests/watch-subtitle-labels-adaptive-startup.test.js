@@ -137,3 +137,23 @@ test('twelve-second segments produced at 2x retain evidence across their six-sec
     const slow = await gate(t => 12 + 12 * Math.floor(t / 12000), longSegments, { timeoutMs: 25000 });
     assert.equal(slow.result, false); assert.equal(slow.evidence, null);
 });
+
+test('a fresh server preroll at 15 seconds earns the unchanged growth proof', async () => {
+    const result = await gate(t => 6 + 4 * Math.floor(t / 400), page => {
+        page.video.currentTime = 15; page.video.played = { length: 0 };
+    });
+    assert.equal(result.result, true); assert.equal(result.now, 2000);
+    assert.ok(result.evidence.rateX >= 2 && result.evidence.bufferedSeconds >= 12);
+});
+
+test('positive preroll does not admit played, user-paused, moving, or slow media', async () => {
+    for (const mutate of [page => page.video.played.length = 1, page => page._gatewayUserPaused = true,
+        page => page._playStartedReported = true, (page,t) => page.video.currentTime = 15 + t / 1000]) {
+        const result = await gate(t => 6 + 4 * Math.floor(t / 400), (page,t) => {
+            page.video.currentTime = 15; page.video.played = { length: 0 }; mutate(page,t);
+        });
+        assert.equal(result.result, false); assert.equal(result.evidence, null);
+    }
+    const slow = await gate(t => 6 + t / 1000, page => { page.video.currentTime = 15; page.video.played = {length:0}; });
+    assert.equal(slow.result,false);
+});
