@@ -8835,8 +8835,15 @@ class WatchPage {
         if (this._rebufferPresentationActive) {
             // Metadata/canplay and a final queued timeupdate also arrive while
             // starved. Only playing or real forward progress ends rebuffering.
+            const mediaTime = Number(this.video.currentTime);
+            // A backward seek/new local timeline invalidates the old stall
+            // clock. Require a subsequent advancing sample before dismissing.
+            if (allowPlaybackProgressFallback && !this.video.seeking
+                && Number.isFinite(mediaTime) && mediaTime < this._rebufferMediaTime) {
+                this._rebufferMediaTime = mediaTime;
+            }
             const progressing = allowPlaybackProgressFallback && !this.video.seeking
-                && Number(this.video.currentTime) - this._rebufferMediaTime >= 0.05;
+                && mediaTime - this._rebufferMediaTime >= 0.05;
             const playing = allowFirstFrameFallback && this.video.readyState >= 3;
             if (this.video.paused || (!progressing && !playing)) return;
         }

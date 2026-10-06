@@ -99,6 +99,16 @@ async function verifyGatewayLateRecovery(WatchPage, Hls, tick) {
     startup.contentType = 'series'; startup.currentCloudPlaybackSessionId = 'fixture';
     startup.streamStartOffset = 300; startup.video.videoWidth = 1920;
     if (startup.captureCloudResumePosition() !== 315) throw Error('resume clock lost its absolute origin');
+    const feedback = Object.create(WatchPage.prototype);
+    Object.assign(feedback, { video: { currentTime: 15, paused: false, seeking: false, readyState: 4 },
+        _firstFrameReported: true, _rebufferPresentationActive: true, _rebufferMediaTime: 171,
+        hasCurrentMedia: () => true, _playbackStatusOkReported: true,
+        hideLoading() { this._rebufferPresentationActive = false; }, hidePlaybackError() {}, reportObservedAudioLanguages() {} });
+    feedback.markPlaybackUsable({ allowPlaybackProgressFallback: true });
+    if (!feedback._rebufferPresentationActive) throw Error('a seek alone dismissed loading');
+    feedback.video.currentTime = 15.25;
+    feedback.markPlaybackUsable({ allowPlaybackProgressFallback: true });
+    if (feedback._rebufferPresentationActive) throw Error('old stall clock masked progressing video');
     return 'ok';
 }
 if (typeof module !== 'undefined') module.exports = verifyGatewayLateRecovery;
