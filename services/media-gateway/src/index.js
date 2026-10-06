@@ -15590,6 +15590,10 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     if (!fileSizeBytes) {
         throw vodInputPumpError('VOD_SIZE_UNAVAILABLE', 'Finite MKV seek requires an exact file size.', { status: 502 });
     }
+    // MP4/TS can enter here without the MKV preopen that populates telemetry.
+    // Report the exact size actually used by the broker, not a stale null.
+    session.startupTimings = asRecord(session.startupTimings);
+    session.startupTimings.fileSizeBytes = fileSizeBytes;
 
     // The size/identity preopen owns the provider's single socket. Drain it
     // completely before the seek broker is allowed to issue FFmpeg-directed

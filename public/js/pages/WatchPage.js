@@ -5973,6 +5973,20 @@ class WatchPage {
 
     normalizeGatewayStartupPolicy(value = null) {
         const policy = value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+        if (policy?.protocol === 3) {
+            const strong = policy.fileIdentityRevalidated === true;
+            const sampled = policy.recentSampleValidation === true;
+            if (policy.eligible !== true || policy.reason !== 'private-resume-window-ready'
+                || policy.pipeline !== 'video-transcode' || policy.targetBufferSeconds !== 6
+                || strong === sampled || typeof policy.cachedAheadSeconds !== 'number'
+                || !Number.isFinite(policy.cachedAheadSeconds)
+                || policy.cachedAheadSeconds < 24 || policy.cachedAheadSeconds > 150) return null;
+            // Already resident media has no encode-rate estimate. Keep its
+            // freshness evidence distinct and still require real browser buffer.
+            return { protocol: 3, eligible: true, reason: policy.reason, pipeline: policy.pipeline,
+                targetBufferSeconds: 6, cachedAheadSeconds: policy.cachedAheadSeconds,
+                fileIdentityRevalidated: strong, recentSampleValidation: sampled };
+        }
         if (!policy || Number(policy.protocol) !== 2 || policy.eligible !== true) return null;
 
         const pipeline = String(policy.pipeline || '').trim().toLowerCase();
