@@ -47,6 +47,7 @@ test('recent mode is opt-in; exact private binding, short TTL and revocation app
     assert.equal(await capture(cache), true);
     const plan = cache.revalidationPlan(binding, 10);
     assert.equal(plan.ranges.length, 4); assert.equal(plan.ranges[0].digest, undefined);
+    assert.equal(plan.target, target);
     for (const other of [{ ...binding, ownerKey:'c'.repeat(64) }, { ...binding, profileHash:'d'.repeat(64) },
         { ...binding, sourceUrlHash:'e'.repeat(64) }]) assert.equal(cache.hasCandidate(other,10), false);
     const lease = cache.acquire(binding, 10, observed());
@@ -84,6 +85,59 @@ test('already cancelled request opens no provider broker', async () => {
     const controller=new AbortController(); controller.abort();
     assert.equal(await validateRecentResume({ plan:{kind:'sampled-recent-v1',ranges:samples().map(s=>({start:s.start,length:N}))},
         signal:controller.signal,createBroker:async()=>{throw Error('must not open');} }),null);
+});
+
+for (const rejectAt of [1, 2, 0]) test(`identity rejection stops remaining fresh reads and drains: ${rejectAt || 'no rejection'}`, async () => {
+    let requests=0, active=false, closed=false, rejected=0;
+    const result=await validateRecentResume({
+        plan:{kind:'sampled-recent-v1',target,ranges:samples().map(s=>({start:s.start,length:N}))},
+        acceptIdentity:()=>{assert.equal(active,false);return !rejectAt || requests<rejectAt;},
+        onIdentityRejected:()=>{rejected++;},
+        createBroker:async()=>({inputUrl:'http://fixture.invalid',close:async()=>{assert.equal(active,false);closed=true;}}),
+        fetchImpl:async()=>{assert.equal(active,false);active=true;requests++;
+            return {status:206,arrayBuffer:async()=>{active=false;return Buffer.alloc(N);}};}
+    });
+    assert.equal(requests,rejectAt || 4);assert.equal(closed,true);
+    assert.equal(rejected,rejectAt?1:0);
+    if(rejectAt)assert.equal(result,null);else assert.equal(result.length,4);
+});
+
+test('Gateway checks the fresh target and rejects without publishing partial proof', async()=>{
+    const fs=require('node:fs'),vm=require('node:vm');
+    const source=fs.readFileSync(require('node:path').join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
+    const start=source.indexOf('async function revalidateRecentResumeSession('),end=source.indexOf('\nasync function tryStartPrivateResumeWindow',start);
+    for(const same of [false,true]){
+        const session={startupTimings:{}}, calls=[];
+        const run=vm.runInNewContext('('+source.slice(start,end)+')',{
+            AbortController,closeFiniteMkvSeekBroker:async()=>calls.push('old-drained'),
+            closePreopenedBoundedMkvInput:async()=>{},fileSizeBytesForSession:()=>size,
+            FFMPEG_USER_AGENT:'fixture',pinnedProxyAgentFactoryForRoute:()=>null,providerNodeRouteForSession:()=>null,
+            PROVIDER_SLOT_RELEASE_DELAY_MS:0,
+            compareRecentResumeTargetParts:()=>null,
+            createStrictLidBroker:async opts=>{opts.onProviderIdentity({effectiveUrlIdentitySha256:same?target:'c'.repeat(64)});return {};},
+            validateRecentResume:async opts=>{await opts.createBroker();
+                if(!opts.acceptIdentity()){opts.onIdentityRejected();return null;}
+                return samples();},
+        });
+        const result=await run(session,{target});
+        assert.deepEqual(calls,['old-drained']);
+        assert.equal(session.recentResumeValidationPromise,null);
+        if(same){assert.equal(result.samples.length,4);assert.equal(session.startupTimings.recentResumeValidationOutcome,undefined);}
+        else{assert.equal(result,null);assert.equal(session.startupTimings.recentResumeValidationOutcome,'target-changed');}
+    }
+});
+
+test('target diagnostics expose only component equality and never authorize changed targets',()=>{
+    const {recentResumeTargetParts:parts,compareRecentResumeTargetParts:compare}=require('../services/media-gateway/src/recent-resume-validation');
+    const a=parts('https://user:secret@fixture.invalid/token-a/file?sign=secret-one');
+    const b=parts('https://user:secret@fixture.invalid/token-b/file?sign=secret-two');
+    assert.deepEqual(compare(a,b),{protocol:true,host:true,path:false,queryKeys:true});
+    assert.deepEqual(compare(a,parts('https://fixture.invalid/token-a/file?sign=rotated')),
+        {protocol:true,host:true,path:true,queryKeys:true});
+    assert.equal(compare(a,null),null);assert.equal(parts('file:///private'),null);
+    assert.ok(Object.values(a).every(v=>/^[a-f0-9]{64}$/.test(v)));
+    assert.equal(JSON.stringify(a).includes('secret'),false);
+    assert.equal(samplesMatch(sampleProof(samples(),size,target),samples(),size,'c'.repeat(64)),false);
 });
 
 for (const hit of [false,true]) test(`Gateway recreates indexed input after sampled validation: ${hit ? 'hit' : 'miss'}`, async () => {

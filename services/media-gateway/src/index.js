@@ -130,7 +130,7 @@ const { privateResumeBinding, createPrivateResumeOwnerGate } = require('./privat
 const { privateResumeProfile } = require('./private-resume-profile');
 const { captureSamples, SAMPLE_BYTES, captureInputWindows, RECENT_INPUT_MAX_BYTES,
     RECENT_HEADER_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES } = require('./recent-resume-samples');
-const { validateRecentResume } = require('./recent-resume-validation');
+const { validateRecentResume, recentResumeTargetParts, compareRecentResumeTargetParts } = require('./recent-resume-validation');
 const { PrivateResumeHlsCache, parseResumeMediaPlaylist } = require('./private-resume-hls-cache');
 const { captureSubtitleWindow, parseSubtitlePlaylist } = require('./private-resume-subtitles');
 const { SharedPlaybackRanges, hybridPlaybackRanges } = require('./shared-playback-ranges');
@@ -6604,6 +6604,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         validator: context.validator ? { ...context.validator } : null,
                         effectiveUrlSha256: context.effectiveUrlSha256,
                         effectiveUrlIdentitySha256: context.effectiveUrlIdentitySha256,
+                        targetParts: recentResumeTargetParts(observedEffectiveUrl),
                     });
                 }
                 if (!attempt.response.body || typeof attempt.response.body.getReader !== 'function') {
@@ -15396,7 +15397,8 @@ function privateResumeHlsBindingForSession(session) {
 function privateResumeObservedIdentity(session) {
     return { validator: session.vodInputValidator, fileSizeBytes: fileSizeBytesForSession(session),
         effectiveUrlIdentitySha256: session.vodInputEffectiveUrlIdentitySha256,
-        samples: canUseRecentResumeSamples(session.ownerKey) ? session.privateResumeSamples : null };
+        samples: canUseRecentResumeSamples(session.ownerKey) ? session.privateResumeSamples : null,
+        targetParts: session.vodInputTargetParts || null };
 }
 
 function privateResumeMultiAudioInputBinding(session) {
@@ -15526,6 +15528,12 @@ async function revalidateRecentResumeSession(session, plan, requestSignal) {
         if (hadPreopen && !await waitForVodInputRetry(PROVIDER_SLOT_RELEASE_DELAY_MS, controller.signal)) return null;
         let identity = null;
         const samples = await validateRecentResume({ plan, signal: controller.signal,
+            acceptIdentity: () => !plan.target || identity?.effectiveUrlIdentitySha256 === plan.target,
+            onIdentityRejected: () => {
+                session.startupTimings.recentResumeValidationOutcome = 'target-changed';
+                session.startupTimings.recentResumeTargetComparison = compareRecentResumeTargetParts(
+                    plan.targetParts, identity?.targetParts);
+            },
             createBroker: signal => createStrictLidBroker({ sourceUrl: session.sourceUrl,
                 fileSizeBytes: fileSizeBytesForSession(session),
                 userAgent: session.userAgent || FFMPEG_USER_AGENT,
@@ -15652,6 +15660,7 @@ function applyFiniteMkvSeekProviderIdentity(session, identity) {
     if (/^[a-f0-9]{64}$/.test(effectiveUrlIdentitySha256)) {
         session.vodInputEffectiveUrlIdentitySha256 = effectiveUrlIdentitySha256;
     }
+    session.vodInputTargetParts = identity.targetParts || null;
     session.startupTimings = asRecord(session.startupTimings);
     if (session.startupTimings.finiteMkvSeekProviderIdentityBound === true) return;
     const validatorEvidence = validator?.kind === 'etag'

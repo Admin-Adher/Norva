@@ -40,6 +40,31 @@ test('MP4 copied header filter preserves decoded frames and timestamps', { skip:
 });
 const { StrictLidRangeReuse, createStrictRangeCollector } = require('../services/media-gateway/src/strict-lid-range-reuse');
 
+test('recent target rejection drains one real range and preserves the changed-target fence', async()=>{
+  const {validateRecentResume}=require('../services/media-gateway/src/recent-resume-validation');
+  const N=65536,size=8*N; let ranges=0,active=0,maxActive=0,identity=null,rejected=0;
+  const server=http.createServer((req,res)=>{
+    if(req.url==='/entry'){res.writeHead(302,{Location:'/target-b'});res.end();return;}
+    ranges++;active++;maxActive=Math.max(maxActive,active);
+    const [start,end]=req.headers.range.slice(6).split('-').map(Number);
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${size}`,'Content-Length':end-start+1});
+    res.on('finish',()=>active--);res.end(Buffer.alloc(end-start+1,7));
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const origin=`http://127.0.0.1:${server.address().port}`;
+  const harness=brokerHarness(), expected=harness.strictLidEffectiveUrlIdentitySha256(origin+'/target-a');
+  try {
+    const result=await validateRecentResume({plan:{kind:'sampled-recent-v1',target:expected,
+      ranges:[0,N,2*N,3*N].map(start=>({start,length:N}))},
+      acceptIdentity:()=>identity?.effectiveUrlIdentitySha256===expected,onIdentityRejected:()=>rejected++,
+      createBroker:signal=>harness.createStrictLidBroker({sourceUrl:origin+'/entry',fileSizeBytes:size,
+        onProviderIdentity:value=>identity=value,abortSignal:signal,completedReleaseDelayMs:0})});
+    assert.equal(result,null);assert.equal(ranges,1);assert.equal(active,0);assert.equal(maxActive,1);
+    assert.equal(rejected,1);assert.notEqual(identity.effectiveUrlIdentitySha256,expected);
+    assert.ok(identity.targetParts.path);assert.equal(harness.strictLidBrokers.size,0);
+  } finally {await new Promise(resolve=>server.close(resolve));}
+});
+
 function brokerHarness(diagnosticLogs = null) {
   const startMarker = '// ── Strict LID loopback broker (mono-account provider barrier)';
   const endMarker = '// ── End strict LID loopback broker';
@@ -73,6 +98,7 @@ function brokerHarness(diagnosticLogs = null) {
       console: { ...console, warn: (...args) => diagnosticLogs?.push(args.join(' ')) },
       crypto: require('node:crypto'),
       ...require('../services/media-gateway/src/recent-resume-samples'),
+      ...require('../services/media-gateway/src/recent-resume-validation'),
       createStrictRangeCollector,
       createMp4SizeEvidence: require('../services/media-gateway/src/mp4-size-evidence').createMp4SizeEvidence,
       fetch,
