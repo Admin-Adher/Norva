@@ -2,7 +2,7 @@
 
 ## Scope and current status
 
-Follow-up to PR 693, integrated by PR 696 and deployed on the existing pilot. The recent-resume pilot remains owner-scoped. No broad rollout, timeout increase, buffer reduction, proxy change, parallel provider connection, codec change, or extension of the ten-minute cache lifetime.
+Follow-up to PR 693, integrated by PR 696 and deployed on the existing pilot. The recent-resume pilot remains owner-scoped. No broad rollout, timeout increase, buffer reduction, production proxy change, parallel provider connection, codec change, or extension of the ten-minute cache lifetime.
 
 ## Evidence
 
@@ -120,3 +120,39 @@ Every temporary media/header/private-output file was deleted; the helper contain
 Safe receipts and consumed diagnostic operators: `.codex-artifacts/resume-socket-proof-20261007/`. No browser playback was launched by these transport controls, no new deployment or hourly automation was created.
 
 Final read-only check at **19:04:30 UTC**: four diagnostic claims expired (including the zero-media preflight), zero active readers on the target account, both Gateways healthy on the same image, zero global Gateway sessions at that snapshot. Cleanup at 19:04:31 confirms zero diagnostic containers and zero private temporary media/header/output files. The previously observed unrelated reader was not stopped by these operators.
+
+
+## Independent network comparison, 19:17–19:34 UTC (21:17–21:34 Paris)
+
+A distinct Windows Wi-Fi path was available. Four new GET invocations were serialized under ordinary claims, using system libcurl and the same original Normal URL, exact file size and 16 MiB range as above. No browser playback or production routing change. The purpose was to separate the server/media process from the shared relay path; no alternative copy was selected.
+
+| Diagnostic path | HTTP | Bytes | Elapsed | Average received rate |
+|---|---:|---:|---:|---:|
+| Local Wi-Fi, proxy explicitly bypassed | 206 | 16 MiB | **5.056408 s** | **26.544 Mbit/s** |
+| Server, proxy explicitly bypassed | 404 | 0 | 0.386404 s | No media |
+| Local Wi-Fi, same configured HTTP CONNECT relay | 206 | 16 MiB | **24.048997 s** | **5.581 Mbit/s** |
+| Local Wi-Fi, direct control after the relay test | 460 | 0 | 0.213352 s | No media |
+
+Both complete bodies have the same SHA-256 `39d3ab6093b909bcb14510d17a7561a0ccef260ed13063648e8c66ef03301807` and exact Content-Range as the earlier server/relay reads. Each successful response followed one redirect. Curl on Windows explicitly reports `proxy_used=0` for direct reads and `1` for the relay read. The server's curl version does not expose that field; its configuration explicitly disabled the proxy. Source/proxy capabilities remained private, passed through SSH and process stdin, never printed in receipts or command arguments. Temporary bodies, headers and private outputs were deleted.
+
+### What this changes, and what remains unknown
+
+The same content can arrive faster than the whole-file average on a distinct network path. The slow receive also recurs when the local PC uses the configured relay, so the Norva server and media pipeline are not necessary to reproduce it. The preceding server/relay controls took 19.458–47.680 s over these bytes, illustrating variability. The new sequential controls do not prove the relay appliance alone is responsible: relay-to-provider routing, provider treatment of the exit, and time variation remain possible. No exit address or provider delivery logs were available.
+
+The failed direct controls are retained. A server-side direct route returned an empty 404; the later Wi-Fi direct control returned an empty 460. Their internal reason is unknown; neither establishes a missing file, geoblock, concurrency violation or an IP restriction. No automatic retry followed the 460. A single fast 16 MiB direct read is not a full-film throughput guarantee and does not establish a reliable direct fallback. No extra AAC or video decoding claim is made by these byte-only reads.
+
+### Existing routing options and operational outcome
+
+Read-only inspection of both current Gateway configurations found **one HTTP relay entry each**, no SOCKS entries and no explicit account slot override. The existing adaptive policy remains enabled in **shadow mode**. No account or host recommendation/measurement exists for this exact source in the bounded route lookup. Thus there is no measured, configured alternative to activate. The lookup acquired and normally expired one separate direct claim, with zero provider I/O. No route recommendation was fabricated, no pool was scanned and no canary was enabled.
+
+Adrien confirmed that no other relay/proxy is available. The remaining dependency is an available delivery route with adequate sustained throughput, or diagnosis/repair of the current relay-to-provider path. The current evidence does not justify a production code patch, weakening reserve thresholds, extending cache lifetime or a general rollout. The existing cache correction remains deployed on the owner-scoped pilot; Normal and Severance's sustained continuity remains unresolved.
+
+### Guards and closeout
+
+Local reads used a remote ordinary direct claim with an independent 0.5 s heartbeat and one-second timeout. A local watcher stopped curl if the heartbeat was older than 1.75 s or the remote bridge closed/refused it. Curl joined a Windows kill-on-job-close object before receiving its configuration. The existing native takeover grace was checked at at least six seconds. In the observed runs, the controller closed the local reader and sent its closure message before claim expiry. The bridge also treats stdin EOF as closed; that disconnection branch was not exercised and is not certified by these successful transfers. The local job object bounds curl lifetime if the controller exits. Three local watchdog/job-lifetime checks passed without provider I/O. One preliminary fixture incorrectly assumed a killed Windows process must return a nonzero code; its assertion was corrected to check bounded termination instead, before any local provider read.
+
+Four GET invocations plus two observed redirects equal six HTTP requests and **32 MiB** of media received. The two empty responses are not successful captures. Five ordinary claims, including the zero-media routing lookup, expired normally; no forced lease, extra concurrency, codec/buffer/TTL/route change, or deployment.
+
+At **19:33:02 UTC**, the target account had zero active readers and both Gateways were healthy with zero global sessions at that snapshot. Image and starts remain PR 696's `c8a56fa6…` at 17:52:43/45. Cleanup at **19:34:09 UTC** confirms zero temporary media/header/output files on both the local machine and server. Browser state was not changed. No new hourly automation.
+
+Safe receipts and consumed operators: `.codex-artifacts/resume-independent-network-20261007/`. The one-shot Wi-Fi, server-direct, route-read, local-proxy and direct-control markers must not be replayed.

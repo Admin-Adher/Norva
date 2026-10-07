@@ -1155,5 +1155,290 @@
         }
       ]
     }
+  },
+  "independentNetworkComparison": {
+    "scope": "Normal exact original source and same 16 MiB range; byte diagnostics, no browser playback",
+    "results": {
+      "wifiDirect": {
+        "at": "2026-10-07T19:17:39Z",
+        "path": "local Windows Wi-Fi without configured proxy",
+        "productionChanged": false,
+        "initialGets": 1,
+        "watchdogChecks": 101,
+        "result": {
+          "httpStatus": 206,
+          "seconds": 5.056408,
+          "firstByteSeconds": 0.324915,
+          "connectSeconds": 0.086361,
+          "bytes": 16777216,
+          "sha256": "39d3ab6093b909bcb14510d17a7561a0ccef260ed13063648e8c66ef03301807",
+          "exit": 0,
+          "contentRanges": [
+            "bytes 1251999744-1268776959/13662582623"
+          ],
+          "redirects": 1,
+          "effectiveScheme": "http",
+          "proxyUsed": 0,
+          "receivedMegabitsPerSecond": 26.544086
+        },
+        "sameBytesAsServerProof": true,
+        "bridge": {
+          "at": "2026-10-07T19:17:41.358193+00:00",
+          "scope": "one exact 16 MiB local-Wi-Fi diagnostic",
+          "providerIoInBridge": false,
+          "heartbeats": 11,
+          "closedAcknowledged": true,
+          "expired": true,
+          "endedAt": "2026-10-07T19:17:47.165780+00:00"
+        },
+        "temporaryFilesRemoved": true,
+        "endedAt": "2026-10-07T19:17:46Z"
+      },
+      "serverDirect": {
+        "at": "2026-10-07T19:19:46.551799+00:00",
+        "question": "Does the same exact range arrive faster on the server without the configured relay?",
+        "copy": "Normal exact 4K FR HDR",
+        "rangeStart": 1251999744,
+        "rangeBytes": 16777216,
+        "reader": "system libcurl to a local temporary regular file",
+        "route": "isolated server direct diagnostic, production route unchanged",
+        "initialGets": 1,
+        "newProductionCode": false,
+        "routeCheck": {
+          "slot": 1,
+          "transport": "http",
+          "controlShadow": true,
+          "verifiedFromProductionModule": true,
+          "productionRouteUnchanged": true,
+          "diagnosticUsesProxy": false
+        },
+        "result": {
+          "httpStatus": 404,
+          "seconds": 0.386404,
+          "firstByteSeconds": 0.386343,
+          "connectSeconds": 0.286883,
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "exit": 0,
+          "contentRanges": [],
+          "redirects": 0,
+          "effectiveScheme": "http",
+          "proxyUsed": null,
+          "receivedMegabitsPerSecond": null
+        },
+        "errorType": "AssertionError",
+        "guard": "bounded_response_incomplete",
+        "heartbeatFailures": [],
+        "expired": true,
+        "temporaryFilesRemoved": true,
+        "endedAt": "2026-10-07T19:19:47.658065+00:00"
+      },
+      "wifiViaRelay": {
+        "at": "2026-10-07T19:30:31Z",
+        "path": "local Windows Wi-Fi via same configured proxy / HTTP CONNECT",
+        "productionChanged": false,
+        "initialGets": 1,
+        "watchdogChecks": 478,
+        "result": {
+          "httpStatus": 206,
+          "seconds": 24.048997,
+          "firstByteSeconds": 1.427954,
+          "connectSeconds": 0.199977,
+          "bytes": 16777216,
+          "sha256": "39d3ab6093b909bcb14510d17a7561a0ccef260ed13063648e8c66ef03301807",
+          "exit": 0,
+          "contentRanges": [
+            "bytes 1251999744-1268776959/13662582623"
+          ],
+          "redirects": 1,
+          "effectiveScheme": "http",
+          "proxyUsed": 1,
+          "receivedMegabitsPerSecond": 5.581011
+        },
+        "sameBytesAsServerProof": true,
+        "bridge": {
+          "at": "2026-10-07T19:30:33.107693+00:00",
+          "scope": "one exact 16 MiB local-Wi-Fi via same configured proxy diagnostic",
+          "providerIoInBridge": false,
+          "heartbeats": 49,
+          "closedAcknowledged": true,
+          "expired": true,
+          "endedAt": "2026-10-07T19:30:57.840293+00:00"
+        },
+        "temporaryFilesRemoved": true,
+        "endedAt": "2026-10-07T19:30:57Z"
+      },
+      "wifiDirectControl": {
+        "at": "2026-10-07T19:31:32Z",
+        "path": "local Windows Wi-Fi without configured proxy",
+        "productionChanged": false,
+        "initialGets": 1,
+        "watchdogChecks": 5,
+        "result": {
+          "httpStatus": 460,
+          "seconds": 0.213352,
+          "firstByteSeconds": 0.21155,
+          "connectSeconds": 0.043314,
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "exit": 0,
+          "contentRanges": [],
+          "redirects": 0,
+          "effectiveScheme": "http",
+          "proxyUsed": 0,
+          "receivedMegabitsPerSecond": null
+        },
+        "sameBytesAsServerProof": false,
+        "errorType": "AssertionError",
+        "guard": "bounded_read_incomplete",
+        "bridge": {
+          "at": "2026-10-07T19:31:34.192489+00:00",
+          "scope": "one exact 16 MiB local-Wi-Fi diagnostic",
+          "providerIoInBridge": false,
+          "heartbeats": 1,
+          "closedAcknowledged": true,
+          "expired": true,
+          "endedAt": "2026-10-07T19:31:34.872994+00:00"
+        },
+        "temporaryFilesRemoved": true,
+        "endedAt": "2026-10-07T19:31:34Z"
+      }
+    },
+    "routeLookup": {
+      "at": "2026-10-07T19:29:33.964843+00:00",
+      "providerRequests": 0,
+      "purpose": "read existing route recommendations for exact Normal source privately",
+      "configuredSlots": 1,
+      "states": [],
+      "accountMeasurements": [],
+      "hostMeasurements": [],
+      "expired": true,
+      "endedAt": "2026-10-07T19:29:34.720547+00:00"
+    },
+    "routeConfiguration": {
+      "at": "2026-10-07T19:32:08.859963+00:00",
+      "readOnly": true,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:43.148136674Z",
+          "settings": {
+            "PROVIDER_PROXY_DEFAULT_NODE_TRANSPORT": "http",
+            "PROVIDER_PROXY_SOCKS_URLS": {
+              "present": false,
+              "entries": 0
+            },
+            "PROVIDER_PROXY_SLOT_OVERRIDES": {
+              "configured": false
+            },
+            "PROVIDER_PROXY_URLS": {
+              "present": true,
+              "entries": 1
+            }
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:45.72659218Z",
+          "settings": {
+            "PROVIDER_PROXY_URLS": {
+              "present": true,
+              "entries": 1
+            },
+            "PROVIDER_PROXY_SOCKS_URLS": {
+              "present": false,
+              "entries": 0
+            },
+            "PROVIDER_PROXY_DEFAULT_NODE_TRANSPORT": "http",
+            "PROVIDER_PROXY_SLOT_OVERRIDES": {
+              "configured": false
+            }
+          }
+        }
+      ]
+    },
+    "initialGetInvocations": 4,
+    "httpRequestsIncludingObservedRedirects": 6,
+    "mediaBytesReceived": 33554432,
+    "localWatchdogChecksPassed": 3,
+    "localFixtureCorrection": "Check bounded child termination, not nonzero exit code after Windows JobObject close. No provider I/O during fixture tests.",
+    "interpretation": [
+      "The same bytes can be received faster than the whole-file average on another path.",
+      "Slow transfer also reproduced through the configured relay from local Wi-Fi, bypassing Norva server and media processing.",
+      "Exact internal cause between relay, its provider-facing route, exit-dependent provider treatment and time variation is not established.",
+      "Server direct 404 and later Wi-Fi direct 460 prevent treating direct access as a reliable fallback.",
+      "No new codec, full-film playback or global rollout certification."
+    ],
+    "externalDependency": "User confirms no other relay/proxy is available. Existing route needs investigation/repair or a validated alternative before a transport correction is possible.",
+    "productionChanged": false,
+    "pilotOwnerScoped": true,
+    "newAutomation": false,
+    "cleanup": {
+      "at": "2026-10-07T19:34:09.217080+00:00",
+      "temporaryFilesRemaining": 0,
+      "localTemporaryFilesRemaining": 0
+    },
+    "finalStatus": {
+      "at": "2026-10-07T19:33:02.894674+00:00",
+      "activeAccountReaders": 0,
+      "operatorClaims": [
+        {
+          "type": "movie",
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-07T19:17:41.41655+00:00",
+          "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+          "events": []
+        },
+        {
+          "type": "movie",
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-07T19:19:46.612755+00:00",
+          "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+          "events": []
+        },
+        {
+          "type": "movie",
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-07T19:29:34.029987+00:00",
+          "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+          "events": []
+        },
+        {
+          "type": "movie",
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-07T19:30:33.164025+00:00",
+          "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+          "events": []
+        },
+        {
+          "type": "movie",
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-07T19:31:34.243909+00:00",
+          "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+          "events": []
+        }
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "activeGlobal": 0
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "activeGlobal": 0
+        }
+      ]
+    }
   }
 }
