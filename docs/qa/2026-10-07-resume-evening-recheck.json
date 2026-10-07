@@ -1,0 +1,1903 @@
+{
+  "date": "2026-10-07",
+  "scope": "Two sequential production browser rechecks, same pilot owner; no deployment or guard changes",
+  "failures": [
+    {
+      "time": "2026-10-07T17:05:44.359Z",
+      "status": "starting",
+      "mode": "remux",
+      "detail": "Playlist was not generated",
+      "startup": {
+        "protocol": 1,
+        "code": "PLAYLIST_TIMEOUT",
+        "timings": {
+          "codecProfileMs": 0,
+          "providerGetPreopenMs": 0,
+          "slotReleaseWaitMs": 0,
+          "ffmpegReadyMs": 60018,
+          "playlistSegmentCount": 0,
+          "playlistBufferSeconds": 0,
+          "ffmpegSpawnCount": 1,
+          "finiteTsFastInput": false,
+          "finiteTsDurationScanSkipped": false,
+          "finiteTsIndexUsed": false
+        },
+        "broker": {
+          "providerFetches": 7,
+          "completedProviderFetches": 6,
+          "interruptedProviderFetches": 0,
+          "cacheHits": 1,
+          "cacheMisses": 9,
+          "resumeRangeReusedBytes": 0
+        },
+        "windows": [
+          {
+            "localStart": 0,
+            "localEnd": 13662582622,
+            "providerStart": 0,
+            "providerEnd": 262143,
+            "bytes": 262144,
+            "responseHeadersMs": 1479,
+            "firstByteMs": 1480,
+            "durationMs": 8246,
+            "redirects": 1,
+            "resolvedTargetReused": false,
+            "outcome": "completed"
+          },
+          {
+            "localStart": 13662475229,
+            "localEnd": 13662582622,
+            "providerStart": 13662475229,
+            "providerEnd": 13662582622,
+            "bytes": 107394,
+            "responseHeadersMs": 875,
+            "firstByteMs": 876,
+            "durationMs": 2192,
+            "redirects": 0,
+            "resolvedTargetReused": true,
+            "outcome": "completed"
+          },
+          {
+            "localStart": 15680,
+            "localEnd": 13662582622,
+            "providerStart": 262144,
+            "providerEnd": 2097151,
+            "bytes": 1835008,
+            "responseHeadersMs": 298,
+            "firstByteMs": 298,
+            "durationMs": 7474,
+            "redirects": 0,
+            "resolvedTargetReused": true,
+            "outcome": "completed"
+          },
+          {
+            "localStart": 1163263902,
+            "localEnd": 13662582622,
+            "providerStart": 1163263902,
+            "providerEnd": 1163919359,
+            "bytes": 655458,
+            "responseHeadersMs": 709,
+            "firstByteMs": 709,
+            "durationMs": 3726,
+            "redirects": 0,
+            "resolvedTargetReused": true,
+            "outcome": "completed"
+          },
+          {
+            "localStart": 1163263902,
+            "localEnd": 13662582622,
+            "providerStart": 1163919360,
+            "providerEnd": 1166016511,
+            "bytes": 2097152,
+            "responseHeadersMs": 402,
+            "firstByteMs": 402,
+            "durationMs": 6523,
+            "redirects": 0,
+            "resolvedTargetReused": true,
+            "outcome": "completed"
+          },
+          {
+            "localStart": 1163263902,
+            "localEnd": 13662582622,
+            "providerStart": 1166016512,
+            "providerEnd": 1168113663,
+            "bytes": 2097152,
+            "responseHeadersMs": 701,
+            "firstByteMs": 701,
+            "durationMs": 14841,
+            "redirects": 0,
+            "resolvedTargetReused": true,
+            "outcome": "completed"
+          },
+          {
+            "localStart": 1163263902,
+            "localEnd": 13662582622,
+            "providerStart": 1168113664,
+            "providerEnd": 1176502271,
+            "bytes": 2954234,
+            "responseHeadersMs": 760,
+            "firstByteMs": 760,
+            "redirects": 0,
+            "resolvedTargetReused": true,
+            "outcome": "active"
+          }
+        ]
+      }
+    },
+    {
+      "time": "2026-10-07T17:09:28.647Z",
+      "status": "starting",
+      "mode": "remux",
+      "detail": "Playlist was not generated",
+      "startup": {
+        "protocol": 1,
+        "code": "PLAYLIST_TIMEOUT",
+        "timings": {
+          "codecProfileMs": 0,
+          "providerGetPreopenMs": 3564,
+          "inbandCodecProfileMs": 82,
+          "slotReleaseWaitMs": 0,
+          "ffmpegReadyMs": 60010,
+          "playlistSegmentCount": 0,
+          "playlistBufferSeconds": 0,
+          "ffmpegSpawnCount": 1,
+          "finiteTsFastInput": false,
+          "finiteTsDurationScanSkipped": false,
+          "finiteTsIndexUsed": false
+        },
+        "broker": {
+          "providerFetches": 6,
+          "completedProviderFetches": 5,
+          "interruptedProviderFetches": 0,
+          "cacheHits": 14,
+          "cacheMisses": 6,
+          "resumeRangeReusedBytes": 0
+        },
+        "windows": [
+          {
+            "localStart": 5006490933,
+            "localEnd": 5006492900,
+            "providerStart": 5006490933,
+            "providerEnd": 5006492900,
+            "bytes": 1968,
+            "responseHeadersMs": 1572,
+            "firstByteMs": 1573,
+            "durationMs": 1573,
+            "redirects": 1,
+            "resolvedTargetReused": false,
+            "outcome": "completed"
+          },
+          {
+            "localStart": 5006431649,
+            "localEnd": 5006492900,
+            "providerStart": 5006431649,
+            "providerEnd": 5006492900,
+            "bytes": 61252,
+            "responseHeadersMs": 255,
+            "firstByteMs": 255,
+            "durationMs": 642,
+            "redirects": 0,
+            "resolvedTargetReused": true,
+            "outcome": "completed"
+          },
+          {
+            "localStart": 1380111694,
+            "localEnd": 5006492900,
+            "providerStart": 1380111694,
+            "providerEnd": 1382023167,
+            "bytes": 1911474,
+            "responseHeadersMs": 280,
+            "firstByteMs": 280,
+            "durationMs": 6911,
+            "redirects": 0,
+            "resolvedTargetReused": true,
+            "outcome": "completed"
+          },
+          {
+            "localStart": 1380111694,
+            "localEnd": 5006492900,
+            "providerStart": 1382023168,
+            "providerEnd": 1384120319,
+            "bytes": 2097152,
+            "responseHeadersMs": 674,
+            "firstByteMs": 675,
+            "durationMs": 2618,
+            "redirects": 0,
+            "resolvedTargetReused": true,
+            "outcome": "completed"
+          },
+          {
+            "localStart": 1380111694,
+            "localEnd": 5006492900,
+            "providerStart": 1384120320,
+            "providerEnd": 1386217471,
+            "bytes": 2097152,
+            "responseHeadersMs": 287,
+            "firstByteMs": 288,
+            "durationMs": 14275,
+            "redirects": 0,
+            "resolvedTargetReused": true,
+            "outcome": "completed"
+          },
+          {
+            "localStart": 1380111694,
+            "localEnd": 5006492900,
+            "providerStart": 1386217472,
+            "providerEnd": 1394606079,
+            "bytes": 7759093,
+            "responseHeadersMs": 1086,
+            "firstByteMs": 1086,
+            "redirects": 0,
+            "resolvedTargetReused": true,
+            "outcome": "active"
+          }
+        ]
+      }
+    }
+  ],
+  "cacheWindow": "Cold after approximately ten hours; recent TTL remains ten minutes",
+  "observations": {
+    "normal": [
+      {
+        "at": 1791392706494,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392707038,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392707567,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392708108,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392708638,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392709178,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392709743,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392710302,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392710837,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392711375,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392711901,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392712437,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392712968,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392713517,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392714072,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392714613,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392715158,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392715718,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392716245,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392716784,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392717334,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392717863,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392718420,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392718980,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392719531,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392720087,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392720643,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392721212,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392721763,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392722292,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392722818,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392723346,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392723879,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392724411,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392724965,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392725498,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392726046,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392726594,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392727122,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392727658,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392728205,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392728743,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392729300,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392729855,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392730401,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392730957,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392731515,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392732069,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392732614,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392733147,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392733728,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392734261,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392734794,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392735355,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392735889,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392736417,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392736975,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392737490,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392738009,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392738527,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392739048,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392739570,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392740096,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392740617,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392741131,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392741651,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392742174,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392742704,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392743225,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392743747,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392744265,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392744788,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392745306,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392745837,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392746364,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392746896,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392747425,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392747956,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392748487,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392749011,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      }
+    ],
+    "severance": [
+      {
+        "at": 1791392919952,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392920499,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392921034,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392921561,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392922090,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392922641,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392923177,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392923720,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392924249,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392924814,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392925363,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392925913,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392926437,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392926988,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392927516,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392928050,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392928616,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392929146,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392929696,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392930235,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392930787,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392931337,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392931885,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392932432,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392932976,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392933505,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392934035,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392934565,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392935104,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392935666,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392936226,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392936758,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392937304,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392937838,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392938388,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392938922,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392939466,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392940053,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392940583,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392941128,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392941695,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392942241,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392942791,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392943341,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392943891,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392944432,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392944984,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392945523,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392946058,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392946625,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392947159,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392947718,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392948258,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392948799,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392949357,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392949904,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392950425,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392950979,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392951503,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392952036,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392952605,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392953134,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392953687,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392954219,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392954739,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392955282,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392955816,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392956347,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392956893,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392957429,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392957962,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392958479,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392959015,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392959559,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392960101,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392960620,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392961156,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392961719,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392962260,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      },
+      {
+        "at": 1791392962811,
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "played": 0,
+        "ready": 0,
+        "time": 0,
+        "width": 0
+      }
+    ]
+  },
+  "finalHealth": {
+    "at": "2026-10-07T17:12:35.450822+00:00",
+    "productionChanged": false,
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "image": "sha256:63717edee76af73f1916d7b564050bcb394359d4d83d174843d8f593375c19e2",
+        "startedAt": "2026-10-07T07:26:03.692113671Z",
+        "healthy": true,
+        "activeSessions": 0,
+        "memoryLimitBytes": 10737418240,
+        "recentEnabled": true,
+        "allAuthenticatedOwners": false,
+        "allowlistConfigured": true,
+        "cache": {
+          "recentOwnerScope": "owner-allowlist",
+          "maxBytes": 268435456,
+          "perFileBytes": 67108864,
+          "bytes": 0,
+          "reservedBytes": 0,
+          "entries": 0,
+          "evictions": 0,
+          "hits": 0,
+          "misses": 0
+        }
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "image": "sha256:63717edee76af73f1916d7b564050bcb394359d4d83d174843d8f593375c19e2",
+        "startedAt": "2026-10-07T07:26:06.271292074Z",
+        "healthy": true,
+        "activeSessions": 0,
+        "memoryLimitBytes": 10737418240,
+        "recentEnabled": true,
+        "allAuthenticatedOwners": false,
+        "allowlistConfigured": true,
+        "cache": {
+          "recentOwnerScope": "owner-allowlist",
+          "maxBytes": 268435456,
+          "perFileBytes": 67108864,
+          "bytes": 0,
+          "reservedBytes": 0,
+          "entries": 0,
+          "evictions": 0,
+          "hits": 0,
+          "misses": 1
+        }
+      }
+    ],
+    "hostMemoryBytes": {
+      "MemTotal": 66415353856,
+      "MemAvailable": 28943773696
+    }
+  },
+  "newCodeDeployed": false,
+  "rootCauseAttribution": "Preparation deadline with source body acquisition still progressing; remote delivery, proxy and local transport not independently separated",
+  "adaptiveBufferHypothesisValidated": false,
+  "allOwnersEnabled": false
+}
