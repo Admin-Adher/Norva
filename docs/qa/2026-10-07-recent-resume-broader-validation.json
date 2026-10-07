@@ -1,0 +1,921 @@
+{
+  "scope": "Authorized owner recent-resume pilot, distinct exact copies and positions; no universal guarantee",
+  "codePrs": [
+    687,
+    688
+  ],
+  "deployedRevision": "75611e65a3f366709d7b14fb08d7ba28e0460feb",
+  "measurements": [
+    {
+      "label": "broader-fallout-cold",
+      "title": null,
+      "source": "Dino",
+      "exactFileHash": "f407f3f724f95669a7a433d86203815a",
+      "createdAt": "2026-10-07T00:28:01.498508+00:00",
+      "position": 70,
+      "ttffMs": 8703,
+      "sessionToPlayMs": 9500,
+      "serverReadyMs": 6354,
+      "ffmpegReadyMs": 3772,
+      "validationMs": null,
+      "inputHit": false,
+      "hlsHit": false,
+      "seededBytes": 0,
+      "retainedInputMode": null,
+      "targetOutcome": null,
+      "targetComparison": null,
+      "subtitlePlan": {
+        "protocol": 1,
+        "enabled": true,
+        "cacheEligible": true,
+        "reason": "enabled",
+        "maxRenditions": 8,
+        "maxCacheableRenditions": 8,
+        "sourceTrackCount": 2,
+        "preparedTrackCount": 2
+      }
+    },
+    {
+      "label": "broader-fallout-warm",
+      "title": null,
+      "source": "Dino",
+      "exactFileHash": "f407f3f724f95669a7a433d86203815a",
+      "createdAt": "2026-10-07T00:29:33.139724+00:00",
+      "position": 135,
+      "ttffMs": 16051,
+      "sessionToPlayMs": 17590,
+      "serverReadyMs": 14554,
+      "ffmpegReadyMs": 10786,
+      "validationMs": 3727,
+      "inputHit": false,
+      "hlsHit": false,
+      "seededBytes": 0,
+      "retainedInputMode": null,
+      "targetOutcome": null,
+      "targetComparison": null,
+      "subtitlePlan": {
+        "protocol": 1,
+        "enabled": true,
+        "cacheEligible": true,
+        "reason": "enabled",
+        "maxRenditions": 8,
+        "maxCacheableRenditions": 8,
+        "sourceTrackCount": 2,
+        "preparedTrackCount": 2
+      }
+    },
+    {
+      "label": "abduct-cold-final",
+      "title": "Abduct [MULTI-SUB]",
+      "source": "MAX OTT",
+      "exactFileHash": "24af36bab13d11649cbfbec04e2ab46c",
+      "createdAt": "2026-10-07T00:36:03.989809+00:00",
+      "position": 469,
+      "ttffMs": 44044,
+      "sessionToPlayMs": 91202,
+      "serverReadyMs": 41639,
+      "ffmpegReadyMs": 41602,
+      "validationMs": null,
+      "inputHit": false,
+      "hlsHit": false,
+      "seededBytes": 0,
+      "retainedInputMode": null,
+      "targetOutcome": null,
+      "targetComparison": null,
+      "subtitlePlan": {
+        "protocol": 1,
+        "enabled": true,
+        "cacheEligible": false,
+        "reason": "enabled-partial",
+        "maxRenditions": 8,
+        "maxCacheableRenditions": 8,
+        "sourceTrackCount": 21,
+        "preparedTrackCount": 8
+      }
+    },
+    {
+      "label": "abduct-postdeploy-cold",
+      "title": "Abduct [MULTI-SUB]",
+      "source": "MAX OTT",
+      "exactFileHash": "24af36bab13d11649cbfbec04e2ab46c",
+      "createdAt": "2026-10-07T00:44:47.882057+00:00",
+      "position": 582,
+      "ttffMs": 28908,
+      "sessionToPlayMs": 28628,
+      "serverReadyMs": 21130,
+      "ffmpegReadyMs": 21073,
+      "validationMs": null,
+      "inputHit": false,
+      "hlsHit": false,
+      "seededBytes": 0,
+      "retainedInputMode": null,
+      "targetOutcome": null,
+      "targetComparison": null,
+      "subtitlePlan": {
+        "protocol": 1,
+        "enabled": true,
+        "cacheEligible": false,
+        "reason": "enabled-partial",
+        "maxRenditions": 8,
+        "maxCacheableRenditions": 8,
+        "sourceTrackCount": 21,
+        "preparedTrackCount": 8
+      }
+    },
+    {
+      "label": "abduct-warm-playing",
+      "title": "Abduct [MULTI-SUB]",
+      "source": "MAX OTT",
+      "exactFileHash": "24af36bab13d11649cbfbec04e2ab46c",
+      "createdAt": "2026-10-07T00:46:14.43528+00:00",
+      "position": 630,
+      "ttffMs": 10823,
+      "sessionToPlayMs": 10019,
+      "serverReadyMs": 8127,
+      "ffmpegReadyMs": 2768,
+      "validationMs": 5320,
+      "inputHit": true,
+      "hlsHit": false,
+      "seededBytes": 19315673,
+      "retainedInputMode": "partial-subtitles",
+      "targetOutcome": null,
+      "targetComparison": null,
+      "subtitlePlan": {
+        "protocol": 1,
+        "enabled": true,
+        "cacheEligible": false,
+        "reason": "enabled-partial",
+        "maxRenditions": 8,
+        "maxCacheableRenditions": 8,
+        "sourceTrackCount": 21,
+        "preparedTrackCount": 8
+      }
+    },
+    {
+      "label": "conclave-postdeploy-cold",
+      "title": "FR - Conclave (2024)",
+      "source": "Dino",
+      "exactFileHash": "ccce7f28bf219a261a7313258da0c1f7",
+      "createdAt": "2026-10-07T00:48:45.114729+00:00",
+      "position": 782,
+      "ttffMs": 13670,
+      "sessionToPlayMs": 12860,
+      "serverReadyMs": 11565,
+      "ffmpegReadyMs": 11280,
+      "validationMs": null,
+      "inputHit": false,
+      "hlsHit": false,
+      "seededBytes": 0,
+      "retainedInputMode": null,
+      "targetOutcome": null,
+      "targetComparison": null,
+      "subtitlePlan": {
+        "protocol": 1,
+        "enabled": true,
+        "cacheEligible": true,
+        "reason": "enabled",
+        "maxRenditions": 8,
+        "maxCacheableRenditions": 8,
+        "sourceTrackCount": 2,
+        "preparedTrackCount": 2
+      }
+    },
+    {
+      "label": "conclave-postdeploy-warm",
+      "title": "FR - Conclave (2024)",
+      "source": "Dino",
+      "exactFileHash": "ccce7f28bf219a261a7313258da0c1f7",
+      "createdAt": "2026-10-07T00:49:47.029434+00:00",
+      "position": 814,
+      "ttffMs": 22409,
+      "sessionToPlayMs": 21552,
+      "serverReadyMs": 20228,
+      "ffmpegReadyMs": 18795,
+      "validationMs": 1399,
+      "inputHit": false,
+      "hlsHit": false,
+      "seededBytes": 0,
+      "retainedInputMode": null,
+      "targetOutcome": "target-changed",
+      "targetComparison": {
+        "protocol": true,
+        "host": true,
+        "path": false,
+        "queryKeys": true
+      },
+      "subtitlePlan": {
+        "protocol": 1,
+        "enabled": true,
+        "cacheEligible": true,
+        "reason": "enabled",
+        "maxRenditions": 8,
+        "maxCacheableRenditions": 8,
+        "sourceTrackCount": 2,
+        "preparedTrackCount": 2
+      }
+    },
+    {
+      "label": "viceversa-cold",
+      "title": "FR| Vice-versa 2",
+      "source": "MAX OTT",
+      "exactFileHash": "823b2433b7f1f713758ff7a6094004f8",
+      "createdAt": "2026-10-07T00:51:02.704534+00:00",
+      "position": 312,
+      "ttffMs": 32593,
+      "sessionToPlayMs": 31735,
+      "serverReadyMs": 30395,
+      "ffmpegReadyMs": 30351,
+      "validationMs": null,
+      "inputHit": false,
+      "hlsHit": false,
+      "seededBytes": 0,
+      "retainedInputMode": null,
+      "targetOutcome": null,
+      "targetComparison": null,
+      "subtitlePlan": {
+        "protocol": 1,
+        "enabled": false,
+        "cacheEligible": true,
+        "reason": "no-subtitles",
+        "maxRenditions": 8,
+        "maxCacheableRenditions": 8,
+        "sourceTrackCount": 0,
+        "preparedTrackCount": 0
+      }
+    },
+    {
+      "label": "viceversa-warm",
+      "title": "FR| Vice-versa 2",
+      "source": "MAX OTT",
+      "exactFileHash": "823b2433b7f1f713758ff7a6094004f8",
+      "createdAt": "2026-10-07T00:52:28.535015+00:00",
+      "position": 349,
+      "ttffMs": 5351,
+      "sessionToPlayMs": 4936,
+      "serverReadyMs": 3292,
+      "ffmpegReadyMs": null,
+      "validationMs": 3252,
+      "inputHit": false,
+      "hlsHit": true,
+      "seededBytes": 8388608,
+      "retainedInputMode": null,
+      "targetOutcome": null,
+      "targetComparison": null,
+      "subtitlePlan": {
+        "protocol": 1,
+        "enabled": false,
+        "cacheEligible": true,
+        "reason": "no-subtitles",
+        "maxRenditions": 8,
+        "maxCacheableRenditions": 8,
+        "sourceTrackCount": 0,
+        "preparedTrackCount": 0
+      }
+    }
+  ],
+  "deployment": {
+    "revision": "75611e65a3f366709d7b14fb08d7ba28e0460feb",
+    "image": "sha256:9764c42dc7344c5c13f489327bc20a233725c90d4902f629e53a8e891e56942b",
+    "startedAt": "2026-10-07T00:42:08.189273+00:00",
+    "pausedAt": "2026-10-07T00:42:08.276431+00:00",
+    "gatewaysApplied": [
+      {
+        "name": "norva-media-gateway",
+        "at": "2026-10-07T00:42:21.153029+00:00"
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "at": "2026-10-07T00:42:23.786368+00:00"
+      }
+    ],
+    "edgesUnchanged": true,
+    "leasesForced": false,
+    "dispatcherRestarted": false,
+    "completedAt": "2026-10-07T00:42:23.861250+00:00",
+    "restoredAt": "2026-10-07T00:42:24.170242+00:00",
+    "admissionsRestored": true,
+    "workerStateRestored": true,
+    "dispatcherPreserved": true
+  },
+  "verification": {
+    "at": "2026-10-07T00:44:38.767036+00:00",
+    "revision": "75611e65a3f366709d7b14fb08d7ba28e0460feb",
+    "image": "sha256:9764c42dc7344c5c13f489327bc20a233725c90d4902f629e53a8e891e56942b",
+    "sourceTreeSha256": "dc2dd48d70d274c792bd42e05026afdb6341aab72c107b792c637f7d8273116e",
+    "replicas": [
+      {
+        "name": "norva-media-gateway",
+        "startedAt": "2026-10-07T00:42:19.809678129Z",
+        "healthy": true,
+        "all86SourceHashesMatch": true
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "startedAt": "2026-10-07T00:42:22.438784547Z",
+        "healthy": true,
+        "all86SourceHashesMatch": true
+      }
+    ],
+    "admissions": {
+      "cron": {
+        "id": 159,
+        "active": true
+      },
+      "paused": false
+    },
+    "stopAbsent": true,
+    "dispatcherRunning": true,
+    "workerRunning": true
+  },
+  "localFrameChecks": [
+    {
+      "label": "broader-abduct-frames",
+      "at": "2026-10-07T00:39:08.894997+00:00",
+      "localOnly": true,
+      "outputs": [
+        {
+          "createdAt": "2026-10-07T00:36:04.244Z",
+          "probeExit": 0,
+          "streams": [
+            {
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "start_time": "39.782333"
+            },
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "start_time": "39.800000"
+            }
+          ],
+          "localVideoFrames": 24,
+          "videoIntervalMaxSeconds": 0.1670000000000016,
+          "videoIntervalsAbove100ms": 1,
+          "decoderErrorLines": 0,
+          "frameProbeExit": 0
+        }
+      ]
+    },
+    {
+      "label": "abduct-postdeploy-cold-frames",
+      "at": "2026-10-07T00:45:55.161216+00:00",
+      "localOnly": true,
+      "outputs": [
+        {
+          "createdAt": "2026-10-07T00:44:48.167Z",
+          "probeExit": 0,
+          "streams": [
+            {
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "start_time": "6.362333"
+            },
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "start_time": "1.400000"
+            }
+          ],
+          "localVideoFrames": 48,
+          "videoIntervalMaxSeconds": 0.0420000000000007,
+          "videoIntervalsAbove100ms": 0,
+          "decoderErrorLines": 0,
+          "frameProbeExit": 0
+        }
+      ]
+    },
+    {
+      "label": "abduct-warm-frames",
+      "at": "2026-10-07T00:46:48.466082+00:00",
+      "localOnly": true,
+      "outputs": [
+        {
+          "createdAt": "2026-10-07T00:46:14.653Z",
+          "probeExit": 0,
+          "streams": [
+            {
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "start_time": "1.572333"
+            },
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "start_time": "1.400000"
+            }
+          ],
+          "localVideoFrames": 48,
+          "videoIntervalMaxSeconds": 0.04200000000000026,
+          "videoIntervalsAbove100ms": 0,
+          "decoderErrorLines": 0,
+          "frameProbeExit": 0
+        }
+      ]
+    },
+    {
+      "label": "conclave-postdeploy-warm-frames",
+      "at": "2026-10-07T00:50:51.689733+00:00",
+      "localOnly": true,
+      "outputs": [
+        {
+          "createdAt": "2026-10-07T00:49:47.316Z",
+          "probeExit": 0,
+          "streams": [
+            {
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "start_time": "67.446333"
+            },
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "start_time": "67.448000"
+            }
+          ],
+          "localVideoFrames": 48,
+          "videoIntervalMaxSeconds": 0.04200000000000159,
+          "videoIntervalsAbove100ms": 0,
+          "decoderErrorLines": 0,
+          "frameProbeExit": 0
+        }
+      ]
+    },
+    {
+      "label": "viceversa-cold-frames",
+      "at": "2026-10-07T00:52:04.213679+00:00",
+      "localOnly": true,
+      "outputs": [
+        {
+          "createdAt": "2026-10-07T00:51:02.992Z",
+          "probeExit": 0,
+          "streams": [
+            {
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "start_time": "1.462344"
+            },
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "start_time": "1.400000"
+            }
+          ],
+          "localVideoFrames": 48,
+          "videoIntervalMaxSeconds": 0.04166700000000034,
+          "videoIntervalsAbove100ms": 0,
+          "decoderErrorLines": 0,
+          "frameProbeExit": 0
+        }
+      ]
+    },
+    {
+      "label": "viceversa-warm-frames",
+      "at": "2026-10-07T00:53:03.952995+00:00",
+      "localOnly": true,
+      "outputs": [
+        {
+          "createdAt": "2026-10-07T00:52:28.743Z",
+          "probeExit": 0,
+          "streams": [
+            {
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "start_time": "1.462344"
+            },
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "start_time": "1.400000"
+            }
+          ],
+          "localVideoFrames": 48,
+          "videoIntervalMaxSeconds": 0.04166700000000034,
+          "videoIntervalsAbove100ms": 0,
+          "decoderErrorLines": 0,
+          "frameProbeExit": 0
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Different positions and variable upstream throughput; no fixed-position benchmark",
+    "Sampled validation is partial proof, never a whole-file checksum",
+    "Target path mismatch keeps cache ineligible",
+    "Abduct predeployment sample contained one 167 ms frame interval",
+    "No new native/WebView/UI change; browser observations do not certify Android playback",
+    "Initial starts, expired cache, absent exact size, incomplete byte retention and changed profiles can remain uncached"
+  ],
+  "browserObservations": {
+    "actions": [
+      {
+        "label": "broader-fallout-cold",
+        "at": "2026-10-07T00:28:00.495Z"
+      },
+      {
+        "label": "broader-fallout-warm",
+        "at": "2026-10-07T00:29:32.671Z"
+      },
+      {
+        "label": "broader-abduct-cold",
+        "at": "2026-10-07T00:36:03.167Z"
+      },
+      {
+        "at": "2026-10-07T00:44:47.099Z",
+        "label": "abduct-postdeploy-cold-start"
+      },
+      {
+        "at": "2026-10-07T00:46:13.888Z",
+        "label": "abduct-warm-start"
+      },
+      {
+        "at": "2026-10-07T00:48:44.493Z",
+        "label": "conclave-postdeploy-cold-start"
+      },
+      {
+        "at": "2026-10-07T00:49:46.160Z",
+        "label": "conclave-postdeploy-warm-start"
+      },
+      {
+        "at": "2026-10-07T00:51:02.048Z",
+        "label": "viceversa-cold-start"
+      },
+      {
+        "at": "2026-10-07T00:52:27.936Z",
+        "label": "viceversa-warm-start"
+      }
+    ],
+    "observations": [
+      {
+        "label": "broader-fallout-start",
+        "at": "2026-10-07T00:28:40.328Z",
+        "buffered": [
+          [
+            0,
+            149.994666
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 29.359121
+      },
+      {
+        "label": "broader-fallout-cold-end",
+        "at": "2026-10-07T00:29:16.396Z",
+        "buffered": [
+          [
+            34.005333,
+            185.984
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 65.42721
+      },
+      {
+        "label": "broader-fallout-warm-start",
+        "at": "2026-10-07T00:29:58.913Z",
+        "buffered": [
+          [
+            0,
+            97.984
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 8.50846
+      },
+      {
+        "label": "broader-fallout-warm-final",
+        "at": "2026-10-07T00:31:35.913Z",
+        "buffered": [
+          [
+            74.005333,
+            225.984
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 105.509033
+      },
+      {
+        "label": "broader-abduct-start",
+        "at": "2026-10-07T00:36:46.554Z",
+        "buffered": [],
+        "error": null,
+        "paused": true,
+        "ready": 0,
+        "time": 0
+      },
+      {
+        "label": "broader-abduct-progress",
+        "at": "2026-10-07T00:37:36.676Z",
+        "buffered": [
+          [
+            2.347333,
+            49.978333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 3.290192
+      },
+      {
+        "label": "broader-abduct-cold-end",
+        "at": "2026-10-07T00:39:26.728Z",
+        "buffered": [
+          [
+            82.385333,
+            222.357333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 113.341435
+      },
+      {
+        "label": "abduct-postdeploy-cold-1",
+        "at": "2026-10-07T00:45:12.328Z",
+        "buffered": [
+          [
+            4.962333,
+            10.967333
+          ]
+        ],
+        "error": null,
+        "paused": true,
+        "ready": 1,
+        "time": 0
+      },
+      {
+        "label": "abduct-postdeploy-cold-playing",
+        "at": "2026-10-07T00:45:39.551Z",
+        "buffered": [
+          [
+            4.962333,
+            40.997333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 28.02632
+      },
+      {
+        "label": "abduct-postdeploy-cold-stop",
+        "at": "2026-10-07T00:46:00.170Z",
+        "buffered": [
+          [
+            16.974333,
+            74.991333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 48.645106
+      },
+      {
+        "label": "abduct-warm-playing-1",
+        "at": "2026-10-07T00:46:30.105Z",
+        "buffered": [
+          [
+            0.172333,
+            32.204333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 5.571967
+      },
+      {
+        "label": "abduct-warm-continuity-2",
+        "at": "2026-10-07T00:47:04.504Z",
+        "buffered": [
+          [
+            8.180333,
+            66.195333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 39.971106
+      },
+      {
+        "label": "abduct-warm-continuity-3",
+        "at": "2026-10-07T00:47:59.817Z",
+        "buffered": [
+          [
+            64.194333,
+            150.197333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 95.284461
+      },
+      {
+        "label": "abduct-warm-final-before-stop",
+        "at": "2026-10-07T00:48:28.853Z",
+        "buffered": [
+          [
+            94.226333,
+            182.186333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 124.319846
+      },
+      {
+        "label": "conclave-postdeploy-cold-1",
+        "at": "2026-10-07T00:49:09.480Z",
+        "buffered": [
+          [
+            0.032333,
+            44.034333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 11.337052
+      },
+      {
+        "label": "conclave-postdeploy-cold-stop",
+        "at": "2026-10-07T00:49:30.106Z",
+        "buffered": [
+          [
+            0.032333,
+            146.053333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 31.963099
+      },
+      {
+        "label": "conclave-postdeploy-warm-1",
+        "at": "2026-10-07T00:50:08.372Z",
+        "buffered": [
+          [
+            0.022333,
+            6.028333
+          ]
+        ],
+        "error": null,
+        "paused": true,
+        "ready": 1,
+        "time": 0
+      },
+      {
+        "label": "conclave-postdeploy-warm-stop",
+        "at": "2026-10-07T00:50:55.234Z",
+        "buffered": [
+          [
+            16.038333,
+            168.022333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 46.518474
+      },
+      {
+        "label": "viceversa-cold-1",
+        "at": "2026-10-07T00:51:39.230Z",
+        "buffered": [
+          [
+            0.062344,
+            18.062343
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 4.625354
+      },
+      {
+        "label": "viceversa-cold-stop",
+        "at": "2026-10-07T00:52:12.487Z",
+        "buffered": [
+          [
+            6.062344,
+            80.062343
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 37.882668
+      },
+      {
+        "label": "viceversa-warm-1",
+        "at": "2026-10-07T00:52:55.652Z",
+        "buffered": [
+          [
+            0,
+            92.067677
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 25.243815
+      },
+      {
+        "label": "viceversa-warm-past-cache-boundary",
+        "at": "2026-10-07T00:53:32.520Z",
+        "buffered": [
+          [
+            32.021322,
+            178.067677
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 62.112399
+      },
+      {
+        "label": "viceversa-warm-continuity-2",
+        "at": "2026-10-07T00:54:01.883Z",
+        "buffered": [
+          [
+            60.067678,
+            178.067677
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 91.4748
+      },
+      {
+        "label": "viceversa-warm-final-stop",
+        "at": "2026-10-07T00:54:34.922Z",
+        "buffered": [
+          [
+            94.067678,
+            178.067677
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 124.513658
+      }
+    ]
+  },
+  "finalHealth": [
+    {
+      "name": "norva-media-gateway",
+      "ok": true,
+      "activeSessions": 0,
+      "sampledEnabled": true,
+      "sampledOwnerScoped": true
+    },
+    {
+      "name": "norva-resume-cache-pilot-20260916",
+      "ok": true,
+      "activeSessions": 0,
+      "sampledEnabled": true,
+      "sampledOwnerScoped": true
+    }
+  ]
+}
