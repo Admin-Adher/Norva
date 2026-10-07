@@ -532,5 +532,237 @@
     "Fast cache decode rate does not establish sustained delivery throughput",
     "No extension of TTL/concurrency/thresholds or forced lease",
     "No later playback or provider retry operator scheduled"
-  ]
+  ],
+  "flowFollowup": {
+    "windowUtc": [
+      "2026-10-07T18:20:00Z",
+      "2026-10-07T18:32:28.695739Z"
+    ],
+    "applicationChanged": false,
+    "newDeployment": false,
+    "rawTransportComparisonReplayed": false,
+    "pilotExpanded": false,
+    "pr697ChecksAllFivePassed": true,
+    "normal": {
+      "completedWindows": 23,
+      "completedBytes": 150709220,
+      "windowTimeSeconds": 275.733,
+      "headersSeconds": 17.781,
+      "bodySeconds": 257.952,
+      "wallGatewaySeconds": 282.992892,
+      "producedSeconds": 52,
+      "eightMiBSeconds": [
+        15.538,
+        6.133,
+        8.66,
+        11.628,
+        10.189,
+        7.083,
+        5.682,
+        6.974,
+        17.565,
+        30.491,
+        36.648,
+        22.81,
+        21.932,
+        14.102,
+        7.304,
+        18.105,
+        15.19
+      ]
+    },
+    "warmSeverance": {
+      "completedWindows": 11,
+      "completedBytes": 75560692,
+      "windowTimeSeconds": 120.203,
+      "headersSeconds": 7.176,
+      "bodySeconds": 113.027,
+      "wallGatewaySeconds": 135.947488,
+      "producedSeconds": 60.01800000000002,
+      "eightMiBSeconds": [
+        5.802,
+        21.811,
+        2.049,
+        6.419,
+        24.971,
+        19.875,
+        23.449,
+        5.292,
+        9.138
+      ],
+      "timings": {
+        "finiteMkvResumePrefixWeakValidationBytes": 1048576,
+        "finiteMkvResumeMode": "continuous-window-indexed-seek",
+        "finiteSeekResumeRangeReusedBytes": 0,
+        "recentDeliveryTargetUsed": true,
+        "recentMultiAudioInputValidationMs": 3715,
+        "recentMultiAudioInputSeededBytes": 67108864,
+        "recentMultiAudioInputHit": true,
+        "recentRetainedInputMode": "multi-audio",
+        "finiteTsResumeAligned": false,
+        "finiteMp4ResumeAligned": false
+      }
+    },
+    "phases": [
+      {
+        "event": "playback_gateway_startup_phases",
+        "startedAt": "2026-10-07T18:29:25.322Z",
+        "elapsedMs": 6393,
+        "phases": {
+          "ownershipMs": 6,
+          "targetResolutionMs": 35,
+          "policyAndEntitlementMs": 2,
+          "cacheAndCapacityMs": 10,
+          "claimMs": 16,
+          "validationDrainMs": 9,
+          "catalogueAndTakeoverMs": 0,
+          "catalogueWaitMs": 0,
+          "takeoverWaitMs": 0,
+          "coordinatorMs": 188,
+          "coordinatorWaitMs": 0,
+          "gatewayMs": 6050,
+          "readyResponseMs": 77
+        }
+      },
+      {
+        "event": "playback_gateway_startup_phases",
+        "startedAt": "2026-10-07T18:21:06.070Z",
+        "elapsedMs": 82030,
+        "phases": {
+          "ownershipMs": 6,
+          "targetResolutionMs": 41,
+          "policyAndEntitlementMs": 3,
+          "cacheAndCapacityMs": 11,
+          "claimMs": 14,
+          "validationDrainMs": 9,
+          "catalogueAndTakeoverMs": 37615,
+          "catalogueWaitMs": 37613,
+          "takeoverWaitMs": 0,
+          "coordinatorMs": 299,
+          "coordinatorWaitMs": 0,
+          "gatewayMs": 43887,
+          "readyResponseMs": 144
+        }
+      },
+      {
+        "event": "playback_gateway_startup_phases",
+        "startedAt": "2026-10-07T18:26:55.230Z",
+        "elapsedMs": 27712,
+        "phases": {
+          "ownershipMs": 7,
+          "targetResolutionMs": 43,
+          "policyAndEntitlementMs": 2,
+          "cacheAndCapacityMs": 12,
+          "claimMs": 19,
+          "validationDrainMs": 10,
+          "catalogueAndTakeoverMs": 0,
+          "catalogueWaitMs": 0,
+          "takeoverWaitMs": 0,
+          "coordinatorMs": 208,
+          "coordinatorWaitMs": 0,
+          "gatewayMs": 27350,
+          "readyResponseMs": 62
+        }
+      }
+    ],
+    "shortLocalCodecCheck": {
+      "at": "2026-10-07T18:30:57.026958+00:00",
+      "localOnly": true,
+      "outputs": [
+        {
+          "createdAt": "2026-10-07T18:29:25.619Z",
+          "probeExit": 0,
+          "streams": [
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "start_time": "43.405333"
+            }
+          ],
+          "localVideoFrames": 48,
+          "videoIntervalMaxSeconds": 0.04200000000000159,
+          "videoIntervalsAbove100ms": 0,
+          "decoderErrorLines": 0,
+          "frameProbeExit": 0,
+          "errorKind": null
+        }
+      ]
+    },
+    "sessionEvidence": [
+      {
+        "type": "movie",
+        "error": null,
+        "state": "expired",
+        "createdAt": "2026-10-07T18:21:06.132393+00:00",
+        "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+        "events": [
+          {
+            "at": "2026-10-07T18:22:29.361393+00:00",
+            "code": null,
+            "event": "first_frame",
+            "ttffMs": 83899,
+            "position": 472
+          }
+        ]
+      },
+      {
+        "type": "series",
+        "error": null,
+        "state": "expired",
+        "createdAt": "2026-10-07T18:26:55.29621+00:00",
+        "exactFileHash": "099a792376312073a2c3036af36c577e",
+        "events": [
+          {
+            "at": "2026-10-07T18:27:23.997279+00:00",
+            "code": null,
+            "event": "first_frame",
+            "ttffMs": 29485,
+            "position": 1172
+          },
+          {
+            "at": "2026-10-07T18:27:29.594294+00:00",
+            "code": null,
+            "event": "play_started",
+            "ttffMs": null,
+            "position": 1172
+          }
+        ]
+      },
+      {
+        "type": "series",
+        "error": null,
+        "state": "expired",
+        "createdAt": "2026-10-07T18:29:25.376798+00:00",
+        "exactFileHash": "099a792376312073a2c3036af36c577e",
+        "events": [
+          {
+            "at": "2026-10-07T18:29:32.995681+00:00",
+            "code": null,
+            "event": "first_frame",
+            "ttffMs": 7692,
+            "position": 1209
+          },
+          {
+            "at": "2026-10-07T18:29:34.172809+00:00",
+            "code": null,
+            "event": "play_started",
+            "ttffMs": null,
+            "position": 1209
+          }
+        ]
+      }
+    ],
+    "accountActiveReadersAtClose": 0,
+    "otherGlobalReadersPreserved": 1,
+    "claimLimits": [
+      "Fetch intervals include body-consumption JavaScript, not independent wire timing.",
+      "Different positions; no general speed multiplier.",
+      "Sustained flow failed both cold and warm Severance.",
+      "Provider storage versus relay/route remains unassigned.",
+      "No full-episode or audible audio certification."
+    ]
+  }
 }

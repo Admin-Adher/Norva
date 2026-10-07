@@ -48,3 +48,33 @@ Local samples from the cold runs: AAC-LC, 48 kHz, stereo; 48 video frames each, 
 At 18:08:40, all three operator sessions are expired and the browser is back on Movies. Both Gateways are healthy. A separate global session remains active and was preserved; this is not a zero-global-playback claim. The one-shot transport marker remains consumed. No new background test or hourly schedule was created.
 
 The cache-target correction is functional and the faster Severance reopening is measured. Normal cold-start delay and sustained fresh-delivery variability remain unresolved. No diagnosis attributes the latter specifically to provider storage, the common proxy or their route without additional evidence.
+
+## Correlated flow check, 18:20–18:32 UTC (20:20–20:32 Paris)
+
+Three further ordinary browser sessions, serialized on the same exact account and copies, with read-only server/output inspection. No application change or deployment. The previous one-shot raw transport comparison was not replayed. Both code PR 696 and documentary PR 697 now have all five checks successful.
+
+| Exact copy | Requested position | First-frame telemetry | Session creation to actual play | Continuity |
+|---|---:|---:|---:|---|
+| Normal, cold | 472 s | 83.899 s | Not reached | Still paused at relative zero at 18:26:38 with 53.999 s buffered; stopped normally, before the buffer deadline. |
+| Severance S1E1, cold | 1172 s | 29.485 s | 34.298 s | Starved near relative 37.979 s; remained automatically paused while the reserve refilled. |
+| Same Severance, recent reopening | 1209 s | 7.692 s | **8.796 s** | Subsequent pauses observed at relative 27.894, 39.938 and 59.927 s. Not a fluid playback result. |
+
+Positions differ, so this is not a controlled same-position speed multiplier. Recent reopening used the retained target, all four fresh validation samples and **67,108,864 input bytes**. Validation took 3.715 s; server preparation 6.039 s including 2.273 s FFmpeg readiness. The initial measured output rate of 11.573x includes cached input and cannot be interpreted as sustained fresh-delivery throughput.
+
+### Where the time goes
+
+Normal's Edge phase record separates **37.613 s of existing catalogue/probe release grace** from 43.887 s spent in the Gateway call (43.845 s FFmpeg readiness). No takeover wait or coordinator wait. This is not a new SQL-timeout diagnosis, and the provider release grace was not shortened.
+
+At 18:26:27, Normal had 23 completed provider windows containing 150,709,220 bytes. Their measured intervals total **275.733 s**, of which 17.781 s precede response headers and 257.952 s follow them, within 282.993 s since Gateway creation. Eight-MiB windows took 5.682–36.648 s. Only 52 s of finalized video was then present on disk; the browser subsequently held 54 s at 18:26:38. The browser was not withholding a much longer already-produced video in these snapshots.
+
+At 18:31:41, warm Severance had received 75,560,692 new bytes in eleven completed windows, taking 120.203 s cumulatively (113.027 s after headers), within 135.947 s since Gateway creation. Eight-MiB responses ranged from 2.049 to 24.971 s. Finalized video/audio covered about 60 s; at 18:31:52 the browser was paused at 59.927 s with about six seconds ahead. It had already resumed after previous refills. Fresh delivery beyond the cached windows was insufficient to sustain uninterrupted playback during this observation.
+
+These intervals are measured inside serialized fetch/body-consumption scopes; they also include local JavaScript execution and are not independent network instrumentation. Code inspection confirms that MKV chunks are forwarded immediately and that local socket drainage waits occur only after an exact provider window is completed. There is no evidence here for a patch that simply forwards those same chunks earlier. Nor do these measurements distinguish provider storage, the common relay, or the route. Previous independent libcurl/Undici tests shared that route. A reliable deeper attribution requires new transport-side evidence, rather than another identical retry or an arbitrary buffer reduction.
+
+### Audio, cleanup and limits
+
+A short already-produced segment from the warm Severance session was checked locally, with no additional provider read: AAC-LC, 48 kHz stereo; 48 decoded video frames, maximum interval 42 ms, zero decoder diagnostics. This is not an audible or full-episode certification. A paused media element with `readyState=4` was counted as an interruption; the helper's zero `noProgressWhilePlaying` counter does not erase automatic pauses.
+
+At 18:32:28 all three operator sessions were expired, the account had zero active readers, and the browser was back on Movies. Both Gateways were healthy on the same PR 696 image. One unrelated global reader remained preserved. No thresholds, cache TTL/size, provider route, codec, lease, account scope or production code changed. Pilot extension remains unvalidated. No new hourly automation was created.
+
+Read-only operators and safe receipts: `.codex-artifacts/resume-flow-diagnosis-20261007/`, notably `normal-rate-analysis.safe.json`, `warm-rate-analysis.safe.json`, `all-phases.safe.json`, `browser-flow.safe.json`, `warm-local-codecs.safe.json` and `final.safe.json`.
