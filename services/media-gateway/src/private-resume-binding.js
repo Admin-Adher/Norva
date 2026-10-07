@@ -11,6 +11,13 @@ function createPrivateResumeOwnerGate({ enabled = false, ownerHashes } = {}) {
     return ownerKey => enabled === true && hex(ownerKey) && (!scoped || owners.has(ownerKey));
 }
 
+// Wider sampled validation requires an explicit rollout choice. An omitted
+// pilot list must never silently enroll every authenticated owner.
+function createRecentResumeOwnerGate({ enabled = false, ownerHashes, allAuthenticatedOwners = false } = {}) {
+    return createPrivateResumeOwnerGate({ enabled,
+        ownerHashes: allAuthenticatedOwners === true ? undefined : String(ownerHashes || '').trim() || 'not-configured' });
+}
+
 // Source revision is supplied by the authenticated Edge, never by the player.
 // URL and credentials are hashed in-process and never included in diagnostics.
 function privateResumeBinding({ ownerKey, sourceUrl, sourceId, sourceRevision, vodIdentityKey = '', fileSizeBytes, profile = '' } = {}) {
@@ -38,4 +45,4 @@ function strongResumeIdentity(observed, fileSizeBytes) {
     return resumeIdentityRejection(observed, fileSizeBytes) === null
         ? hash(JSON.stringify([observed.validator.value, fileSizeBytes, observed.effectiveUrlIdentitySha256])) : null;
 }
-module.exports = { privateResumeBinding, strongResumeIdentity, resumeIdentityRejection, createPrivateResumeOwnerGate };
+module.exports = { privateResumeBinding, strongResumeIdentity, resumeIdentityRejection, createPrivateResumeOwnerGate, createRecentResumeOwnerGate };
