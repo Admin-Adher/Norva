@@ -1,0 +1,396 @@
+{
+  "scope": "Prepare all authenticated owners; production remains owner allowlist",
+  "globalActivated": false,
+  "currentAndFutureOwnersSupportedByExplicitGate": true,
+  "isolation": "owner/source/revision/file/profile/tracks; no cross-owner sharing",
+  "budgets": {
+    "perGatewayBytes": 268435456,
+    "perEntryBytes": 67108864,
+    "recentTtlMs": 600000
+  },
+  "code": [
+    {
+      "pr": 690,
+      "head": "aa409ef569a91d6e61d1721ccba06d2e3ce09f4b",
+      "merge": "1c1333d1038e2be739ea5d7cdc3c36c2655be61c"
+    },
+    {
+      "pr": 691,
+      "head": "519e02f04b83c78798249e5fc6957e4081a1ff5a",
+      "merge": "71e5349abb4deb29c8ad8afd8bc8c032414cfc04"
+    }
+  ],
+  "tests": {
+    "focusedPassed": 190,
+    "focusedSkipped": 5,
+    "isolatedCanaryPassed": 36,
+    "countsOverlap": true
+  },
+  "deployments": [
+    {
+      "revision": "aa409ef569a91d6e61d1721ccba06d2e3ce09f4b",
+      "image": "sha256:6b1547abb52e10ca2bd490bbcac7205f58d611b93dc50cdd05e2ee355a4951e7",
+      "startedAt": "2026-10-07T02:12:32.443087+00:00",
+      "pausedAt": "2026-10-07T02:12:32.508946+00:00",
+      "gatewaysApplied": [
+        {
+          "name": "norva-media-gateway",
+          "at": "2026-10-07T02:14:53.852132+00:00"
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "at": "2026-10-07T02:14:56.487576+00:00"
+        }
+      ],
+      "edgesUnchanged": true,
+      "leasesForced": false,
+      "dispatcherRestarted": false,
+      "completedAt": "2026-10-07T02:14:56.559771+00:00",
+      "restoredAt": "2026-10-07T02:14:56.850998+00:00",
+      "admissionsRestored": true,
+      "workerStateRestored": true,
+      "dispatcherPreserved": true
+    },
+    {
+      "at": "2026-10-07T02:15:08.157403+00:00",
+      "revision": "aa409ef569a91d6e61d1721ccba06d2e3ce09f4b",
+      "image": "sha256:6b1547abb52e10ca2bd490bbcac7205f58d611b93dc50cdd05e2ee355a4951e7",
+      "sourceTreeSha256": "d9abec424a46594540b451a0ebf2efffc1a2b9b256f5b615bf3b5c52204337ff",
+      "replicas": [
+        {
+          "name": "norva-media-gateway",
+          "startedAt": "2026-10-07T02:14:52.498532952Z",
+          "healthy": true,
+          "all87SourceHashesMatch": true
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "startedAt": "2026-10-07T02:14:55.133706776Z",
+          "healthy": true,
+          "all87SourceHashesMatch": true
+        }
+      ],
+      "admissions": {
+        "cron": {
+          "id": 159,
+          "active": true
+        },
+        "paused": false
+      },
+      "stopAbsent": true,
+      "dispatcherRunning": true,
+      "workerRunning": true
+    },
+    {
+      "revision": "519e02f04b83c78798249e5fc6957e4081a1ff5a",
+      "image": "sha256:2736371da88c24789dd760a86260ed8d0632f5dd7b59c2eef8ca531ac446fc99",
+      "startedAt": "2026-10-07T02:25:35.525356+00:00",
+      "pausedAt": "2026-10-07T02:25:35.599724+00:00",
+      "gatewaysApplied": [
+        {
+          "name": "norva-media-gateway",
+          "at": "2026-10-07T02:26:09.177115+00:00"
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "at": "2026-10-07T02:26:11.772725+00:00"
+        }
+      ],
+      "edgesUnchanged": true,
+      "leasesForced": false,
+      "dispatcherRestarted": false,
+      "completedAt": "2026-10-07T02:26:11.849862+00:00",
+      "restoredAt": "2026-10-07T02:26:12.159707+00:00",
+      "admissionsRestored": true,
+      "workerStateRestored": true,
+      "dispatcherPreserved": true
+    },
+    {
+      "at": "2026-10-07T02:26:19.363399+00:00",
+      "revision": "519e02f04b83c78798249e5fc6957e4081a1ff5a",
+      "image": "sha256:2736371da88c24789dd760a86260ed8d0632f5dd7b59c2eef8ca531ac446fc99",
+      "sourceTreeSha256": "62b57e58f1821a20b86597664ce345a2c4350a80cec6df9c763bc5100df35679",
+      "replicas": [
+        {
+          "name": "norva-media-gateway",
+          "startedAt": "2026-10-07T02:26:07.842277939Z",
+          "healthy": true,
+          "all87SourceHashesMatch": true
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "startedAt": "2026-10-07T02:26:10.429722084Z",
+          "healthy": true,
+          "all87SourceHashesMatch": true
+        }
+      ],
+      "admissions": {
+        "cron": {
+          "id": 159,
+          "active": true
+        },
+        "paused": false
+      },
+      "stopAbsent": true,
+      "dispatcherRunning": true,
+      "workerRunning": true
+    }
+  ],
+  "conclave": {
+    "sameFileHash": "ccce7f28bf219a261a7313258da0c1f7",
+    "candidateBytesStored": 67108864,
+    "hlsRejectedForLostClock": true,
+    "freshHeaderHandoffBytes": 65536,
+    "oldBodyCacheUsed": false,
+    "reason": "resolved-target-path-changed",
+    "validationMs": 1354,
+    "normalBrokerFirstProviderByte": 65536,
+    "normalBrokerRedirects": 0,
+    "validationRedirectStillRequired": true,
+    "sessions": [
+      {
+        "createdAt": "2026-10-07T02:26:27.927142+00:00",
+        "position": 1005,
+        "createdToPlaySeconds": 10.968046,
+        "firstFrameMs": 11404
+      },
+      {
+        "createdAt": "2026-10-07T02:27:30.578956+00:00",
+        "position": 1032,
+        "createdToPlaySeconds": 11.828444,
+        "firstFrameMs": 13003
+      }
+    ],
+    "browserObservations": [
+      {
+        "label": "conclave-subtitles-live",
+        "at": "2026-10-07T02:20:04.988Z",
+        "buffered": [
+          [
+            0.025333,
+            148.049333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 27.710532
+      },
+      {
+        "label": "conclave-subtitle-clock",
+        "at": "2026-10-07T02:21:21.172Z",
+        "buffered": [
+          [
+            72.056333,
+            224.041333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 103.894144
+      },
+      {
+        "label": "conclave-fallback-cold",
+        "at": "2026-10-07T02:27:05.194Z",
+        "buffered": [
+          [
+            0.046333,
+            146.067333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 26.319947
+      },
+      {
+        "label": "conclave-handoff-35s",
+        "at": "2026-10-07T02:28:15.373Z",
+        "buffered": [
+          [
+            2.034333,
+            154.059333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 32.769033
+      },
+      {
+        "label": "conclave-handoff-continuity",
+        "at": "2026-10-07T02:29:23.504Z",
+        "buffered": [
+          [
+            70.060333,
+            222.045333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 100.900226
+      },
+      {
+        "label": "conclave-handoff-over-two-minutes",
+        "at": "2026-10-07T02:30:00.332Z",
+        "buffered": [
+          [
+            106.054333,
+            258.038333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 137.728227
+      }
+    ]
+  },
+  "limitations": [
+    "General production activation not performed",
+    "No all-customer concurrent load test",
+    "Positions/network conditions differ; no constant speedup demonstrated",
+    "Conclave target changes prevent old body reuse",
+    "AAC/48-frame local sample is not whole-movie or audible certification"
+  ],
+  "frameProof": {
+    "at": "2026-10-07T02:28:10.903143+00:00",
+    "localOnly": true,
+    "outputs": [
+      {
+        "createdAt": "2026-10-07T02:27:30.808Z",
+        "probeExit": 0,
+        "streams": [
+          {
+            "codec_name": "h264",
+            "profile": "High",
+            "codec_type": "video",
+            "start_time": "51.440333"
+          },
+          {
+            "codec_name": "aac",
+            "profile": "LC",
+            "codec_type": "audio",
+            "sample_rate": "48000",
+            "channels": 2,
+            "start_time": "51.448000"
+          }
+        ],
+        "localVideoFrames": 48,
+        "videoIntervalMaxSeconds": 0.04200000000000159,
+        "videoIntervalsAbove100ms": 0,
+        "decoderErrorLines": 0,
+        "frameProbeExit": 0
+      }
+    ]
+  },
+  "finalReadiness": {
+    "at": "2026-10-07T02:31:17.685841+00:00",
+    "productionChanged": false,
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "healthy": true,
+        "activeSessions": 0,
+        "memoryLimitBytes": 10737418240,
+        "recentEnabled": true,
+        "allAuthenticatedOwners": false,
+        "allowlistConfigured": true,
+        "cache": {
+          "recentOwnerScope": "owner-allowlist",
+          "maxBytes": 268435456,
+          "perFileBytes": 67108864,
+          "bytes": 0,
+          "reservedBytes": 0,
+          "entries": 0,
+          "evictions": 0,
+          "hits": 0,
+          "misses": 0
+        }
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "healthy": true,
+        "activeSessions": 0,
+        "memoryLimitBytes": 10737418240,
+        "recentEnabled": true,
+        "allAuthenticatedOwners": false,
+        "allowlistConfigured": true,
+        "cache": {
+          "recentOwnerScope": "owner-allowlist",
+          "maxBytes": 268435456,
+          "perFileBytes": 67108864,
+          "bytes": 67108864,
+          "reservedBytes": 0,
+          "entries": 1,
+          "evictions": 0,
+          "hits": 0,
+          "misses": 1
+        }
+      }
+    ],
+    "hostMemoryBytes": {
+      "MemTotal": 66415353856,
+      "MemAvailable": 30728732672
+    }
+  },
+  "ci": {
+    "690": [
+      {
+        "name": "Build Windows Portable",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Android Phone APK",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Android TV APK",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Vercel Preview Comments",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Verify cloud contracts",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ],
+    "691": [
+      {
+        "name": "Build Windows Portable",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Android TV APK",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Android Phone APK",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Vercel Preview Comments",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Verify cloud contracts",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "screenshot": "Browser capture unavailable after two attempts; DOM and server evidence retained"
+}
