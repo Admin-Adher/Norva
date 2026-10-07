@@ -53,7 +53,7 @@ for(const hit of [true,false]) test(`multi-audio input ${hit?'hit':'miss'} prese
     const calls=[],session={seekOffset:100,startupTimings:{},multiAudioHls:{enabled:true,audioRenditions:[1,2,3]}};
     const topology=JSON.stringify(session.multiAudioHls);
     const run=vm.runInNewContext('('+seedSource+')',{
-        Date,RECENT_MULTI_INPUT_MAX_BYTES:64*1024*1024,privateResumeRetainedInputBinding:()=>binding,
+        Date,RECENT_MULTI_INPUT_MAX_BYTES:64*1024*1024,privateResumeRetainedInputBinding:()=>binding,privateResumeHlsBindingForSession:()=>null,
         multiAudioHlsEnabled:s=>s.multiAudioHls?.enabled===true,
         privateResumeHlsCache:{inputRevalidationPlan:()=>({}),acquireInput:()=>{calls.push('acquire');return hit?{
             inputSnapshot:()=>({windows:[]}),release:()=>calls.push('release')}:null;}},
@@ -70,7 +70,7 @@ for(const hit of [true,false]) test(`multi-audio input ${hit?'hit':'miss'} prese
 test('cancelled validation never seeds or acquires an input lease',async()=>{
     const signal={aborted:true};
     const run=vm.runInNewContext('('+seedSource+')',{
-        Date,RECENT_MULTI_INPUT_MAX_BYTES:64*1024*1024,privateResumeRetainedInputBinding:()=>binding,
+        Date,RECENT_MULTI_INPUT_MAX_BYTES:64*1024*1024,privateResumeRetainedInputBinding:()=>binding,privateResumeHlsBindingForSession:()=>null,
         privateResumeHlsCache:{inputRevalidationPlan:()=>({}),acquireInput:()=>assert.fail('acquire')},
         revalidateRecentResumeSession:async()=>observed(),prepareFiniteMkvSeekBroker:()=>assert.fail('prepare'),
         abortedVodInputPumpError:()=>Error('aborted')});
@@ -115,6 +115,44 @@ test('partial subtitle input retains the full ordinary plan and selected tracks 
         {playbackIdentity:{sourceId:'one',sourceRevision:'2'}}])
         assert.notEqual(run({...session,...change}).profileHash,a.profileHash);
     for(const change of [{format:'mp4'},{size:null},{audio:null},{completeHlsCacheLease:{}},
-        {exactSubtitleHls:{...session.exactSubtitleHls,cacheEligible:true}}])
+        {exactSubtitleHls:{...session.exactSubtitleHls,enabled:false}}])
         assert.equal(run({...session,...change}),null);
+    assert.ok(run({...session,exactSubtitleHls:{...session.exactSubtitleHls,cacheEligible:true}}));
+});
+
+test('a usable HLS window keeps priority over subtitle input fallback without a second validation',async()=>{
+    const run=vm.runInNewContext('('+seedSource+')',{
+        privateResumeRetainedInputBinding:()=>binding,privateResumeHlsBindingForSession:()=>binding,
+        privateResumeHlsCache:{hasCandidate:()=>true,inputRevalidationPlan:()=>assert.fail('extra-validation')}});
+    assert.equal(await run({seekOffset:10}),false);
+});
+
+const hlsPlaylist='#EXTM3U\n#EXT-X-INDEPENDENT-SEGMENTS\n'+Array.from({length:20},(_,i)=>`#EXTINF:4,\nsegment-${i}.ts\n`).join('');
+const fallbackArgs=()=>({binding,inputBinding:{...binding,profileHash:'d'.repeat(64)},observed:observed(),
+    inputWindows:[{start:0,payload:Buffer.alloc(4*N,3)}],position:10,actualStartOffset:0,
+    playlist:hlsPlaylist,readAsset:async()=>Buffer.alloc(188,0x47)});
+test('subtitle input fallback preserves HLS preference and refuses a sliding playlist clock',async()=>{
+    const cache=new PrivateResumeHlsCache({recentRevalidation:true});
+    const args=fallbackArgs();assert.equal(await cache.captureWithInputFallback(args),true);
+    assert.equal(cache.hasCandidate(binding,10),true);assert.equal(cache.publicStatus().inputStores,0);
+    cache.revokeOwner(binding.ownerKey);
+    args.playlist=args.playlist.replace('#EXTM3U','#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:78');
+    assert.equal(await cache.captureWithInputFallback(args),true);
+    assert.equal(cache.hasCandidate(binding,10),false);
+    assert.equal(cache.publicStatus().lastCaptureRejection,'sliding-playlist-unbound-clock');
+    assert.equal(cache.inputRevalidationPlan(args.inputBinding).ranges.length,4);
+    const lease=cache.acquireInput(args.inputBinding,observed());
+    assert.throws(()=>lease.playlist(),/INPUT_ONLY/);lease.release();
+});
+test('subtitle input fallback cannot repopulate a revoked owner or cross a source binding',async()=>{
+    const cache=new PrivateResumeHlsCache({recentRevalidation:true});
+    const args=fallbackArgs();args.readAsset=async()=>{cache.revokeOwner(binding.ownerKey);return null;};
+    assert.equal(await cache.captureWithInputFallback(args),false);
+    assert.equal(cache.publicStatus().entries,0);assert.equal(cache.publicStatus().reservedBytes,0);
+    for(const k of ['ownerKey','sourceUrlHash','fileSizeBytes']){
+        const changed=fallbackArgs();changed.readAsset=async()=>null;
+        changed.inputBinding={...changed.inputBinding,[k]:k==='fileSizeBytes'?size+1:'e'.repeat(64)};
+        assert.equal(await cache.captureWithInputFallback(changed),false);
+    }
+    assert.equal(cache.publicStatus().entries,0);
 });

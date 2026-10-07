@@ -15436,10 +15436,10 @@ function privateResumeRetainedInputBinding(session) {
         || privateResumeFormat(session) !== 'mkv'
         || session.mediaCacheProducer || session.completeHlsCacheLease) return null;
     const multiAudio = multiAudioHlsEnabled(session);
-    // Incomplete subtitle graphs cannot supply a cached HLS playlist. Their
-    // source bytes can still accelerate the unchanged ordinary rendition plan.
-    const partialSubtitles = exactSubtitleHlsEnabled(session) && session.exactSubtitleHls.cacheEligible === false;
-    if (!multiAudio && !partialSubtitles) return null;
+    // Subtitle graphs may be complete in the plan but lack finalized coverage
+    // at exit. Source bytes can accelerate the unchanged ordinary rendition plan.
+    const subtitles = exactSubtitleHlsEnabled(session);
+    if (!multiAudio && !subtitles) return null;
     const audio = selectedAudioTrackForSession(session);
     if (!audio || !Number.isInteger(audio.index) || !audio.codec) return null;
     const identity = asRecord(session.playbackIdentity), tracks = multiAudio ? audioRenditionsForSession(session)
@@ -15459,6 +15459,8 @@ async function trySeedRecentRetainedInput(session, signal) {
     if (!(session.seekOffset > 0)) return false;
     const binding = privateResumeRetainedInputBinding(session);
     if (!binding) return false;
+    const hlsBinding = privateResumeHlsBindingForSession(session);
+    if (hlsBinding && privateResumeHlsCache.hasCandidate(hlsBinding, session.seekOffset)) return false;
     const plan = privateResumeHlsCache.inputRevalidationPlan(binding);
     if (!plan) return false;
     const startedAt = Date.now();
@@ -15476,7 +15478,8 @@ async function trySeedRecentRetainedInput(session, signal) {
         session.startupTimings.recentMultiAudioInputSeededBytes = bytes;
         session.startupTimings.recentMultiAudioInputHit = bytes > 0;
         session.startupTimings.recentRetainedInputMode = multiAudioHlsEnabled(session)
-            ? 'multi-audio' : 'partial-subtitles';
+            ? 'multi-audio' : session.exactSubtitleHls?.cacheEligible === false
+                ? 'partial-subtitles' : 'subtitle-window-fallback';
         return bytes > 0;
     } finally { lease.release(); }
 }
@@ -15489,14 +15492,15 @@ async function capturePrivateResumeWindow(session) {
     // discontinuity graph. The new encoder's output is independently reusable.
     const actualStartOffset = session.privateResumeContinuationOffset ?? session.actualStartOffset;
     const inputBinding = privateResumeRetainedInputBinding(session);
-    if (inputBinding) return privateResumeHlsCache.captureInput({ binding: inputBinding,
-        observed: privateResumeObservedIdentity(session), inputWindows: session.privateResumeInputWindows });
     const binding = privateResumeHlsBindingForSession(session);
+    if (inputBinding && (!binding || multiAudioHlsEnabled(session)
+        || session.exactSubtitleHls?.cacheEligible === false)) return privateResumeHlsCache.captureInput({ binding: inputBinding,
+        observed: privateResumeObservedIdentity(session), inputWindows: session.privateResumeInputWindows });
     if (!binding) return privateResumeHlsCache.rejectCapture('session-ineligible');
     if (!Number.isFinite(actualStartOffset)) return privateResumeHlsCache.rejectCapture('invalid-start-clock');
     const playlist = await fsp.readFile(exactSubtitleHlsEnabled(session)
         ? session.videoPlaylistPath : session.playlistPath, 'utf8').catch(() => '');
-    return privateResumeHlsCache.capture({ binding, observed: privateResumeObservedIdentity(session),
+    return privateResumeHlsCache.captureWithInputFallback({ binding, inputBinding, observed: privateResumeObservedIdentity(session),
         inputWindows: session.privateResumeInputWindows,
         position, actualStartOffset, subtitleRenditions: exactSubtitleRenditionsForSession(session),
         // SIGTERM can write ENDLIST on an incomplete movie. A stopped encoder
