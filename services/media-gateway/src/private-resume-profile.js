@@ -16,4 +16,14 @@ function privateResumeProfile({ format, audio, audioMode, clientAudioPassthrough
         encoder: String(encoder || ''), subtitles });
 }
 
-module.exports = { privateResumeProfile };
+// PostgreSQL JSONB and an in-band probe enumerate the same facts in different
+// key orders. Arrays remain ordered: rendition membership/order is significant.
+function canonicalResumeProfile(value) {
+    const ordered = item => Array.isArray(item) ? item.map(ordered)
+        : item && typeof item === 'object'
+            ? Object.fromEntries(Object.keys(item).sort().map(key => [key, ordered(item[key])]))
+            : item;
+    return JSON.stringify(ordered(value));
+}
+
+module.exports = { privateResumeProfile, canonicalResumeProfile };
