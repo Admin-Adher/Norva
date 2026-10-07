@@ -156,3 +156,79 @@ Four GET invocations plus two observed redirects equal six HTTP requests and **3
 At **19:33:02 UTC**, the target account had zero active readers and both Gateways were healthy with zero global sessions at that snapshot. Image and starts remain PR 696's `c8a56fa6…` at 17:52:43/45. Cleanup at **19:34:09 UTC** confirms zero temporary media/header/output files on both the local machine and server. Browser state was not changed. No new hourly automation.
 
 Safe receipts and consumed operators: `.codex-artifacts/resume-independent-network-20261007/`. The one-shot Wi-Fi, server-direct, route-read, local-proxy and direct-control markers must not be replayed.
+
+
+## Relay configuration, public target and support, from 19:42 UTC (21:42 Paris)
+
+The single-relay configuration is not newly introduced by the recent cache deployments. The dated [25 September verification](2026-09-25-mobile-production-verification.md) already records one NodeMaven HTTP relay, its failed reachability and the owner's explicitly authorized one-time replacement. Older debugging instructions describe a five-slot pool and must not be treated as the current configuration. No retired proxy credentials were reactivated.
+
+After Adrien reconnected the NodeMaven console, it showed one active ISP HTTP proxy, due **16 October 2026 at 16:47 as displayed** (console timezone not verified), with **zero swaps remaining**. Both Gateways' configured endpoint and port match the console. The Check proxy action completed and reported low fraud risk and an exit location; it is not a sustained-throughput test. The console's global service banner says operational. No IP/protocol/subscription/renewal setting was changed, and no purchase was made.
+
+### Public destination comparison
+
+The next experiment used the [official Cloudflare speedtest download endpoint](https://github.com/cloudflare/speedtest/blob/main/README.md), independent of all VOD sources and credentials. At 19:46 UTC, two sequential system-libcurl GETs requested exactly **10,000,000 bytes** each, with verified TLS, no compression, no redirects, a 35-second limit and output discarded to `/dev/null`:
+
+| Server path | Status / bytes | Elapsed | Received average |
+|---|---|---:|---:|
+| Direct | HTTP 200 / 10,000,000 | **0.334464 s** | **239.189 Mbit/s** |
+| Current HTTP CONNECT relay | HTTP 200 / 10,000,000 | **6.894430 s** | **11.604 Mbit/s** |
+
+The two Gateways were healthy and had zero viewer sessions before these transfers. Fifteen half-second host observations saw zero or one established socket to the proxy endpoint, zero receive-queue bytes, at most 180 send-queue bytes and 10.565% aggregate CPU use. The preceding three-second baseline observed zero proxy sockets. No sampling error. These are snapshots; they do not certify an absence of all short-lived background traffic.
+
+Host receive-window scaling and automatic receive-buffer growth are enabled, with a 6 MiB maximum receive buffer. The observed host qdiscs are `mq`, `fq_codel` and `noqueue`, with no explicit rate-shaping qdisc or current backlog. Their historical drop counters are not timestamped and are not attributed to this test. No kernel, queue, transport or application setting was changed. The independent curl path also bypasses any Norva agent/decoder/cache throttling.
+
+This extends the evidence beyond Normal: the route through the relay was substantially slower to an independent public destination as well. It does **not** prove a fixed NodeMaven bandwidth cap, the exact failing network segment or a globally saturated relay. The [NodeMaven ISP documentation](https://docs.nodemaven.com/en/articles/13165405-isp-static-proxies) describes dedicated IPs with unlimited usage; that is not a measured sustained bitrate guarantee. The working direct test likewise does not make direct VOD access reliable, given the previous 404 and 460 results.
+
+Only two public requests / 20,000,000 bytes, zero VOD requests, no provider-account claims and no retained body files were used in this follow-up. Existing pilot scope and production image are unchanged. Adrien explicitly authorized sending the public-test diagnostic to NodeMaven support. It was sent and marked seen, and Anna joined the conversation. No downstream source credentials, URLs, customer details or private report files were sent. The message explicitly withholds permission for any IP/protocol/subscription change or charge.
+
+Safe receipts and the support draft: `.codex-artifacts/relay-capacity-audit-20261007/`. The public-test marker is consumed. The NodeMaven browser tab is retained for this investigation; the Norva playback tab was not changed.
+
+
+### Support suggestion: alternative port on the same relay
+
+Anna suggested port **5433 instead of 5432** and subsequently stated that it preserves the same exit IP. This statement was initially attributed to support; the later independent check below confirms the same exit for ports 5432 and 2534, not 5433. A previous closed support conversation, displayed as three weeks old, contains Mikhail's statement that traffic and connections for ISP proxies are unlimited. That does not establish a per-connection bitrate guarantee and does not relax Norva's separate one-connection-per-provider-account guards.
+
+Two new sequential public Cloudflare GETs tested this specific support suggestion, with the same configured relay host and credentials, still without any VOD request or production change:
+
+| Public 10,000,000-byte transfer, 19:57 UTC | Status | Elapsed | Received average |
+|---|---:|---:|---:|
+| Support-suggested port 5433, HTTP CONNECT | 200 | **6.256463 s** | **12.787 Mbit/s** |
+| Existing port 5432, control | 200 | **7.816326 s** | **10.235 Mbit/s** |
+
+No redirects or retries; both bodies discarded. The timings differ but remain below Normal's approximately 19.8 Mbit/s whole-file average. This pair does not establish a stable port advantage or validate a production route change. Its socket sampler still filters the configured port 5432, so it is **not** used to certify connection counts during the alternative-port transfer. Both Gateways had zero viewer sessions at the initial check.
+
+The results were sent to Anna with a request to investigate throughput limits, congestion and the current relay path. Technical resolution remains pending. At that stage, totals were **four GETs / 40,000,000 bytes**, zero VOD/source requests, zero provider claims and zero production changes. The subsequent bounded checks are recorded below. The ordinary file/identity/lease protections remain untouched. No replacement IP, new subscription, new automation or global cache rollout was requested.
+
+
+### Two further support ports and independent exit check, 20:01–20:07 UTC
+
+Anna then specifically requested ports **2534 and 3389**. Each was tried once against the same public 10,000,000-byte payload, sequentially with the same host and credentials:
+
+| Diagnostic port | Status / received bytes | Elapsed | Result |
+|---|---|---:|---|
+| 2534 | HTTP 200 / 10,000,000 | **4.696923 s** | Complete, 17.032 Mbit/s |
+| 3389 | HTTP 200 / 9,990,400 | **7.989740 s** | **Incomplete**, curl exit 18, 9,600 bytes missing |
+
+No retry followed the incomplete transfer. These results were sent to support. The original-port socket sampler again does not certify counts on alternative ports. Production remained on 5432.
+
+A longer bounded experiment checked exit identity before any source-account traffic. Two successful public [Cloudflare trace](https://developers.cloudflare.com/fundamentals/reference/cdn-cgi-endpoint/) responses on ports 5432 and 2534 report **the same subscribed exit IP**, the IAD point of presence and TLS 1.3. Only equality booleans are retained publicly; the addresses and raw responses remain unreported. Each trace body was 211 bytes.
+
+The subsequent **32 MiB** public download on 2534 completed at **20:07:53 UTC**: HTTP 200, curl exit 0, no redirect, **12.883759 s / 20.835 Mbit/s**, first byte 0.643528 s. This slightly exceeds Normal's whole-file average in this short public test but does not establish stable margin or throughput to its actual source.
+
+The first version of this longer-test operator stopped at 20:05:55 before the large transfer because its curl write-out configuration contained an invalid literal newline. A local loopback fixture reproduced configuration rejection (exit 2, no stdout). The failed operator did not retain enough curl diagnostics to certify its external trace outcome; it is not counted as a completed trace or a media failure. Its consumed marker was preserved. The corrected diagnostic used a distinct one-shot marker; no production code was modified.
+
+### Same exact Normal range on port 2534, 20:09 UTC
+
+The positive public result and fresh independent same-exit evidence justified one bounded source-range comparison. It used the same exact file, original URL and range `1251999744–1268776959` as the earlier controls, with the production routing policy read first. Only this diagnostic used port 2534; the production configuration stayed unchanged.
+
+The ordinary direct claim had an independent 0.5-second heartbeat with one-second fail-closed timeout and checked native takeover grace. The target account was unoccupied, one source GET followed one redirect, and the claim expired normally. No heartbeat failure, forced lease, overlapping media read or retry.
+
+Result: **HTTP 206, 16 MiB in 13.368403 s**, approximately **10.040 Mbit/s**, first byte 1.289119 s. The full size, Content-Range and body SHA-256 `39d3ab6093b909bcb14510d17a7561a0ccef260ed13063648e8c66ef03301807` match the previous comparisons exactly. Temporary body/header/private-output files were removed. This is faster than the earlier 47.680-second system-curl measurement, but timing and route conditions were not simultaneous: a durable speedup is not proven. It remains below the 19.822 Mbit/s whole-file average and is **not a validated fluid-playback fix**. No browser replay or new AAC/video decoding claim follows from a byte-only transfer.
+
+### Support status and closeout
+
+Anna stated that she would check with the team and requested a Fast.com measurement. We explained that Fast.com in the current browser would use local Wi-Fi, rather than the authenticated server/proxy path, and asked their team to measure that exact path or provide a supported method. No Fast.com result was invented or represented as a proxy measurement. The exact source-range result and the public/exit checks were transmitted without any source URL, login, catalogue identifier, raw IP or private report upload. No IP replacement, protocol/subscription change or fee was authorized.
+
+Accounted successful/partial public responses in this follow-up: **seven download GETs / 93,544,832 payload bytes**, plus **two completed trace GETs / 422 body bytes**. The malformed preliminary trace operator is retained separately, with no interpretable response. Source traffic: **one range GET plus one redirect / 16 MiB**, one normally expired provider claim. No whole-film download, production setting change, new deployment, general pilot rollout or hourly automation.
+
+Read-only closeout at **20:17:46 UTC (22:17 Paris)**: zero active readers on the target account; the diagnostic claim is expired. Both Gateways remain healthy on image `c8a56fa6…`, with zero global sessions at that snapshot. The source of the throughput limitation and a reliable remedy remain unresolved; the technical support investigation is pending.

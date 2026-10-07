@@ -1440,5 +1440,464 @@
         }
       ]
     }
+  },
+  "relayCapacityAudit": {
+    "publicTarget": {
+      "at": "2026-10-07T19:46:47.797839+00:00",
+      "purpose": "bounded public Cloudflare speedtest payload, no VOD/provider account I/O",
+      "productionChanged": false,
+      "results": [
+        {
+          "path": "direct",
+          "at": "2026-10-07T19:46:50.870427+00:00",
+          "exit": 0,
+          "http": 200,
+          "bytes": 10000000,
+          "seconds": 0.334464,
+          "firstByteSeconds": 0.242334,
+          "connectSeconds": 0.202788,
+          "tlsSeconds": 0.214974,
+          "redirects": 0,
+          "Mbps": 239.188672
+        },
+        {
+          "path": "configured-http-connect",
+          "at": "2026-10-07T19:46:51.211917+00:00",
+          "exit": 0,
+          "http": 200,
+          "bytes": 10000000,
+          "seconds": 6.89443,
+          "firstByteSeconds": 0.575538,
+          "connectSeconds": 0.122438,
+          "tlsSeconds": 0.391327,
+          "redirects": 0,
+          "Mbps": 11.60357
+        }
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "viewerSessions": 0,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:43.148136674Z",
+          "cpuQuota": 0,
+          "cpuPeriod": 0,
+          "nanoCpus": 6000000000
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "viewerSessions": 0,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:45.72659218Z",
+          "cpuQuota": 0,
+          "cpuPeriod": 0,
+          "nanoCpus": 6000000000
+        }
+      ],
+      "baselineStart": {
+        "at": "2026-10-07T19:46:47.839726+00:00",
+        "networkRxBytes": 1038496672202,
+        "networkTxBytes": 1558874916007,
+        "cpuTotal": 2476648549,
+        "cpuIdle": 1375792611,
+        "proxyEstablished": 0,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 0
+      },
+      "baselineEnd": {
+        "at": "2026-10-07T19:46:50.855550+00:00",
+        "networkRxBytes": 1038496672202,
+        "networkTxBytes": 1558874916007,
+        "cpuTotal": 2476653356,
+        "cpuIdle": 1375797115,
+        "proxyEstablished": 0,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 0
+      },
+      "endedAt": "2026-10-07T19:46:58.113344+00:00"
+    },
+    "hostSummary": {
+      "samples": 15,
+      "proxySocketCounts": [
+        0,
+        1
+      ],
+      "maxProxyReceiveQueueBytes": 0,
+      "maxProxySendQueueBytes": 180,
+      "cpuBusyPercent": 10.565,
+      "networkRxDeltaBytes": 20798880,
+      "samplingErrors": []
+    },
+    "hostConfiguration": {
+      "at": "2026-10-07T19:49:11.046510+00:00",
+      "readOnly": true,
+      "norva-media-gateway": {
+        "matchesConsoleHostAndPort": true,
+        "scheme": "http"
+      },
+      "norva-resume-cache-pilot-20260916": {
+        "matchesConsoleHostAndPort": true,
+        "scheme": "http"
+      },
+      "receiveBufferSettings": {
+        "tcp_moderate_rcvbuf": "1",
+        "tcp_rmem": "4096\t131072\t6291456",
+        "tcp_window_scaling": "1"
+      },
+      "qdiscSummary": {
+        "kinds": [
+          "fq_codel",
+          "mq",
+          "noqueue"
+        ],
+        "explicitRateShaper": false,
+        "currentBacklog": 0,
+        "historicalDropsNotAttributed": true
+      }
+    },
+    "console": {
+      "recordedAt": "2026-10-07T19:50:24.402574+00:00",
+      "provider": "NodeMaven",
+      "accountAccess": "user reconnected browser",
+      "activeOrders": 1,
+      "quantity": 1,
+      "protocol": "HTTP",
+      "subscription": "Active",
+      "dueDateAsDisplayed": "16 October 2026 16:47",
+      "displayTimezoneUnverified": true,
+      "remainingSwaps": 0,
+      "checkProxy": "completed; low fraud risk and exit location reported; no throughput measurement displayed",
+      "globalServiceBanner": "All systems operational",
+      "credentialsNotIncluded": true,
+      "changesToPlanOrProxy": false
+    },
+    "providerVodRequests": 2,
+    "providerClaims": 1,
+    "publicRequests": 9,
+    "bytes": 93545254,
+    "productionChanged": false,
+    "support": {
+      "draftPrepared": true,
+      "sent": true,
+      "userAuthorization": "explicit approval in current chat",
+      "firstMessageSeen": true,
+      "agent": "Anna",
+      "suggestion": "Specific ports 5433, 2534 and 3389 tested",
+      "sameExitIp": "5432 and 2534 independently equal in two successful public trace responses",
+      "portResultsSent": true,
+      "status": "Anna said she would check with team; Fast.com through exact authenticated proxy requested, no result claimed",
+      "planOrIpChangesAuthorized": false,
+      "privateProviderDataSent": false,
+      "allPortResultsSent": true
+    },
+    "limits": [
+      "Public target comparison is not a full-film test.",
+      "No fixed bandwidth cap or exact internal relay defect established.",
+      "Host snapshots cannot exclude all short-lived traffic.",
+      "No new route or global rollout validated."
+    ],
+    "supportPortPair": {
+      "at": "2026-10-07T19:57:41.242852+00:00",
+      "purpose": "bounded public Cloudflare speedtest payload, no VOD/provider account I/O",
+      "productionChanged": false,
+      "results": [
+        {
+          "path": "support-port-5433",
+          "at": "2026-10-07T19:57:44.315890+00:00",
+          "exit": 0,
+          "http": 200,
+          "bytes": 10000000,
+          "seconds": 6.256463,
+          "firstByteSeconds": 0.612489,
+          "connectSeconds": 0.137967,
+          "tlsSeconds": 0.41535,
+          "redirects": 0,
+          "Mbps": 12.786777
+        },
+        {
+          "path": "control-port-5432",
+          "at": "2026-10-07T19:57:50.579264+00:00",
+          "exit": 0,
+          "http": 200,
+          "bytes": 10000000,
+          "seconds": 7.816326,
+          "firstByteSeconds": 0.545961,
+          "connectSeconds": 0.10662,
+          "tlsSeconds": 0.366654,
+          "redirects": 0,
+          "Mbps": 10.234988
+        }
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "viewerSessions": 0,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:43.148136674Z",
+          "cpuQuota": 0,
+          "cpuPeriod": 0,
+          "nanoCpus": 6000000000
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "viewerSessions": 0,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:45.72659218Z",
+          "cpuQuota": 0,
+          "cpuPeriod": 0,
+          "nanoCpus": 6000000000
+        }
+      ],
+      "baselineStart": {
+        "at": "2026-10-07T19:57:41.286023+00:00",
+        "networkRxBytes": 1038797775273,
+        "networkTxBytes": 1559159634962,
+        "cpuTotal": 2477697029,
+        "cpuIdle": 1376716400,
+        "proxyEstablished": 0,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 0
+      },
+      "baselineEnd": {
+        "at": "2026-10-07T19:57:44.300868+00:00",
+        "networkRxBytes": 1038797775273,
+        "networkTxBytes": 1559159635028,
+        "cpuTotal": 2477701842,
+        "cpuIdle": 1376720844,
+        "proxyEstablished": 0,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 0
+      },
+      "endedAt": "2026-10-07T19:57:58.402686+00:00",
+      "socketSamplerScopeLimit": "Filters original port 5432 only; not used for alternative-port concurrency claims."
+    },
+    "supportAdditionalPorts": {
+      "at": "2026-10-07T20:01:54.343615+00:00",
+      "purpose": "bounded public Cloudflare speedtest payload, no VOD/provider account I/O",
+      "productionChanged": false,
+      "results": [
+        {
+          "path": "support-port-2534",
+          "at": "2026-10-07T20:01:57.416356+00:00",
+          "exit": 0,
+          "http": 200,
+          "bytes": 10000000,
+          "seconds": 4.696923,
+          "firstByteSeconds": 1.24514,
+          "connectSeconds": 0.122046,
+          "tlsSeconds": 0.476648,
+          "redirects": 0,
+          "Mbps": 17.032427
+        },
+        {
+          "path": "support-port-3389",
+          "at": "2026-10-07T20:02:02.121265+00:00",
+          "exit": 18,
+          "http": 200,
+          "bytes": 9990400,
+          "seconds": 7.98974,
+          "firstByteSeconds": 0.528914,
+          "connectSeconds": 0.116937,
+          "tlsSeconds": 0.353868,
+          "redirects": 0,
+          "Mbps": 10.003229
+        }
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "viewerSessions": 0,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:43.148136674Z",
+          "cpuQuota": 0,
+          "cpuPeriod": 0,
+          "nanoCpus": 6000000000
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "viewerSessions": 0,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:45.72659218Z",
+          "cpuQuota": 0,
+          "cpuPeriod": 0,
+          "nanoCpus": 6000000000
+        }
+      ],
+      "baselineStart": {
+        "at": "2026-10-07T20:01:54.385721+00:00",
+        "networkRxBytes": 1038990449905,
+        "networkTxBytes": 1559180862749,
+        "cpuTotal": 2478103114,
+        "cpuIdle": 1377068166,
+        "proxyEstablished": 0,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 0
+      },
+      "baselineEnd": {
+        "at": "2026-10-07T20:01:57.401213+00:00",
+        "networkRxBytes": 1038994620560,
+        "networkTxBytes": 1559180919457,
+        "cpuTotal": 2478108093,
+        "cpuIdle": 1377072197,
+        "proxyEstablished": 0,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 0
+      },
+      "endedAt": "2026-10-07T20:02:10.118877+00:00",
+      "socketSamplerScopeLimit": "Original port 5432 only; no alternative-port concurrency claim."
+    },
+    "extendedPublicAndExitProof": {
+      "at": "2026-10-07T20:07:39.225788+00:00",
+      "purpose": "bounded public Cloudflare speedtest payload, no VOD/provider account I/O",
+      "productionChanged": false,
+      "results": [
+        {
+          "port": 2534,
+          "requestedBytes": 33554432,
+          "http": 200,
+          "bytes": 33554432,
+          "seconds": 12.883759,
+          "firstByteSeconds": 0.643528,
+          "exit": 0,
+          "redirects": 0,
+          "Mbps": 20.835181
+        }
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "viewerSessions": 0,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:43.148136674Z",
+          "cpuQuota": 0,
+          "cpuPeriod": 0,
+          "nanoCpus": 6000000000
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "viewerSessions": 0,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:45.72659218Z",
+          "cpuQuota": 0,
+          "cpuPeriod": 0,
+          "nanoCpus": 6000000000
+        }
+      ],
+      "traceAttempts": [
+        {
+          "port": 5432,
+          "exit": 0,
+          "stdoutBytes": 221
+        },
+        {
+          "port": 2534,
+          "exit": 0,
+          "stdoutBytes": 221
+        }
+      ],
+      "exitChecks": [
+        {
+          "port": 5432,
+          "http": 200,
+          "bytes": 211,
+          "matchesSubscribedEndpoint": true,
+          "colo": "IAD",
+          "tls": "TLSv1.3"
+        },
+        {
+          "port": 2534,
+          "http": 200,
+          "bytes": 211,
+          "matchesSubscribedEndpoint": true,
+          "colo": "IAD",
+          "tls": "TLSv1.3"
+        }
+      ],
+      "sameExitIp": true,
+      "endedAt": "2026-10-07T20:07:53.495113+00:00"
+    },
+    "operatorFormatFailure": {
+      "at": "2026-10-07T20:05:55Z",
+      "largeTransferStarted": false,
+      "cause": "Invalid literal newline in curl write-out config; local fixture exit 2/no stdout. External trace outcome not interpretable.",
+      "distinctCorrectedMarker": true,
+      "productionChanged": false
+    },
+    "normalPort2534": {
+      "at": "2026-10-07T20:09:45.216366+00:00",
+      "question": "Does the support-suggested same-IP port 2534 improve the same exact Normal range?",
+      "copy": "Normal exact 4K FR HDR",
+      "rangeStart": 1251999744,
+      "rangeBytes": 16777216,
+      "reader": "system libcurl to a local temporary regular file",
+      "route": "isolated same-relay HTTP CONNECT port 2534, same exit independently verified; production unchanged",
+      "initialGets": 1,
+      "newProductionCode": false,
+      "routeCheck": {
+        "slot": 1,
+        "transport": "http",
+        "controlShadow": true,
+        "verifiedFromProductionModule": true,
+        "productionRouteUnchanged": true,
+        "diagnosticUsesProxy": true,
+        "diagnosticPort": 2534
+      },
+      "result": {
+        "httpStatus": 206,
+        "seconds": 13.368403,
+        "firstByteSeconds": 1.289119,
+        "connectSeconds": 0.2392,
+        "bytes": 16777216,
+        "sha256": "39d3ab6093b909bcb14510d17a7561a0ccef260ed13063648e8c66ef03301807",
+        "exit": 0,
+        "contentRanges": [
+          "bytes 1251999744-1268776959/13662582623"
+        ],
+        "redirects": 1,
+        "effectiveScheme": "http",
+        "proxyUsed": null,
+        "Mbps": 10.039922
+      },
+      "sameBytesAsPreviousProof": true,
+      "heartbeatFailures": [],
+      "expired": true,
+      "temporaryFilesRemoved": true,
+      "endedAt": "2026-10-07T20:09:59.577538+00:00"
+    },
+    "providerRangeGets": 1,
+    "providerRedirects": 1,
+    "providerBytes": 16777216,
+    "publicDownloadRequests": 7,
+    "publicTraceRequests": 2,
+    "publicPayloadBytes": 93544832,
+    "publicTraceBytes": 422,
+    "publicRequestCountScope": "Interpretable download/trace responses; preliminary malformed curl invocation excluded, preserved separately.",
+    "closeout": {
+      "at": "2026-10-07T20:17:46.985616+00:00",
+      "activeAccountReaders": 0,
+      "diagnosticClaimExpired": true,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "activeGlobal": 0
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "activeGlobal": 0
+        }
+      ]
+    }
   }
 }
