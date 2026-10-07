@@ -48,12 +48,13 @@ test('no second memory budget, unbounded capture, or admission without header',(
 });
 
 const source=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
-const seedSource=source.slice(source.indexOf('async function trySeedRecentMultiAudioInput('),source.indexOf('\nasync function capturePrivateResumeWindow('));
+const seedSource=source.slice(source.indexOf('async function trySeedRecentRetainedInput('),source.indexOf('\nasync function capturePrivateResumeWindow('));
 for(const hit of [true,false]) test(`multi-audio input ${hit?'hit':'miss'} preserves ordinary output and restores indexed input`,async()=>{
     const calls=[],session={seekOffset:100,startupTimings:{},multiAudioHls:{enabled:true,audioRenditions:[1,2,3]}};
     const topology=JSON.stringify(session.multiAudioHls);
     const run=vm.runInNewContext('('+seedSource+')',{
-        Date,RECENT_MULTI_INPUT_MAX_BYTES:64*1024*1024,privateResumeMultiAudioInputBinding:()=>binding,
+        Date,RECENT_MULTI_INPUT_MAX_BYTES:64*1024*1024,privateResumeRetainedInputBinding:()=>binding,
+        multiAudioHlsEnabled:s=>s.multiAudioHls?.enabled===true,
         privateResumeHlsCache:{inputRevalidationPlan:()=>({}),acquireInput:()=>{calls.push('acquire');return hit?{
             inputSnapshot:()=>({windows:[]}),release:()=>calls.push('release')}:null;}},
         revalidateRecentResumeSession:async()=>{calls.push('fresh-drained');return observed();},
@@ -69,7 +70,7 @@ for(const hit of [true,false]) test(`multi-audio input ${hit?'hit':'miss'} prese
 test('cancelled validation never seeds or acquires an input lease',async()=>{
     const signal={aborted:true};
     const run=vm.runInNewContext('('+seedSource+')',{
-        Date,RECENT_MULTI_INPUT_MAX_BYTES:64*1024*1024,privateResumeMultiAudioInputBinding:()=>binding,
+        Date,RECENT_MULTI_INPUT_MAX_BYTES:64*1024*1024,privateResumeRetainedInputBinding:()=>binding,
         privateResumeHlsCache:{inputRevalidationPlan:()=>({}),acquireInput:()=>assert.fail('acquire')},
         revalidateRecentResumeSession:async()=>observed(),prepareFiniteMkvSeekBroker:()=>assert.fail('prepare'),
         abortedVodInputPumpError:()=>Error('aborted')});
@@ -90,4 +91,30 @@ test('input-only body uses the configured per-file allowance while HLS defaults 
     const lease=cache.acquireInput(largeBinding,identity);
     assert.equal(lease.inputSnapshot().windows.reduce((n,w)=>n+w.payload.length,0),24*MiB);
     lease.release();cache.revokeOwner(binding.ownerKey);assert.equal(cache.publicStatus().bytes,0);
+});
+
+test('partial subtitle input retains the full ordinary plan and selected tracks in its private binding',()=>{
+    const start=source.indexOf('function privateResumeRetainedInputBinding('),end=source.indexOf('\nasync function trySeedRecentRetainedInput',start);
+    const run=vm.runInNewContext('('+source.slice(start,end)+')',{
+        canUsePrivateResumeCache:()=>true,canUseRecentResumeSamples:()=>true,
+        privateResumeFormat:s=>s.format,multiAudioHlsEnabled:s=>s.multiAudioHls?.enabled===true,
+        exactSubtitleHlsEnabled:s=>s.exactSubtitleHls?.enabled===true,
+        selectedAudioTrackForSession:s=>s.audio,audioRenditionsForSession:s=>s.multiAudioHls.tracks,
+        exactSubtitleRenditionsForSession:s=>s.exactSubtitleHls.renditions,
+        asRecord:x=>x||{},privateResumeBinding,fileSizeBytesForSession:s=>s.size,
+        VIDEO_ENCODER_CONFIG:{backend:'vaapi'},
+    });
+    const session={ownerKey:'a'.repeat(64),sourceUrl:'https://fixture.invalid/a',size,format:'mkv',
+        playbackIdentity:{sourceId:'one',sourceRevision:'1'},audio:{index:1,codec:'aac'},
+        exactSubtitleHls:{enabled:true,cacheEligible:false,sourceTrackCount:21,
+            renditions:Array.from({length:8},(_,i)=>({streamIndex:i+2,language:'en'}))}};
+    const before=JSON.stringify(session),a=run(session);
+    assert.ok(a);assert.equal(JSON.stringify(session),before);
+    for(const change of [{subtitleStreamIndex:12},{audio:{index:3,codec:'aac'}},
+        {exactSubtitleHls:{...session.exactSubtitleHls,sourceTrackCount:22}},
+        {playbackIdentity:{sourceId:'one',sourceRevision:'2'}}])
+        assert.notEqual(run({...session,...change}).profileHash,a.profileHash);
+    for(const change of [{format:'mp4'},{size:null},{audio:null},{completeHlsCacheLease:{}},
+        {exactSubtitleHls:{...session.exactSubtitleHls,cacheEligible:true}}])
+        assert.equal(run({...session,...change}),null);
 });
