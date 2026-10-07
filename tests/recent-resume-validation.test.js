@@ -105,10 +105,10 @@ for (const rejectAt of [1, 2, 0]) test(`identity rejection stops remaining fresh
 test('Gateway checks the fresh target and rejects without publishing partial proof', async()=>{
     const fs=require('node:fs'),vm=require('node:vm');
     const source=fs.readFileSync(require('node:path').join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
-    const start=source.indexOf('async function revalidateRecentResumeSession('),end=source.indexOf('\nasync function tryStartPrivateResumeWindow',start);
+    const start=source.indexOf('function recentDeliveryRouteKey('),end=source.indexOf('\nasync function tryStartPrivateResumeWindow',start);
     for(const same of [false,true]){
         const session={startupTimings:{}}, calls=[];
-        const run=vm.runInNewContext('('+source.slice(start,end)+')',{
+        const run=vm.runInNewContext('(()=>{'+source.slice(start,end)+';return revalidateRecentResumeSession;})()',{
             AbortController,closeFiniteMkvSeekBroker:async()=>calls.push('old-drained'),
             closePreopenedBoundedMkvInput:async()=>{},fileSizeBytesForSession:()=>size,
             FFMPEG_USER_AGENT:'fixture',pinnedProxyAgentFactoryForRoute:()=>null,providerNodeRouteForSession:()=>null,
@@ -194,4 +194,26 @@ test('retained input never escapes the existing aggregate memory reservation', a
     assert.equal(await capture(cache,{inputWindows:[{start:0,payload:Buffer.alloc(4*N)}]}),false);
     assert.equal(cache.publicStatus().lastCaptureRejection,'reservation-budget');
     assert.equal(cache.publicStatus().bytes,0);assert.equal(cache.publicStatus().reservedBytes,0);
+});
+
+
+test('successful fresh header is handed off after all four reads drain; failures never hand it off', async()=>{
+    for(const failAt of [0,2,4]){
+        let reads=0,closed=false,handoffs=0;
+        const result=await validateRecentResume({plan:{kind:'sampled-recent-v1',ranges:samples().map(s=>({start:s.start,length:N}))},
+            createBroker:async()=>({inputUrl:'http://fixture.invalid',close:async()=>{closed=true;}}),
+            fetchImpl:async()=>{reads++;if(reads===failAt)throw Error('transfer failed');return{status:206,arrayBuffer:async()=>Buffer.alloc(N,3)};},
+            onFreshValidatedHeader:(_,payload)=>{assert.equal(closed,true);assert.equal(reads,4);assert.equal(payload[0],3);handoffs++;}});
+        assert.equal(handoffs,failAt?0:1);assert.equal(Boolean(result),!failAt);
+    }
+});
+
+test('only a matching private cache candidate exposes an opaque delivery hint',async()=>{
+    const token=Object.freeze({}),cache=new PrivateResumeHlsCache({recentRevalidation:true});
+    assert.equal(await capture(cache,{observed:{...observed(),deliveryTarget:token}}),true);
+    assert.equal(cache.revalidationPlan(binding,10).deliveryTarget,token);
+    for(const key of ['ownerKey','profileHash','sourceUrlHash','sourceRevision'])
+        assert.equal(cache.revalidationPlan({...binding,[key]:'different'},10),null);
+    assert.equal(JSON.stringify(cache.publicStatus()).includes('deliveryTarget'),false);
+    cache.revokeOwner(binding.ownerKey);assert.equal(cache.revalidationPlan(binding,10),null);
 });
