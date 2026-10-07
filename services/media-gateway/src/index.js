@@ -12707,7 +12707,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             mediaCacheProducerControl.attach(session, normalizedMediaCacheProducer);
         }
 
-        await trySeedRecentMultiAudioInput(session, sessionRequestAbortController.signal);
+        await trySeedRecentRetainedInput(session, sessionRequestAbortController.signal);
         if (await tryStartPrivateResumeWindow(session, sessionRequestAbortController.signal)) {
             session.startupTimings.totalMs = Math.max(0, Date.now() - sessionCreateStartedAt);
             sessionStartupStats.successes += 1;
@@ -15401,24 +15401,33 @@ function privateResumeObservedIdentity(session) {
         targetParts: session.vodInputTargetParts || null };
 }
 
-function privateResumeMultiAudioInputBinding(session) {
+function privateResumeRetainedInputBinding(session) {
     if (!canUsePrivateResumeCache(session?.ownerKey) || !canUseRecentResumeSamples(session?.ownerKey)
-        || !multiAudioHlsEnabled(session) || privateResumeFormat(session) !== 'mkv'
+        || privateResumeFormat(session) !== 'mkv'
         || session.mediaCacheProducer || session.completeHlsCacheLease) return null;
-    const identity = asRecord(session.playbackIdentity), tracks = audioRenditionsForSession(session);
+    const multiAudio = multiAudioHlsEnabled(session);
+    // Incomplete subtitle graphs cannot supply a cached HLS playlist. Their
+    // source bytes can still accelerate the unchanged ordinary rendition plan.
+    const partialSubtitles = exactSubtitleHlsEnabled(session) && session.exactSubtitleHls.cacheEligible === false;
+    if (!multiAudio && !partialSubtitles) return null;
+    const audio = selectedAudioTrackForSession(session);
+    if (!audio || !Number.isInteger(audio.index) || !audio.codec) return null;
+    const identity = asRecord(session.playbackIdentity), tracks = multiAudio ? audioRenditionsForSession(session)
+        : [{ ...audio, streamIndex: audio.index }];
     if (!tracks.length || tracks.length > 12 || tracks.some(t => !Number.isInteger(t.streamIndex))) return null;
     return privateResumeBinding({ ownerKey: session.ownerKey, sourceUrl: session.sourceUrl,
         sourceId: identity.sourceId, sourceRevision: identity.sourceRevision,
         vodIdentityKey: identity.vodIdentityKey, fileSizeBytes: fileSizeBytesForSession(session),
-        profile: JSON.stringify({ protocol: 'recent-multi-input-1', audio: tracks,
-            selected: selectedAudioTrackForSession(session)?.index,
+        profile: JSON.stringify({ protocol: 'recent-retained-input-2', audio: tracks,
+            selected: audio.index, requestedSubtitle: session.subtitleStreamIndex,
+            sourceSubtitleCount: session.exactSubtitleHls?.sourceTrackCount,
             audioMode: session.audioMode, passthrough: session.clientAudioPassthrough,
             subtitles: exactSubtitleRenditionsForSession(session), encoder: VIDEO_ENCODER_CONFIG.backend }) });
 }
 
-async function trySeedRecentMultiAudioInput(session, signal) {
+async function trySeedRecentRetainedInput(session, signal) {
     if (!(session.seekOffset > 0)) return false;
-    const binding = privateResumeMultiAudioInputBinding(session);
+    const binding = privateResumeRetainedInputBinding(session);
     if (!binding) return false;
     const plan = privateResumeHlsCache.inputRevalidationPlan(binding);
     if (!plan) return false;
@@ -15436,6 +15445,8 @@ async function trySeedRecentMultiAudioInput(session, signal) {
         const bytes = broker?.seedRecentInput(lease.inputSnapshot(), RECENT_MULTI_INPUT_MAX_BYTES) || 0;
         session.startupTimings.recentMultiAudioInputSeededBytes = bytes;
         session.startupTimings.recentMultiAudioInputHit = bytes > 0;
+        session.startupTimings.recentRetainedInputMode = multiAudioHlsEnabled(session)
+            ? 'multi-audio' : 'partial-subtitles';
         return bytes > 0;
     } finally { lease.release(); }
 }
@@ -15447,7 +15458,7 @@ async function capturePrivateResumeWindow(session) {
     // A second exit must not splice a previously spliced playlist into another
     // discontinuity graph. The new encoder's output is independently reusable.
     const actualStartOffset = session.privateResumeContinuationOffset ?? session.actualStartOffset;
-    const inputBinding = privateResumeMultiAudioInputBinding(session);
+    const inputBinding = privateResumeRetainedInputBinding(session);
     if (inputBinding) return privateResumeHlsCache.captureInput({ binding: inputBinding,
         observed: privateResumeObservedIdentity(session), inputWindows: session.privateResumeInputWindows });
     const binding = privateResumeHlsBindingForSession(session);
@@ -15872,7 +15883,7 @@ async function closeFiniteMkvSeekBroker(session) {
     if (!broker) return;
     if (session.privateResumeStopPosition > 0 && canUseRecentResumeSamples(session.ownerKey)) {
         session.privateResumeSamples = broker.snapshotRecentSamples();
-        session.privateResumeInputWindows = broker.snapshotRecentInput(multiAudioHlsEnabled(session)
+        session.privateResumeInputWindows = broker.snapshotRecentInput(privateResumeRetainedInputBinding(session)
             ? RECENT_MULTI_INPUT_MAX_BYTES : RECENT_INPUT_MAX_BYTES);
     }
     session.finiteMkvSeekBroker = null;
