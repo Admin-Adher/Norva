@@ -764,5 +764,396 @@
       "Provider storage versus relay/route remains unassigned.",
       "No full-episode or audible audio certification."
     ]
+  },
+  "transportIsolation": {
+    "windowUtc": [
+      "2026-10-07T18:44:33Z",
+      "2026-10-07T19:01:20.139452+00:00"
+    ],
+    "productionChanged": false,
+    "pilotExpanded": false,
+    "failedPreflight": {
+      "at": "2026-10-07T18:44:33.560017+00:00",
+      "initialGets": 0,
+      "guard": "account_route_mismatch",
+      "expired": true
+    },
+    "libcurl": {
+      "at": "2026-10-07T18:49:03.533461+00:00",
+      "routeCheck": {
+        "slot": 1,
+        "transport": "http",
+        "controlShadow": true,
+        "verifiedFromProductionModule": true
+      },
+      "result": {
+        "httpStatus": 206,
+        "seconds": 47.679798,
+        "firstByteSeconds": 1.478418,
+        "connectSeconds": 0.25933,
+        "bytes": 16777216,
+        "sha256": "39d3ab6093b909bcb14510d17a7561a0ccef260ed13063648e8c66ef03301807",
+        "exit": 0,
+        "contentRanges": [
+          "bytes 1251999744-1268776959/13662582623"
+        ],
+        "redirects": 1
+      },
+      "sampling": {
+        "at": "2026-10-07T18:49:03.533461+00:00",
+        "samples": 92,
+        "bodySocketSamples": 88,
+        "seconds": 47.679798,
+        "averageMbps": 2.814981053401275,
+        "wholeFileAverageMbps": 19.822447976635402,
+        "cpuSecondsObserved": 0.2,
+        "sampleWindowSeconds": 47.481,
+        "states": {
+          "S": 92
+        },
+        "bodyReceiveQueueMax": 0,
+        "bodyRttMedianMs": 134.116,
+        "bodyRcvSpaceMinBytes": 76896.0,
+        "bodyLastReceiveAgeMaxMs": 522.0,
+        "atLeast8MiBAtSeconds": 40.708,
+        "limitations": [
+          "Kernel snapshots cannot exclude short unsampled queues.",
+          "RTT is to the common proxy, not provider origin.",
+          "File average includes all muxed tracks and varies locally.",
+          "Completed GET plus one redirect is not proof of only one TCP socket; initial redirect socket was idle."
+        ]
+      },
+      "expired": true,
+      "temporaryFilesRemoved": true
+    },
+    "windowComparison": {
+      "at": "2026-10-07T18:55:34.137348+00:00",
+      "question": "Does the eight-MiB window itself throttle the same pinned delivery?",
+      "rangeStart": 1251999744,
+      "perStageBytes": 16777216,
+      "stagesPlanned": [
+        "full16",
+        "split8x2",
+        "split8x2",
+        "full16"
+      ],
+      "maximumMediaBytes": 67108864,
+      "sameRouteRequired": true,
+      "productionChanged": false,
+      "routeCheck": {
+        "slot": 1,
+        "transport": "http",
+        "controlShadow": true,
+        "verifiedFromProductionModule": true
+      },
+      "comparison": {
+        "stages": [
+          {
+            "mode": "full",
+            "ranges": [
+              {
+                "status": 206,
+                "headersMs": 1460.64912,
+                "redirects": 1,
+                "bytes": 16777216,
+                "MiBProgressMs": [
+                  2879,
+                  3714,
+                  4758,
+                  5509,
+                  6046,
+                  7119,
+                  9995,
+                  13439,
+                  14794,
+                  16956,
+                  18660,
+                  21007,
+                  25193,
+                  27349,
+                  28704,
+                  30105
+                ],
+                "headers": {
+                  "contentLength": 16777216,
+                  "transferEncoding": null,
+                  "connection": "keep-alive",
+                  "server": "Apache2"
+                },
+                "elapsedMs": 30105.224661
+              }
+            ],
+            "bytes": 16777216,
+            "elapsedMs": 30105.367164,
+            "sha256": "39d3ab6093b909bcb14510d17a7561a0ccef260ed13063648e8c66ef03301807"
+          },
+          {
+            "mode": "split",
+            "ranges": [
+              {
+                "status": 206,
+                "headersMs": 1031.6639779999969,
+                "redirects": 0,
+                "bytes": 8388608,
+                "MiBProgressMs": [
+                  2421,
+                  5417,
+                  6697,
+                  8105,
+                  9682,
+                  11094,
+                  12214,
+                  14825
+                ],
+                "headers": {
+                  "contentLength": 8388608,
+                  "transferEncoding": null,
+                  "connection": "keep-alive",
+                  "server": "Apache2"
+                },
+                "elapsedMs": 14824.781168999998
+              },
+              {
+                "status": 206,
+                "headersMs": 701.7234030000036,
+                "redirects": 0,
+                "bytes": 8388608,
+                "MiBProgressMs": [
+                  2033,
+                  4058,
+                  5265,
+                  6599,
+                  7861,
+                  9252,
+                  11208,
+                  12766
+                ],
+                "headers": {
+                  "contentLength": 8388608,
+                  "transferEncoding": null,
+                  "connection": "keep-alive",
+                  "server": "Apache2"
+                },
+                "elapsedMs": 12765.779396000005
+              }
+            ],
+            "bytes": 16777216,
+            "elapsedMs": 27590.593355,
+            "sha256": "39d3ab6093b909bcb14510d17a7561a0ccef260ed13063648e8c66ef03301807"
+          },
+          {
+            "mode": "split",
+            "ranges": [
+              {
+                "status": 206,
+                "headersMs": 665.576393000003,
+                "redirects": 0,
+                "bytes": 8388608,
+                "MiBProgressMs": [
+                  2843,
+                  4102,
+                  4915,
+                  5574,
+                  6273,
+                  7160,
+                  7938,
+                  16641
+                ],
+                "headers": {
+                  "contentLength": 8388608,
+                  "transferEncoding": null,
+                  "connection": "keep-alive",
+                  "server": "Apache2"
+                },
+                "elapsedMs": 16641.31042200001
+              },
+              {
+                "status": 206,
+                "headersMs": 839.9193150000065,
+                "redirects": 0,
+                "bytes": 8388608,
+                "MiBProgressMs": [
+                  2495,
+                  3831,
+                  5344,
+                  6239,
+                  7231,
+                  8326,
+                  9458,
+                  10557
+                ],
+                "headers": {
+                  "contentLength": 8388608,
+                  "transferEncoding": null,
+                  "connection": "keep-alive",
+                  "server": "Apache2"
+                },
+                "elapsedMs": 10556.843091999996
+              }
+            ],
+            "bytes": 16777216,
+            "elapsedMs": 27198.176206000004,
+            "sha256": "39d3ab6093b909bcb14510d17a7561a0ccef260ed13063648e8c66ef03301807"
+          },
+          {
+            "mode": "full",
+            "ranges": [
+              {
+                "status": 206,
+                "headersMs": 1075.3952069999941,
+                "redirects": 0,
+                "bytes": 16777216,
+                "MiBProgressMs": [
+                  2487,
+                  3821,
+                  5378,
+                  6719,
+                  7860,
+                  9425,
+                  11115,
+                  12625,
+                  13949,
+                  15230,
+                  16354,
+                  17230,
+                  17977,
+                  18545,
+                  19006,
+                  19458
+                ],
+                "headers": {
+                  "contentLength": 16777216,
+                  "transferEncoding": null,
+                  "connection": "keep-alive",
+                  "server": "Apache2"
+                },
+                "elapsedMs": 19457.813387999995
+              }
+            ],
+            "bytes": 16777216,
+            "elapsedMs": 19457.826501999996,
+            "sha256": "39d3ab6093b909bcb14510d17a7561a0ccef260ed13063648e8c66ef03301807"
+          }
+        ],
+        "requests": 7,
+        "sameBytes": true,
+        "cpuSeconds": 1.865008,
+        "loopP99Ms": 21.200895,
+        "loopMaxMs": 22.446079,
+        "elapsedMs": 104352.275453
+      },
+      "exit": 0,
+      "heartbeatFailures": [],
+      "expired": true,
+      "temporaryFilesRemoved": true,
+      "endedAt": "2026-10-07T18:57:20.346591+00:00"
+    },
+    "forwardControl": {
+      "at": "2026-10-07T19:00:35.073082+00:00",
+      "question": "Does HTTP forward differ from CONNECT on the same configured proxy slot, credentials and exact file?",
+      "copy": "Normal exact 4K FR HDR",
+      "rangeStart": 1251999744,
+      "rangeBytes": 16777216,
+      "reader": "system libcurl to a local temporary regular file",
+      "route": "same pinned proxy slot 1 and credentials, diagnostic HTTP forward only",
+      "initialGets": 1,
+      "newProductionCode": false,
+      "routeCheck": {
+        "slot": 1,
+        "productionTransport": "http",
+        "productionTunnel": true,
+        "diagnosticTunnel": false,
+        "controlShadow": true,
+        "verifiedFromProductionModule": true,
+        "productionChanged": false
+      },
+      "result": {
+        "httpStatus": 206,
+        "seconds": 44.325739,
+        "firstByteSeconds": 1.447963,
+        "connectSeconds": 0.239676,
+        "bytes": 16777216,
+        "sha256": "39d3ab6093b909bcb14510d17a7561a0ccef260ed13063648e8c66ef03301807",
+        "exit": 0,
+        "contentRanges": [
+          "bytes 1251999744-1268776959/13662582623"
+        ],
+        "redirects": 1,
+        "effectiveScheme": "http",
+        "connections": 2
+      },
+      "heartbeatFailures": [],
+      "expired": true,
+      "temporaryFilesRemoved": true,
+      "endedAt": "2026-10-07T19:01:20.139452+00:00"
+    },
+    "mediaGetInvocations": 8,
+    "httpRequestsIncludingObservedRedirects": 11,
+    "mediaBytesReceived": 100663296,
+    "scopeLimits": [
+      "Only Normal exact range 1251999744-1268776959 was used; this is not a new Severance replay.",
+      "Curl receiving to a file bypasses Norva media code, cache and FFmpeg, but shares the configured proxy route.",
+      "Whole-file average includes all tracks; local bitrate varies.",
+      "The HTTP-forward test retained the configured proxy slot and credentials; exit address was not independently measured.",
+      "No demonstrated stable benefit from larger windows or HTTP forward.",
+      "Provider delivery versus shared proxy remains unresolved."
+    ],
+    "cleanup": {
+      "at": "2026-10-07T19:04:31.704432+00:00",
+      "temporaryFilesRemaining": 0,
+      "proofContainersRemaining": 0
+    },
+    "finalStatus": {
+      "at": "2026-10-07T19:04:30.058555+00:00",
+      "activeAccountReaders": 0,
+      "operatorClaims": [
+        {
+          "type": "movie",
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-07T18:44:33.614281+00:00",
+          "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+          "events": []
+        },
+        {
+          "type": "movie",
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-07T18:49:03.612318+00:00",
+          "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+          "events": []
+        },
+        {
+          "type": "movie",
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-07T18:55:34.190788+00:00",
+          "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+          "events": []
+        },
+        {
+          "type": "movie",
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-07T19:00:35.162856+00:00",
+          "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+          "events": []
+        }
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "activeGlobal": 0
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "activeGlobal": 0
+        }
+      ]
+    }
   }
 }

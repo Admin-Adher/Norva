@@ -78,3 +78,45 @@ A short already-produced segment from the warm Severance session was checked loc
 At 18:32:28 all three operator sessions were expired, the account had zero active readers, and the browser was back on Movies. Both Gateways were healthy on the same PR 696 image. One unrelated global reader remained preserved. No thresholds, cache TTL/size, provider route, codec, lease, account scope or production code changed. Pilot extension remains unvalidated. No new hourly automation was created.
 
 Read-only operators and safe receipts: `.codex-artifacts/resume-flow-diagnosis-20261007/`, notably `normal-rate-analysis.safe.json`, `warm-rate-analysis.safe.json`, `all-phases.safe.json`, `browser-flow.safe.json`, `warm-local-codecs.safe.json` and `final.safe.json`.
+
+
+## Transport isolation, 18:44–19:01 UTC (20:44–21:01 Paris)
+
+New bounded question: does the poor sustained input rate persist outside the Norva media process, and is it explained by the eight-MiB window or CONNECT tunnel? The tested bytes are **Normal only**, exact range 1,251,999,744–1,268,776,959 of the same 13,662,582,623-byte file. This is not another Severance continuity test.
+
+### Independent receive observation
+
+System libcurl, writing to a private temporary regular file rather than FFmpeg, received the exact **16 MiB in 47.679798 s** (HTTP 206, one redirect, 2.815 Mbit/s). SHA-256 `39d3ab6093b909bcb14510d17a7561a0ccef260ed13063648e8c66ef03301807`. It bypasses the Norva JavaScript media path, cache, demuxer, decoder and browser; the configured proxy route remains common.
+
+Across 92 half-second process snapshots, curl used 0.20 s CPU over the observed 47.481 s and was sleeping in all snapshots, usually in socket polling. Eighty-eight body-socket samples had an empty receive queue, a kernel `rcv_space` value of at least 76,896 bytes, and median TCP RTT 134.116 ms to the proxy. The idle socket left by the initial redirect is excluded from the body-only aggregates. Snapshot sampling cannot exclude short unseen queues; these are not packet captures and do not locate an upstream bottleneck beyond the proxy. They do demonstrate a slow receive outside the Norva media pipeline without a sustained local CPU/receive-queue bottleneck in this test.
+
+The current exact profile reports 5,513.984 s and 13,662,582,623 bytes: a whole-file average of **19.822 Mbit/s**. This includes all muxed tracks and varies by position; it is not an exact requirement for each second. The measured receive rates nevertheless remain far below that average. Transcoding the output to a lower resolution does not itself reduce the original muxed bytes that must first reach the server.
+
+### Window-size control on one authorized target
+
+An isolated helper from the production image used the production Undici/proxy implementation without the broker, FFmpeg, browser or production volumes. A single pinned agent and resolved delivery target were used for four stages over the same bytes, ordered full/split/split/full:
+
+| Stage | Range layout | Total bytes | Elapsed |
+|---|---|---:|---:|
+| 1 | One 16 MiB response | 16 MiB | 30.105 s |
+| 2 | Two consecutive 8 MiB responses | 16 MiB | 27.591 s |
+| 3 | Two consecutive 8 MiB responses | 16 MiB | 27.198 s |
+| 4 | One 16 MiB response | 16 MiB | 19.458 s |
+
+All four complete hashes equal the libcurl hash. Six serialized media ranges plus one initial redirect; no later redirect or identity relaxation. The helper used 1.865 s CPU in 104.352 s; event-loop delay maximum 22.446 ms with 20 ms monitoring resolution. No multi-second helper event-loop stall was observed. These results do **not** establish a stable advantage for a larger range; time variation remains. The production eight-MiB size was preserved.
+
+### Same configured proxy, HTTP forward control
+
+One final libcurl control used HTTP forward instead of CONNECT, with the same configured proxy endpoint, slot and credentials. The final delivery URL was HTTP. It received the same exact 16 MiB/hash in **44.325739 s** (3.028 Mbit/s), HTTP 206 and one redirect. This is still slow and gives no demonstrated transport-mode fix. The comparison was sequential, not simultaneous, and the exit address was not independently measured. No production routing policy changed.
+
+### Guards and cleanup
+
+The first preflight at 18:44:33 acquired an ordinary direct claim but stopped before any media GET: the global last-route diagnostic referred to another account. Its claim expired normally. The diagnostic was corrected to read the production affinity/slot/forward-policy modules and current shadow policy, rather than treating a global last-observed route as account evidence. A separate consumed marker was used; the original marker was not replayed.
+
+All later reads used ordinary direct claims and independent 0.5 s heartbeats with one-second fail-closed timeout. Production takeover grace was checked; each request drained or would be stopped before expiry. No parallel media request for the account, no forced lease, no route/configuration/codec/cache/buffer change. The eight completed media ranges total **96 MiB** across the curl, window-size and forward controls; three observed initial redirects bring the HTTP count to eleven. There was no whole-file download.
+
+Every temporary media/header/private-output file was deleted; the helper container was removed. All claims expired and the owner-only pilot remains unchanged. The common proxy versus provider delivery boundary is still unresolved; these tests establish that the slow receive also occurs before Norva's media processing. Neither larger cache windows nor an HTTP-mode change has a demonstrated remedy here.
+
+Safe receipts and consumed diagnostic operators: `.codex-artifacts/resume-socket-proof-20261007/`. No browser playback was launched by these transport controls, no new deployment or hourly automation was created.
+
+Final read-only check at **19:04:30 UTC**: four diagnostic claims expired (including the zero-media preflight), zero active readers on the target account, both Gateways healthy on the same image, zero global Gateway sessions at that snapshot. Cleanup at 19:04:31 confirms zero diagnostic containers and zero private temporary media/header/output files. The previously observed unrelated reader was not stopped by these operators.
