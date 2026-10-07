@@ -128,7 +128,7 @@ const { FiniteMkvResumePrefixCache } = require('./finiteMkvResumePrefixCache');
 const { FinitePlaybackRangeReuse } = require('./finitePlaybackRangeReuse');
 const { privateResumeBinding, createPrivateResumeOwnerGate, createRecentResumeOwnerGate } = require('./private-resume-binding');
 const { createFreshResumeHandoff, consumeFreshResumeHandoff } = require('./fresh-resume-handoff');
-const { privateResumeProfile } = require('./private-resume-profile');
+const { privateResumeProfile, canonicalResumeProfile } = require('./private-resume-profile');
 const { captureSamples, SAMPLE_BYTES, captureInputWindows, RECENT_INPUT_MAX_BYTES,
     RECENT_HEADER_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES } = require('./recent-resume-samples');
 const { validateRecentResume, recentResumeTargetParts, compareRecentResumeTargetParts } = require('./recent-resume-validation');
@@ -15445,14 +15445,22 @@ function privateResumeRetainedInputBinding(session) {
     const identity = asRecord(session.playbackIdentity), tracks = multiAudio ? audioRenditionsForSession(session)
         : [{ ...audio, streamIndex: audio.index }];
     if (!tracks.length || tracks.length > 12 || tracks.some(t => !Number.isInteger(t.streamIndex))) return null;
+    const subtitleRenditions = exactSubtitleRenditionsForSession(session);
+    // The retained object is source bytes, not a rendered subtitle selection.
+    // Auto vs explicit selection inside the identical prepared graph must not
+    // orphan those bytes. An outside-cohort request still changes the binding;
+    // the normal frozen graph and current request alone choose playback tracks.
+    const outsideSubtitle = Number.isInteger(session.subtitleStreamIndex)
+        && !subtitleRenditions.some(r => r.streamIndex === session.subtitleStreamIndex)
+        ? session.subtitleStreamIndex : null;
     return privateResumeBinding({ ownerKey: session.ownerKey, sourceUrl: session.sourceUrl,
         sourceId: identity.sourceId, sourceRevision: identity.sourceRevision,
         vodIdentityKey: identity.vodIdentityKey, fileSizeBytes: fileSizeBytesForSession(session),
-        profile: JSON.stringify({ protocol: 'recent-retained-input-2', audio: tracks,
-            selected: audio.index, requestedSubtitle: session.subtitleStreamIndex,
+        profile: canonicalResumeProfile({ protocol: 'recent-retained-input-3', audio: tracks,
+            selected: audio.index, requestedSubtitle: outsideSubtitle,
             sourceSubtitleCount: session.exactSubtitleHls?.sourceTrackCount,
             audioMode: session.audioMode, passthrough: session.clientAudioPassthrough,
-            subtitles: exactSubtitleRenditionsForSession(session), encoder: VIDEO_ENCODER_CONFIG.backend }) });
+            subtitles: subtitleRenditions, encoder: VIDEO_ENCODER_CONFIG.backend }) });
 }
 
 async function trySeedRecentRetainedInput(session, signal) {
@@ -15768,9 +15776,12 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         : FINITE_MKV_SEEK_WINDOW_BYTES);
     // Small windows bound indexed seek waste, but capping the entire ensuing
     // Matroska read at 2 MiB repeats remote response latency throughout playback.
-    // A single-audio MKV can grow to the ordinary window only after this same
-    // local read has consumed two small windows. Every new cue starts small.
-    const growMkvSequential = finiteMkv && exactAudioTrackCount === 1
+    // A MKV can grow to the ordinary window only after this same local read
+    // has consumed two small windows. Interleaved audio tracks share these
+    // source bytes; track count must not cap a sustained read. Every new cue
+    // starts small and the broker still owns just one provider connection.
+    const growMkvSequential = finiteMkv && (exactAudioTrackCount === 1
+        || (exactAudioTrackCount > 1 && canUseRecentResumeSamples(session.ownerKey)))
         && effectiveWindowBytes < FINITE_MKV_SEEK_WINDOW_BYTES;
     const sequentialWindowBytes = finiteMp4 || growMkvSequential ? FINITE_MKV_SEEK_WINDOW_BYTES
         : playbackStartupWindowPolicy.bytes(session.ownerKey, FINITE_MKV_SEEK_WINDOW_BYTES);

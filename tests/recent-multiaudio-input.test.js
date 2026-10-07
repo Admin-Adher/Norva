@@ -3,6 +3,7 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const { PrivateResumeHlsCache } = require('../services/media-gateway/src/private-resume-hls-cache');
 const { privateResumeBinding } = require('../services/media-gateway/src/private-resume-binding');
+const { canonicalResumeProfile } = require('../services/media-gateway/src/private-resume-profile');
 const { SAMPLE_BYTES:N, RECENT_TTL_MS } = require('../services/media-gateway/src/recent-resume-samples');
 const size=64*N, target='b'.repeat(64);
 const binding=privateResumeBinding({ownerKey:'a'.repeat(64),sourceUrl:'https://fixture.invalid/a',sourceId:'one',sourceRevision:'1',fileSizeBytes:size,profile:'three tracks'});
@@ -101,7 +102,7 @@ test('partial subtitle input retains the full ordinary plan and selected tracks 
         exactSubtitleHlsEnabled:s=>s.exactSubtitleHls?.enabled===true,
         selectedAudioTrackForSession:s=>s.audio,audioRenditionsForSession:s=>s.multiAudioHls.tracks,
         exactSubtitleRenditionsForSession:s=>s.exactSubtitleHls.renditions,
-        asRecord:x=>x||{},privateResumeBinding,fileSizeBytesForSession:s=>s.size,
+        asRecord:x=>x||{},privateResumeBinding,canonicalResumeProfile,fileSizeBytesForSession:s=>s.size,
         VIDEO_ENCODER_CONFIG:{backend:'vaapi'},
     });
     const session={ownerKey:'a'.repeat(64),sourceUrl:'https://fixture.invalid/a',size,format:'mkv',
@@ -110,6 +111,13 @@ test('partial subtitle input retains the full ordinary plan and selected tracks 
             renditions:Array.from({length:8},(_,i)=>({streamIndex:i+2,language:'en'}))}};
     const before=JSON.stringify(session),a=run(session);
     assert.ok(a);assert.equal(JSON.stringify(session),before);
+    const jsonbAudio=Object.fromEntries(Object.entries(session.audio).reverse());
+    assert.equal(run({...session,audio:jsonbAudio}).profileHash,a.profileHash);
+    // Explicitly selecting a rendition already in the same graph changes no
+    // retained source bytes and must keep the caller's selection untouched.
+    const explicit={...session,subtitleStreamIndex:3};
+    assert.equal(run(explicit).profileHash,a.profileHash);
+    assert.equal(explicit.subtitleStreamIndex,3);
     for(const change of [{subtitleStreamIndex:12},{audio:{index:3,codec:'aac'}},
         {exactSubtitleHls:{...session.exactSubtitleHls,sourceTrackCount:22}},
         {playbackIdentity:{sourceId:'one',sourceRevision:'2'}}])
