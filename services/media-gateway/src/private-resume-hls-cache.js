@@ -205,6 +205,11 @@ class PrivateResumeHlsCache {
         if (!identity && !recentProof) return this.rejectCapture('unverified-identity');
         const parsed = parseResumeMediaPlaylist(playlist);
         if (!parsed) return this.rejectCapture('ineligible-playlist');
+        // The relative clock below starts at the session origin. A sliding
+        // playlist has discarded that origin; never label its first remaining
+        // segment as time zero. Retained source bytes need no HLS clock.
+        const sequence = /^#EXT-X-MEDIA-SEQUENCE:([^\r\n]*)/m.exec(playlist);
+        if (sequence && sequence[1].trim() !== '0') return this.rejectCapture('sliding-playlist-unbound-clock');
         const localPosition = position - actualStartOffset;
         const index = parsed.segments.findIndex(s => s.start <= localPosition && s.end > localPosition);
         if (index < 0) return this.rejectCapture('position-outside-buffer');
@@ -257,6 +262,14 @@ class PrivateResumeHlsCache {
             return true;
         } catch (_) { return this.rejectCapture('capture-exception'); }
         finally { this.reservedBytes -= reservation; }
+    }
+    async captureWithInputFallback(args = {}) {
+        const epoch = this.epoch;
+        if (await this.capture(args)) return true;
+        // A revoked owner must not be repopulated by an asynchronous close.
+        if (!args.inputBinding || epoch !== this.epoch
+            || ['ownerKey', 'sourceUrlHash', 'fileSizeBytes'].some(k => args.inputBinding[k] !== args.binding?.[k])) return false;
+        return this.captureInput({ binding: args.inputBinding, observed: args.observed, inputWindows: args.inputWindows });
     }
     publicStatus() { this.prune(); return { protocol: 1, ...this.stats, entries: this.entries.size,
         bytes: this.bytes, reservedBytes: this.reservedBytes, maxBytes: this.maxBytes,
