@@ -25,7 +25,7 @@ function compareRecentResumeTargetParts(previous, current) {
 // prevents an old byte-range cache from validating itself. No retry or route
 // rotation; close/drain must finish before normal playback can take over.
 async function validateRecentResume({ plan, createBroker, signal, budgetMs = 8000, fetchImpl = fetch,
-    acceptIdentity = () => true, onIdentityRejected = () => {}, onFreshRejectedHeader = () => {} }) {
+    acceptIdentity = () => true, onIdentityRejected = () => {}, onFreshRejectedHeader = () => {}, onFreshValidatedHeader = () => {} }) {
     if (!plan || plan.kind !== 'sampled-recent-v1' || plan.ranges?.length !== 4
         || plan.ranges.some(r => !Number.isSafeInteger(r.start) || r.start < 0 || r.length !== SAMPLE_BYTES)) return null;
     const controller = new AbortController();
@@ -33,7 +33,7 @@ async function validateRecentResume({ plan, createBroker, signal, budgetMs = 800
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) abort();
     const timer = setTimeout(abort, Math.min(8000, Math.max(1, budgetMs)));
-    let broker, rejectedHeader = null;
+    let broker, rejectedHeader = null, validatedHeader = null;
     try {
         if (controller.signal.aborted) return null;
         broker = await createBroker(controller.signal);
@@ -55,6 +55,7 @@ async function validateRecentResume({ plan, createBroker, signal, budgetMs = 800
             }
             samples.push({ start: range.start, payload });
         }
+        validatedHeader = samples[0].start === 0 ? samples[0].payload : null;
         return controller.signal.aborted ? null : samples;
     } catch (_) { return null; }
     finally {
@@ -63,6 +64,9 @@ async function validateRecentResume({ plan, createBroker, signal, budgetMs = 800
         controller.abort();
         await broker?.close();
         signal?.removeEventListener('abort', abort);
+        if (canHandoff && validatedHeader && !signal?.aborted && !broker?.terminalError) {
+            try { onFreshValidatedHeader(broker, validatedHeader); } catch (_) { /* Optional fresh routing handoff. */ }
+        }
         if (canHandoff && rejectedHeader && !signal?.aborted && !broker?.terminalError) {
             try { onFreshRejectedHeader(broker, rejectedHeader); } catch (_) { /* Optional handoff; ordinary input remains available. */ }
         }

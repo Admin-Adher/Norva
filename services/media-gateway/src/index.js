@@ -128,6 +128,7 @@ const { FiniteMkvResumePrefixCache } = require('./finiteMkvResumePrefixCache');
 const { FinitePlaybackRangeReuse } = require('./finitePlaybackRangeReuse');
 const { privateResumeBinding, createPrivateResumeOwnerGate, createRecentResumeOwnerGate } = require('./private-resume-binding');
 const { createFreshResumeHandoff, consumeFreshResumeHandoff } = require('./fresh-resume-handoff');
+const { retainRecentDeliveryTarget, consumeRecentDeliveryTarget } = require('./recent-delivery-target');
 const { privateResumeProfile, canonicalResumeProfile } = require('./private-resume-profile');
 const { captureSamples, SAMPLE_BYTES, captureInputWindows, RECENT_INPUT_MAX_BYTES,
     RECENT_HEADER_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES } = require('./recent-resume-samples');
@@ -7072,6 +7073,10 @@ async function createStrictLidBroker(options = {}) {
             sourceUrl, fileSizeBytes, userAgent: String(options.userAgent || FFMPEG_USER_AGENT) }) : null;
     if (!isHttpUrl(sourceUrl)) throw strictLidBrokerError('INVALID_SOURCE', 'Strict language media source is invalid', { status: 400 });
     if (!fileSizeBytes) throw strictLidBrokerError('EXACT_FILE_SIZE_REQUIRED', 'Exact media file size is required', { status: 400 });
+    const recentDelivery = options.recentDeliveryTarget ? consumeRecentDeliveryTarget(options.recentDeliveryTarget, {
+        ownerKey: options.recentDeliveryOwner, routeKey: options.recentDeliveryRoute,
+        sourceUrl, fileSizeBytes, userAgent: String(options.userAgent || FFMPEG_USER_AGENT),
+    }) : null;
     const handle = crypto.randomBytes(32).toString('base64url');
     const pathPrefix = options.pathPrefix === 'finite-mkv-seek' ? 'finite-mkv-seek' : 'strict-lid';
     const expectedPath = `/${pathPrefix}/${handle}`;
@@ -7298,6 +7303,12 @@ async function createStrictLidBroker(options = {}) {
             ),
         );
     }
+    if (recentDelivery) {
+        // Routing only: this broker must still read all four fresh samples.
+        context.strictResolvedSourceUrl = recentDelivery.targetUrl;
+        context.effectiveUrlSha256 = recentDelivery.targetHash;
+        context.effectiveUrlIdentitySha256 = recentDelivery.targetIdentity;
+    }
     if (freshContinuation) {
         // Keep the very same current delivery target: a second redirect must
         // not splice another representation onto the freshly read header.
@@ -7334,6 +7345,25 @@ async function createStrictLidBroker(options = {}) {
     let closePromise = null;
     const broker = {
         inputUrl: `http://127.0.0.1:${address.port}${expectedPath}`,
+        get recentDeliveryTargetUsed() { return Boolean(recentDelivery); },
+        retainDeliveryTarget({ ownerKey, routeKey }) {
+            if (!context.captureRecentSamples || !context.drainCompleted || context.terminalError
+                || context.completedProviderFetches < 1) return null;
+            return retainRecentDeliveryTarget({ ownerKey, routeKey, sourceUrl,
+                userAgent: context.userAgent, fileSizeBytes, targetUrl: context.strictResolvedSourceUrl,
+                targetHash: context.effectiveUrlSha256, targetIdentity: context.effectiveUrlIdentitySha256 });
+        },
+        takeFreshValidatedHeader(payload) {
+            if (!context.drainCompleted || context.freshHeaderTaken || context.terminalError
+                || !options.freshResumeScope || context.providerFetches !== 4
+                || context.completedProviderFetches !== 4 || context.providerBytes !== 4 * 65536) return null;
+            context.freshHeaderTaken = true;
+            return createFreshResumeHandoff({ scope: options.freshResumeScope, sourceUrl,
+                userAgent: context.userAgent, fileSizeBytes, targetUrl: context.strictResolvedSourceUrl,
+                effectiveUrlSha256: context.effectiveUrlSha256,
+                effectiveUrlIdentitySha256: context.effectiveUrlIdentitySha256,
+                validator: context.validator, targetParts: recentResumeTargetParts(context.strictResolvedSourceUrl), payload });
+        },
         takeFreshRejectedHeader(payload) {
             if (!context.drainCompleted || context.freshHeaderTaken || context.terminalError
                 || !options.freshResumeScope || context.providerFetches !== 1
@@ -15428,7 +15458,8 @@ function privateResumeObservedIdentity(session) {
     return { validator: session.vodInputValidator, fileSizeBytes: fileSizeBytesForSession(session),
         effectiveUrlIdentitySha256: session.vodInputEffectiveUrlIdentitySha256,
         samples: canUseRecentResumeSamples(session.ownerKey) ? session.privateResumeSamples : null,
-        targetParts: session.vodInputTargetParts || null };
+        targetParts: session.vodInputTargetParts || null,
+        deliveryTarget: session.privateResumeDeliveryTarget || null };
 }
 
 function privateResumeRetainedInputBinding(session) {
@@ -15566,6 +15597,13 @@ async function buildPrivateResumeSubtitleContinuation(session) {
     return session.privateResumeSubtitleGraph || null;
 }
 
+function recentDeliveryRouteKey(session) {
+    const route = providerNodeRouteForSession(session);
+    if (!route) return null;
+    return isPublicDirectRoute(route) ? 'public-direct'
+        : JSON.stringify([route.nodeTransport, route.slot, route.httpProxyMode || 'connect']);
+}
+
 async function revalidateRecentResumeSession(session, plan, requestSignal) {
     const controller = new AbortController();
     session.recentResumeValidationController = controller;
@@ -15592,15 +15630,26 @@ async function revalidateRecentResumeSession(session, plan, requestSignal) {
                     session.freshResumeHandoff = broker.takeFreshRejectedHeader?.(payload) || null;
                 }
             },
-            createBroker: signal => createStrictLidBroker({ sourceUrl: session.sourceUrl,
-                fileSizeBytes: fileSizeBytesForSession(session),
-                userAgent: session.userAgent || FFMPEG_USER_AGENT,
-                dispatcherFactory: pinnedProxyAgentFactoryForRoute(providerNodeRouteForSession(session)),
-                onProviderIdentity: current => { identity = current; },
-                freshResumeScope: session,
-                completedReleaseDelayMs: 0, supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
-                abortSignal: signal,
-            }),
+            onFreshValidatedHeader: (broker, payload) => {
+                if (!controller.signal.aborted && !session.stoppingPromise) {
+                    session.freshResumeHandoff = broker.takeFreshValidatedHeader?.(payload) || null;
+                }
+            },
+            createBroker: async signal => {
+                const broker = await createStrictLidBroker({ sourceUrl: session.sourceUrl,
+                    recentDeliveryTarget: plan.deliveryTarget, recentDeliveryOwner: session.ownerKey,
+                    recentDeliveryRoute: recentDeliveryRouteKey(session),
+                    fileSizeBytes: fileSizeBytesForSession(session),
+                    userAgent: session.userAgent || FFMPEG_USER_AGENT,
+                    dispatcherFactory: pinnedProxyAgentFactoryForRoute(providerNodeRouteForSession(session)),
+                    onProviderIdentity: current => { identity = current; },
+                    freshResumeScope: session,
+                    completedReleaseDelayMs: 0, supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
+                    abortSignal: signal,
+                });
+                session.startupTimings.recentDeliveryTargetUsed = broker.recentDeliveryTargetUsed === true;
+                return broker;
+            },
         });
         return samples && identity ? { ...identity, samples, fileSizeBytes: fileSizeBytesForSession(session) } : null;
     })();
@@ -15967,6 +16016,10 @@ async function closeFiniteMkvSeekBroker(session) {
         broker.dispatcherFallbacks || 0,
     );
     await broker.close().catch(() => {});
+    if (session.privateResumeStopPosition > 0 && canUseRecentResumeSamples(session.ownerKey)) {
+        session.privateResumeDeliveryTarget = broker.retainDeliveryTarget?.({ ownerKey: session.ownerKey,
+            routeKey: recentDeliveryRouteKey(session) }) || null;
+    }
     // Provider release/next playback must not wait for metadata disk I/O. The
     // bounded hot index already makes completed windows available immediately.
     void session.finiteTsIndexObserver?.close().catch(() => {});
@@ -22451,6 +22504,7 @@ async function stopSession(session, options = {}) {
         await capturePrivateResumeWindow(session).catch(() => false);
         session.privateResumeSamples = null;
         session.privateResumeInputWindows = null;
+        session.privateResumeDeliveryTarget = null;
         releaseVideoEncoderAdmission(session);
         await session.completeHlsCachePromotionPromise?.catch(() => null);
         await session.sharedMediaCachePublicationPromise?.catch(() => null);

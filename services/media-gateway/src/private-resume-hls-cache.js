@@ -111,12 +111,12 @@ class PrivateResumeHlsCache {
     }
     inputRevalidationPlan(binding) {
         const entry = this.inputCandidate(binding), proof = entry?.recentProof;
-        return proof ? { kind: proof.kind, target: proof.target, targetParts: entry.targetParts,
+        return proof ? { kind: proof.kind, target: proof.target, targetParts: entry.targetParts, deliveryTarget: entry.deliveryTarget,
             ranges: proof.ranges.map(({ start, length }) => ({ start, length })) } : null;
     }
     revalidationPlan(binding, position) {
         const entry = this.candidate(binding, position), proof = entry?.recentProof;
-        return proof ? { kind: proof.kind, target: proof.target, targetParts: entry.targetParts,
+        return proof ? { kind: proof.kind, target: proof.target, targetParts: entry.targetParts, deliveryTarget: entry.deliveryTarget,
             ranges: proof.ranges.map(({ start, length }) => ({ start, length })) } : null;
     }
     acquireInput(binding, observed) { return this.acquire(binding, 0, observed, true); }
@@ -189,7 +189,7 @@ class PrivateResumeHlsCache {
                 return this.rejectCapture('input-header-unavailable');
             const bytes = windows.reduce((n,w) => n + w.payload.length, 0);
             if (prior) this.drop(key, prior);
-            this.entries.set(key, { binding, recentProof, targetParts: observed.targetParts, inputOnly: true, inputWindows: windows,
+            this.entries.set(key, { binding, recentProof, targetParts: observed.targetParts, deliveryTarget: observed.deliveryTarget, inputOnly: true, inputWindows: windows,
                 assets: new Map(), subtitlePlaylists: new Map(), bytes, leases: 0, live: true,
                 expiresAt: this.now() + Math.min(this.ttlMs, RECENT_TTL_MS) });
             this.bytes += bytes; this.stats.inputStores++;
@@ -253,7 +253,7 @@ class PrivateResumeHlsCache {
             bytes += retainedInput.reduce((sum,w) => sum+w.payload.length, 0);
             if (this.entries.get(key) !== prior || this.entries.size - (prior ? 1 : 0) >= this.maxEntries) return this.rejectCapture('concurrent-capture');
             if (prior) this.drop(key, prior);
-            this.entries.set(key, { binding, identity, recentProof, targetParts: observed.targetParts, start, end, ended, segments, assets, bytes, bandwidth,
+            this.entries.set(key, { binding, identity, recentProof, targetParts: observed.targetParts, deliveryTarget: observed.deliveryTarget, start, end, ended, segments, assets, bytes, bandwidth,
                 inputWindows: retainedInput,
                 subtitlePlaylists: subtitles.playlists,
                 expiresAt: this.now() + (recentProof ? Math.min(this.ttlMs, RECENT_TTL_MS) : this.ttlMs), leases: 0, live: true });

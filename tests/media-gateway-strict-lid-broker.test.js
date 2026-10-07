@@ -131,6 +131,7 @@ function brokerHarness(diagnosticLogs = null) {
       ...require('../services/media-gateway/src/recent-resume-samples'),
       ...require('../services/media-gateway/src/recent-resume-validation'),
       ...require('../services/media-gateway/src/fresh-resume-handoff'),
+      ...require('../services/media-gateway/src/recent-delivery-target'),
       createStrictRangeCollector,
       createMp4SizeEvidence: require('../services/media-gateway/src/mp4-size-evidence').createMp4SizeEvidence,
       fetch,
@@ -3907,4 +3908,58 @@ test('real split-track MP4 demuxing serves cache during remote release grace', {
  const started=Date.now();let failure=null;
  try{await promisify(execFile)('ffmpeg',['-v','error','-analyzeduration','500000','-probesize','65536','-ss','1.37','-i',broker.inputUrl,'-t','3','-f','null','-'],{timeout:30000});}catch(e){failure={code:e.code,killed:e.killed,stderr:e.stderr?.slice(-400)}}
  assert.equal(peak,1);assert.equal(failure,null);
+});
+
+
+for (const mode of ['same','changed-bytes','expired','redirected','changed-size']) test(`recent delivery hint through real HTTP: ${mode}`, async()=>{
+  const {validateRecentResume}=require('../services/media-gateway/src/recent-resume-validation');
+  const {sampleProof,samplesMatch}=require('../services/media-gateway/src/recent-resume-samples');
+  const N=65536,size=16*N,ownerKey='a'.repeat(64),routeKey='http:1:connect',scope={id:'new-playback'};
+  let entries=0,ranges=0,active=0,maxActive=0,phase='initial',identity,first,next,handoff;
+  const server=http.createServer((req,res)=>{
+    if(req.url==='/entry'){entries++;res.writeHead(302,{Location:'/token-'+entries});res.end();return;}
+    if(phase==='resume'&&mode==='expired'&&req.url==='/token-1'){res.writeHead(403);res.end();return;}
+    if(phase==='resume'&&mode==='redirected'&&req.url==='/token-1'){res.writeHead(302,{Location:'/different'});res.end();return;}
+    ranges++;active++;maxActive=Math.max(maxActive,active);
+    const [start,end]=req.headers.range.slice(6).split('-').map(Number),total=phase==='resume'&&mode==='changed-size'?size+1:size;
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${total}`,'Content-Length':end-start+1});
+    res.once('finish',()=>active--);res.end(Buffer.alloc(end-start+1,phase==='resume'&&mode==='changed-bytes'?9:4));
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const sourceUrl=`http://127.0.0.1:${server.address().port}/entry`,h=brokerHarness();
+  try{
+    first=await h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,pathPrefix:'finite-mkv-seek',captureRecentSamples:true,
+      finiteWindowBytes:N,finiteWarmupWindowBytes:0,completedReleaseDelayMs:0,onProviderIdentity:v=>identity=v});
+    const original=[];
+    for(const start of [0,4*N,8*N,12*N]){
+      const response=await fetch(first.inputUrl,{headers:{Range:`bytes=${start}-${start+N-1}`}});
+      assert.equal(response.status,206);original.push({start,payload:Buffer.from(await response.arrayBuffer())});
+    }
+    assert.equal(first.retainDeliveryTarget({ownerKey,routeKey}),null,'live broker cannot hand off');
+    await first.close();const token=first.retainDeliveryTarget({ownerKey,routeKey});assert.ok(token);
+    const proof=sampleProof(original,size,identity.effectiveUrlIdentitySha256),plan={kind:proof.kind,target:proof.target,
+      ranges:proof.ranges.map(({start,length})=>({start,length}))};phase='resume';
+    const fresh=await validateRecentResume({plan,acceptIdentity:()=>identity.effectiveUrlIdentitySha256===proof.target,
+      onFreshValidatedHeader:(broker,payload)=>{assert.equal(active,0);handoff=broker.takeFreshValidatedHeader(payload);},
+      createBroker:async signal=>{const b=await h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,recentDeliveryTarget:token,
+        recentDeliveryOwner:ownerKey,recentDeliveryRoute:routeKey,freshResumeScope:scope,abortSignal:signal,
+        onProviderIdentity:v=>identity=v,completedReleaseDelayMs:0});assert.equal(b.recentDeliveryTargetUsed,true);return b;}});
+    assert.equal(samplesMatch(proof,fresh,size,identity.effectiveUrlIdentitySha256),mode==='same');
+    assert.equal(entries,1,'validation must not mint a second temporary delivery URL');
+    if(mode==='same'){
+      assert.ok(handoff);next=await h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,pathPrefix:'finite-mkv-seek',captureRecentSamples:true,
+        freshResumeScope:scope,freshResumeHandoff:handoff,finiteWindowBytes:N,finiteWarmupWindowBytes:0,completedReleaseDelayMs:0});
+      const before=ranges,header=await fetch(next.inputUrl,{headers:{Range:'bytes=0-4095'}});await header.arrayBuffer();assert.equal(ranges,before);
+      const body=await fetch(next.inputUrl,{headers:{Range:`bytes=${14*N}-${15*N-1}`}});assert.equal(body.status,206);
+      assert.equal(Buffer.from(await body.arrayBuffer()).equals(Buffer.alloc(N,4)),true);assert.equal(entries,1);
+    }else if(mode==='changed-bytes')assert.ok(handoff,'fresh header remains current, but old input proof was rejected');
+    else assert.equal(handoff,undefined);
+    if(mode==='expired'){
+      next=await h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,completedReleaseDelayMs:0});
+      const normal=await fetch(next.inputUrl,{headers:{Range:'bytes=0-65535'}});
+      assert.equal(normal.status,206);assert.equal((await normal.arrayBuffer()).byteLength,N);
+      assert.equal(entries,2,'expired hint leaves the ordinary source route usable');
+    }
+    assert.equal(maxActive,1);
+  }finally{await first?.close();await next?.close();await new Promise(resolve=>server.close(resolve));}
 });
