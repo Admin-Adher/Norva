@@ -9,6 +9,7 @@ module.exports = function brokerHarness() {
         AbortController, Buffer, Date, Error, Number, Object, Promise, String, URL,
         clearTimeout, setTimeout, setImmediate, fetch, console,
         crypto: require('node:crypto'), http: require('node:http'),
+        ...require('../../services/media-gateway/src/recent-resume-validation'),
         undiciRequest: require('undici').request, Readable: require('node:stream').Readable,
         createStrictRangeCollector: require('../../services/media-gateway/src/strict-lid-range-reuse').createStrictRangeCollector,
         createMp4SizeEvidence: require('../../services/media-gateway/src/mp4-size-evidence').createMp4SizeEvidence,
