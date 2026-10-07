@@ -1,0 +1,536 @@
+{
+  "scope": "Adrien recent-resume pilot only; not general Norva rollout",
+  "code": "bb25007ed45b8aa2104700c17301e6d72648290f",
+  "pr": 696,
+  "merge": "87a51a59f63f5183142bfc5d0d3c89c12baa6556",
+  "transportComparison": {
+    "at": "2026-10-07T17:24:53.279426+00:00",
+    "copy": "Normal exact 4K FR HDR",
+    "rangeStart": 1166016512,
+    "rangeBytes": 2097152,
+    "sequential": true,
+    "route": "same secondary HTTP CONNECT slot 1",
+    "results": [
+      {
+        "reader": "system libcurl independent of Norva",
+        "httpStatus": 206,
+        "seconds": 5.050663,
+        "firstByteSeconds": 1.698145,
+        "bytes": 2097152,
+        "sha256": "dbc0fa8dcb5298e8e2db87171a7cf174eef2555180b504b841401f87e12069dd",
+        "exit": 0,
+        "contentRanges": [
+          "bytes 1166016512-1168113663/13662582623"
+        ]
+      },
+      {
+        "reader": "production Undici and proxy agent, no broker/FFmpeg",
+        "statuses": [
+          302,
+          206
+        ],
+        "headersMs": 1819,
+        "contentRange": "bytes 1166016512-1168113663/13662582623",
+        "bytes": 2097152,
+        "sha256": "dbc0fa8dcb5298e8e2db87171a7cf174eef2555180b504b841401f87e12069dd",
+        "firstByteMs": 1820.080726,
+        "seconds": 2.82840439
+      }
+    ],
+    "providerInitialGets": 2,
+    "sameBytes": true,
+    "expired": true,
+    "temporaryFilesRemoved": true
+  },
+  "tests": {
+    "localPassed": 287,
+    "localSkipped": 6,
+    "localFailed": 0,
+    "selectedServerCanaryPassed": 15,
+    "overlap": true,
+    "allFiveCodeChecksSucceeded": true,
+    "initialFailure": "VM test fixture missing extracted route helper; corrected"
+  },
+  "deployment": {
+    "revision": "bb25007ed45b8aa2104700c17301e6d72648290f",
+    "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+    "startedAt": "2026-10-07T17:52:36.731180+00:00",
+    "pausedAt": "2026-10-07T17:52:36.803000+00:00",
+    "gatewaysApplied": [
+      {
+        "name": "norva-media-gateway",
+        "at": "2026-10-07T17:52:44.484713+00:00"
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "at": "2026-10-07T17:52:47.065969+00:00"
+      }
+    ],
+    "edgesUnchanged": true,
+    "leasesForced": false,
+    "dispatcherRestarted": false,
+    "completedAt": "2026-10-07T17:52:47.139021+00:00",
+    "restoredAt": "2026-10-07T17:52:47.444152+00:00",
+    "admissionsRestored": true,
+    "workerStateRestored": true,
+    "dispatcherPreserved": true,
+    "admissionPauseSeconds": 10.641152,
+    "gatewayFiles": 88,
+    "unchangedGatewayFiles": 84,
+    "edgeFiles": 194,
+    "edgeFilesAndPermissionsUnchanged": true,
+    "sourceTreeSha256": "7dea9c35bc5dbb33f2497e979cd81ec1ccf177fd98f354d9fd6f934f91af26ec"
+  },
+  "normal": {
+    "positionSeconds": 472,
+    "firstFrameMs": 28163,
+    "automatedPlayStarted": false,
+    "lastAt": "2026-10-07T17:56:20.241Z",
+    "lastTime": 0,
+    "lastBufferedSeconds": 59.999,
+    "stoppedManually": true,
+    "cacheStored": false,
+    "normalWarmTest": "not performed; no eligible recent entry from this unstarted playback"
+  },
+  "severance": {
+    "cold": {
+      "createdAt": "2026-10-07T17:57:06.43257+00:00",
+      "position": 927,
+      "playSeconds": 101.233,
+      "firstFrameMs": 45594
+    },
+    "warm": {
+      "createdAt": "2026-10-07T18:00:47.294424+00:00",
+      "position": 992,
+      "playSeconds": 11.086,
+      "firstFrameMs": 10904,
+      "targetHintUsed": true,
+      "inputHit": true,
+      "seededBytes": 67108864,
+      "validationMs": 5771,
+      "fourFreshSamplesMatched": true,
+      "initialPolicyObservedRateX": 12.012,
+      "continuousPlaybackCertified": false,
+      "observedInterruptions": [
+        {
+          "timeSeconds": 59.933878,
+          "at": "2026-10-07T18:02:11.883Z",
+          "paused": true,
+          "recoveredAt": "2026-10-07T18:02:45.649Z"
+        },
+        {
+          "timeSeconds": 145.951,
+          "from": "2026-10-07T18:06:22.654Z",
+          "through": "2026-10-07T18:06:42.202Z",
+          "paused": true
+        }
+      ],
+      "providerWindows": [
+        {
+          "requestId": 6,
+          "localStart": 1478563590,
+          "localEnd": 5006492900,
+          "providerStart": 1520435200,
+          "providerEnd": 1526726655,
+          "responseHeadersMs": 293,
+          "firstByteMs": 294,
+          "durationMs": 11628,
+          "bytes": 6291456,
+          "outcome": "completed",
+          "resolvedTargetReused": true,
+          "redirects": 0
+        },
+        {
+          "requestId": 6,
+          "localStart": 1478563590,
+          "localEnd": 5006492900,
+          "providerStart": 1526726656,
+          "providerEnd": 1535115263,
+          "responseHeadersMs": 888,
+          "firstByteMs": 888,
+          "durationMs": 16631,
+          "bytes": 8388608,
+          "outcome": "completed",
+          "resolvedTargetReused": true,
+          "redirects": 0
+        },
+        {
+          "requestId": 6,
+          "localStart": 1478563590,
+          "localEnd": 5006492900,
+          "providerStart": 1535115264,
+          "providerEnd": 1543503871,
+          "responseHeadersMs": 824,
+          "firstByteMs": 824,
+          "durationMs": 18271,
+          "bytes": 8388608,
+          "outcome": "completed",
+          "resolvedTargetReused": true,
+          "redirects": 0
+        },
+        {
+          "requestId": 6,
+          "localStart": 1478563590,
+          "localEnd": 5006492900,
+          "providerStart": 1543503872,
+          "providerEnd": 1551892479,
+          "responseHeadersMs": 645,
+          "firstByteMs": 645,
+          "durationMs": 3572,
+          "bytes": 8388608,
+          "outcome": "completed",
+          "resolvedTargetReused": true,
+          "redirects": 0
+        },
+        {
+          "requestId": 6,
+          "localStart": 1478563590,
+          "localEnd": 5006492900,
+          "providerStart": 1551892480,
+          "providerEnd": 1560281087,
+          "responseHeadersMs": 598,
+          "firstByteMs": 598,
+          "durationMs": 21833,
+          "bytes": 8388608,
+          "outcome": "completed",
+          "resolvedTargetReused": true,
+          "redirects": 0
+        },
+        {
+          "requestId": 6,
+          "localStart": 1478563590,
+          "localEnd": 5006492900,
+          "providerStart": 1560281088,
+          "providerEnd": 1568669695,
+          "responseHeadersMs": 1049,
+          "firstByteMs": 1049,
+          "durationMs": 20442,
+          "bytes": 8388608,
+          "outcome": "completed",
+          "resolvedTargetReused": true,
+          "redirects": 0
+        },
+        {
+          "requestId": 6,
+          "localStart": 1478563590,
+          "localEnd": 5006492900,
+          "providerStart": 1568669696,
+          "providerEnd": 1577058303,
+          "responseHeadersMs": 600,
+          "firstByteMs": 600,
+          "durationMs": 15847,
+          "bytes": 8388608,
+          "outcome": "completed",
+          "resolvedTargetReused": true,
+          "redirects": 0
+        },
+        {
+          "requestId": 6,
+          "localStart": 1478563590,
+          "localEnd": 5006492900,
+          "providerStart": 1577058304,
+          "providerEnd": 1585446911,
+          "responseHeadersMs": 593,
+          "firstByteMs": 593,
+          "durationMs": 3779,
+          "bytes": 8388608,
+          "outcome": "completed",
+          "resolvedTargetReused": true,
+          "redirects": 0
+        },
+        {
+          "requestId": 6,
+          "localStart": 1478563590,
+          "localEnd": 5006492900,
+          "providerStart": 1585446912,
+          "providerEnd": 1593835519,
+          "responseHeadersMs": 810,
+          "firstByteMs": 811,
+          "durationMs": 3634,
+          "bytes": 8388608,
+          "outcome": "completed",
+          "resolvedTargetReused": true,
+          "redirects": 0
+        },
+        {
+          "requestId": 6,
+          "localStart": 1478563590,
+          "localEnd": 5006492900,
+          "providerStart": 1593835520,
+          "providerEnd": 1602224127,
+          "responseHeadersMs": 620,
+          "firstByteMs": 621,
+          "durationMs": 11752,
+          "bytes": 8388608,
+          "outcome": "completed",
+          "resolvedTargetReused": true,
+          "redirects": 0
+        }
+      ]
+    }
+  },
+  "browserSampling": [
+    {
+      "label": "normal-cold",
+      "samples": 25,
+      "first": {
+        "label": "normal-cold",
+        "at": "2026-10-07T17:54:15.606Z",
+        "buffered": [
+          [
+            0.026333,
+            20.025333
+          ]
+        ],
+        "error": null,
+        "paused": true,
+        "ready": 4,
+        "time": 0
+      },
+      "last": {
+        "label": "normal-cold",
+        "at": "2026-10-07T17:54:40.785Z",
+        "buffered": [
+          [
+            0.026333,
+            28.025333
+          ]
+        ],
+        "error": null,
+        "paused": true,
+        "ready": 4,
+        "time": 0
+      },
+      "pausedSamples": 25
+    },
+    {
+      "label": "severance-cold",
+      "samples": 25,
+      "first": {
+        "label": "severance-cold",
+        "at": "2026-10-07T17:57:31.987Z",
+        "buffered": [],
+        "error": null,
+        "paused": true,
+        "ready": 0,
+        "time": 0
+      },
+      "last": {
+        "label": "severance-cold",
+        "at": "2026-10-07T17:57:57.324Z",
+        "buffered": [
+          [
+            0,
+            5.985666
+          ]
+        ],
+        "error": null,
+        "paused": true,
+        "ready": 4,
+        "time": 0
+      },
+      "pausedSamples": 25
+    },
+    {
+      "label": "severance-cold-gate",
+      "samples": 25,
+      "first": {
+        "label": "severance-cold-gate",
+        "at": "2026-10-07T17:58:34.872Z",
+        "buffered": [
+          [
+            0,
+            15.969666
+          ]
+        ],
+        "error": null,
+        "paused": true,
+        "ready": 4,
+        "time": 0
+      },
+      "last": {
+        "label": "severance-cold-gate",
+        "at": "2026-10-07T17:59:00.173Z",
+        "buffered": [
+          [
+            0,
+            29.985666
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 12.17516
+      },
+      "pausedSamples": 12
+    },
+    {
+      "label": "severance-warm-start",
+      "samples": 20,
+      "first": {
+        "label": "severance-warm-start",
+        "at": "2026-10-07T18:00:46.567Z",
+        "buffered": [],
+        "error": null,
+        "paused": true,
+        "ready": 0,
+        "time": 0
+      },
+      "last": {
+        "label": "severance-warm-start",
+        "at": "2026-10-07T18:01:07.545Z",
+        "buffered": [
+          [
+            0,
+            33.951
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 9.685361
+      },
+      "pausedSamples": 11
+    },
+    {
+      "label": "severance-warm-continuity",
+      "samples": 25,
+      "first": {
+        "label": "severance-warm-continuity",
+        "at": "2026-10-07T18:01:46.392Z",
+        "buffered": [
+          [
+            18.018,
+            53.961666
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 48.532926
+      },
+      "last": {
+        "label": "severance-warm-continuity",
+        "at": "2026-10-07T18:02:11.883Z",
+        "buffered": [
+          [
+            28.028,
+            63.945666
+          ]
+        ],
+        "error": null,
+        "paused": true,
+        "ready": 4,
+        "time": 59.933878
+      },
+      "pausedSamples": 14
+    },
+    {
+      "label": "severance-warm-long",
+      "samples": 20,
+      "first": {
+        "label": "severance-warm-long",
+        "at": "2026-10-07T18:06:22.654Z",
+        "buffered": [
+          [
+            114.031,
+            149.961666
+          ]
+        ],
+        "error": null,
+        "paused": true,
+        "ready": 4,
+        "time": 145.951
+      },
+      "last": {
+        "label": "severance-warm-long",
+        "at": "2026-10-07T18:06:42.202Z",
+        "buffered": [
+          [
+            114.031,
+            151.945666
+          ]
+        ],
+        "error": null,
+        "paused": true,
+        "ready": 4,
+        "time": 145.951
+      },
+      "pausedSamples": 20
+    }
+  ],
+  "localCodecChecks": [
+    {
+      "at": "2026-10-07T17:55:16.465365+00:00",
+      "localOnly": true,
+      "outputs": [
+        {
+          "createdAt": "2026-10-07T17:53:32.632Z",
+          "probeExit": 0,
+          "streams": [
+            {
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "start_time": "39.426333"
+            },
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "start_time": "39.437333"
+            }
+          ],
+          "localVideoFrames": 48,
+          "videoIntervalMaxSeconds": 0.04200000000000159,
+          "videoIntervalsAbove100ms": 0,
+          "decoderErrorLines": 0,
+          "frameProbeExit": 0,
+          "errorKind": null
+        }
+      ]
+    },
+    {
+      "at": "2026-10-07T17:59:27.036933+00:00",
+      "localOnly": true,
+      "outputs": [
+        {
+          "createdAt": "2026-10-07T17:57:06.718Z",
+          "probeExit": 0,
+          "streams": [
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "start_time": "33.400000"
+            }
+          ],
+          "localVideoFrames": 48,
+          "videoIntervalMaxSeconds": 0.04200000000000159,
+          "videoIntervalsAbove100ms": 0,
+          "decoderErrorLines": 0,
+          "frameProbeExit": 0,
+          "errorKind": null
+        }
+      ]
+    }
+  ],
+  "closeout": {
+    "at": "2026-10-07T18:08:40.418738+00:00",
+    "allThreeOperatorSessionsExpired": true,
+    "otherGlobalSessionsPreserved": 1,
+    "gatewaysHealthy": true,
+    "scopeStillOwnerOnly": true
+  },
+  "limits": [
+    "No attributed storage versus proxy/transport cause",
+    "No blanket performance gain: tested positions differ",
+    "Fast cache decode rate does not establish sustained delivery throughput",
+    "No extension of TTL/concurrency/thresholds or forced lease",
+    "No later playback or provider retry operator scheduled"
+  ]
+}
