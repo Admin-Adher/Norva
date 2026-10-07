@@ -25,7 +25,7 @@ function compareRecentResumeTargetParts(previous, current) {
 // prevents an old byte-range cache from validating itself. No retry or route
 // rotation; close/drain must finish before normal playback can take over.
 async function validateRecentResume({ plan, createBroker, signal, budgetMs = 8000, fetchImpl = fetch,
-    acceptIdentity = () => true, onIdentityRejected = () => {} }) {
+    acceptIdentity = () => true, onIdentityRejected = () => {}, onFreshRejectedHeader = () => {} }) {
     if (!plan || plan.kind !== 'sampled-recent-v1' || plan.ranges?.length !== 4
         || plan.ranges.some(r => !Number.isSafeInteger(r.start) || r.start < 0 || r.length !== SAMPLE_BYTES)) return null;
     const controller = new AbortController();
@@ -33,7 +33,7 @@ async function validateRecentResume({ plan, createBroker, signal, budgetMs = 800
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) abort();
     const timer = setTimeout(abort, Math.min(8000, Math.max(1, budgetMs)));
-    let broker;
+    let broker, rejectedHeader = null;
     try {
         if (controller.signal.aborted) return null;
         broker = await createBroker(controller.signal);
@@ -48,16 +48,24 @@ async function validateRecentResume({ plan, createBroker, signal, budgetMs = 800
             // A different current delivery target already makes this cache
             // ineligible. Finish/drain this exact response, then avoid the
             // remaining reads; success still requires all four fresh samples.
-            if (!acceptIdentity()) { onIdentityRejected(); return null; }
+            if (!acceptIdentity()) {
+                onIdentityRejected();
+                if (samples.length === 0 && range.start === 0) rejectedHeader = payload;
+                return null;
+            }
             samples.push({ start: range.start, payload });
         }
         return controller.signal.aborted ? null : samples;
     } catch (_) { return null; }
     finally {
+        const canHandoff = !controller.signal.aborted;
         clearTimeout(timer);
         controller.abort();
         await broker?.close();
         signal?.removeEventListener('abort', abort);
+        if (canHandoff && rejectedHeader && !signal?.aborted && !broker?.terminalError) {
+            try { onFreshRejectedHeader(broker, rejectedHeader); } catch (_) { /* Optional handoff; ordinary input remains available. */ }
+        }
     }
 }
 module.exports = { validateRecentResume, recentResumeTargetParts, compareRecentResumeTargetParts };

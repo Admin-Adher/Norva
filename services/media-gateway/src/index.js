@@ -126,7 +126,8 @@ const {
 const { ProviderAdaptiveRouteControl } = require('./providerAdaptiveRouteControl');
 const { FiniteMkvResumePrefixCache } = require('./finiteMkvResumePrefixCache');
 const { FinitePlaybackRangeReuse } = require('./finitePlaybackRangeReuse');
-const { privateResumeBinding, createPrivateResumeOwnerGate } = require('./private-resume-binding');
+const { privateResumeBinding, createPrivateResumeOwnerGate, createRecentResumeOwnerGate } = require('./private-resume-binding');
+const { createFreshResumeHandoff, consumeFreshResumeHandoff } = require('./fresh-resume-handoff');
 const { privateResumeProfile } = require('./private-resume-profile');
 const { captureSamples, SAMPLE_BYTES, captureInputWindows, RECENT_INPUT_MAX_BYTES,
     RECENT_HEADER_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES } = require('./recent-resume-samples');
@@ -2817,9 +2818,10 @@ const canUsePrivateResumeCache = createPrivateResumeOwnerGate({ enabled: PRIVATE
     ownerHashes: process.env.PRIVATE_RESUME_CACHE_OWNER_HASHES });
 const privateResumeByteRanges = new FinitePlaybackRangeReuse({ maxBytes: 128 * 1024 * 1024,
     perFileBytes: 32 * 1024 * 1024, maxRetainedWindowBytes: 8 * 1024 * 1024 });
-const canUseRecentResumeSamples = createPrivateResumeOwnerGate({
+const canUseRecentResumeSamples = createRecentResumeOwnerGate({
     enabled: process.env.PRIVATE_RESUME_RECENT_SAMPLES_ENABLED === 'true',
     ownerHashes: process.env.PRIVATE_RESUME_RECENT_SAMPLES_OWNER_HASHES,
+    allAuthenticatedOwners: process.env.PRIVATE_RESUME_RECENT_SAMPLES_ALL_AUTHENTICATED_OWNERS === 'true',
 });
 const privateResumeHlsCache = new PrivateResumeHlsCache({
     recentRevalidation: process.env.PRIVATE_RESUME_RECENT_SAMPLES_ENABLED === 'true',
@@ -3101,6 +3103,8 @@ app.get('/health', (req, res) => {
         privateResumeByteRanges: { enabled: PRIVATE_RESUME_CACHE_ENABLED,
             ownerScoped: Boolean(process.env.PRIVATE_RESUME_CACHE_OWNER_HASHES?.trim()), ...privateResumeByteRanges.publicStatus() },
         privateResumeHlsCache: { enabled: PRIVATE_RESUME_CACHE_ENABLED,
+            recentOwnerScope: process.env.PRIVATE_RESUME_RECENT_SAMPLES_ALL_AUTHENTICATED_OWNERS === 'true'
+                ? 'all-authenticated-owners' : 'owner-allowlist',
             ownerScoped: Boolean(process.env.PRIVATE_RESUME_CACHE_OWNER_HASHES?.trim()), ...privateResumeHlsCache.publicStatus() },
         sharedPlaybackRanges: sharedPlaybackRanges.publicStatus(),
         finiteTsSeekIndex: finiteTsSeekIndex.status(),
@@ -7063,6 +7067,9 @@ function handleStrictLidBrokerRequest(context, expectedPath, req, res) {
 async function createStrictLidBroker(options = {}) {
     const sourceUrl = String(options.sourceUrl || '');
     const fileSizeBytes = normalizeStrictLidFileSize(options.fileSizeBytes);
+    const freshContinuation = options.pathPrefix === 'finite-mkv-seek'
+        ? consumeFreshResumeHandoff(options.freshResumeHandoff, { scope: options.freshResumeScope,
+            sourceUrl, fileSizeBytes, userAgent: String(options.userAgent || FFMPEG_USER_AGENT) }) : null;
     if (!isHttpUrl(sourceUrl)) throw strictLidBrokerError('INVALID_SOURCE', 'Strict language media source is invalid', { status: 400 });
     if (!fileSizeBytes) throw strictLidBrokerError('EXACT_FILE_SIZE_REQUIRED', 'Exact media file size is required', { status: 400 });
     const handle = crypto.randomBytes(32).toString('base64url');
@@ -7291,7 +7298,18 @@ async function createStrictLidBroker(options = {}) {
             ),
         );
     }
-    seedFiniteMkvCurrentPrefix(context, options);
+    if (freshContinuation) {
+        // Keep the very same current delivery target: a second redirect must
+        // not splice another representation onto the freshly read header.
+        context.strictResolvedSourceUrl = freshContinuation.targetUrl;
+        context.validator = freshContinuation.validator || null;
+        context.effectiveUrlSha256 = freshContinuation.effectiveUrlSha256;
+        context.effectiveUrlIdentitySha256 = freshContinuation.effectiveUrlIdentitySha256;
+        seedFiniteMkvCurrentPrefix(context, { finiteCurrentPrefix: freshContinuation.prefix,
+            finiteCurrentPrefixOwner: options.freshResumeScope.id });
+        onProviderIdentity?.({ validator: context.validator, effectiveUrlSha256: context.effectiveUrlSha256,
+            effectiveUrlIdentitySha256: context.effectiveUrlIdentitySha256, targetParts: freshContinuation.targetParts });
+    } else seedFiniteMkvCurrentPrefix(context, options);
     const server = http.createServer((req, res) => {
         handleStrictLidBrokerRequest(context, expectedPath, req, res);
     });
@@ -7316,6 +7334,17 @@ async function createStrictLidBroker(options = {}) {
     let closePromise = null;
     const broker = {
         inputUrl: `http://127.0.0.1:${address.port}${expectedPath}`,
+        takeFreshRejectedHeader(payload) {
+            if (!context.drainCompleted || context.freshHeaderTaken || context.terminalError
+                || !options.freshResumeScope || context.providerFetches !== 1
+                || context.completedProviderFetches !== 1 || context.providerBytes !== 65536) return null;
+            context.freshHeaderTaken = true;
+            return createFreshResumeHandoff({ scope: options.freshResumeScope, sourceUrl,
+                userAgent: context.userAgent, fileSizeBytes, targetUrl: context.strictResolvedSourceUrl,
+                effectiveUrlSha256: context.effectiveUrlSha256,
+                effectiveUrlIdentitySha256: context.effectiveUrlIdentitySha256,
+                validator: context.validator, targetParts: recentResumeTargetParts(context.strictResolvedSourceUrl), payload });
+        },
         snapshotRecentSamples() {
             if (!context.captureRecentSamples) return null;
             return captureSamples([...(context.recentHeaderSample ? [context.recentHeaderSample] : []),
@@ -7447,6 +7476,7 @@ async function createStrictLidBroker(options = {}) {
                 }
                 options.abortSignal?.removeEventListener?.('abort', onAbort);
                 strictLidBrokers.delete(broker);
+                context.drainCompleted = true;
             })();
             return closePromise;
         },
@@ -15545,11 +15575,17 @@ async function revalidateRecentResumeSession(session, plan, requestSignal) {
                 session.startupTimings.recentResumeTargetComparison = compareRecentResumeTargetParts(
                     plan.targetParts, identity?.targetParts);
             },
+            onFreshRejectedHeader: (broker, payload) => {
+                if (!controller.signal.aborted && !session.stoppingPromise) {
+                    session.freshResumeHandoff = broker.takeFreshRejectedHeader?.(payload) || null;
+                }
+            },
             createBroker: signal => createStrictLidBroker({ sourceUrl: session.sourceUrl,
                 fileSizeBytes: fileSizeBytesForSession(session),
                 userAgent: session.userAgent || FFMPEG_USER_AGENT,
                 dispatcherFactory: pinnedProxyAgentFactoryForRoute(providerNodeRouteForSession(session)),
                 onProviderIdentity: current => { identity = current; },
+                freshResumeScope: session,
                 completedReleaseDelayMs: 0, supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
                 abortSignal: signal,
             }),
@@ -15780,6 +15816,8 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         effectiveUrlIdentitySha256: session.vodInputEffectiveUrlIdentitySha256,
         onProviderIdentity: (identity) => applyFiniteMkvSeekProviderIdentity(session, identity),
         pathPrefix: 'finite-mkv-seek',
+        freshResumeHandoff: session.freshResumeHandoff,
+        freshResumeScope: session,
         captureRecentSamples: canUseRecentResumeSamples(session.ownerKey),
         finiteWindowBytes: effectiveWindowBytes,
         finiteSeekLookbehindBytes: finiteTs ? 256 * 1024 : 0,
@@ -15817,6 +15855,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         abortSignal: parentSignal,
     });
     session.finiteMkvSeekBroker = broker;
+    session.freshResumeHandoff = null;
     session.currentVodPrefix = null;
     session.finiteTsSeekBroker = finiteTs;
     session.startupTimings = asRecord(session.startupTimings);

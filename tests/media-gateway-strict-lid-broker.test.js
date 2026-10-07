@@ -65,6 +65,37 @@ test('recent target rejection drains one real range and preserves the changed-ta
   } finally {await new Promise(resolve=>server.close(resolve));}
 });
 
+test('a drained rejected-cache header continues on the same current target, never the older cache or a second redirect', async()=>{
+  const {validateRecentResume}=require('../services/media-gateway/src/recent-resume-validation');
+  const N=65536,size=8*N,scope={id:'same-playback'};let entries=0,ranges=0,active=0,maxActive=0,token=null,redirectAgain=false;
+  const server=http.createServer((req,res)=>{
+    if(req.url==='/entry'){entries++;res.writeHead(302,{Location:'/token-'+entries});res.end();return;}
+    if(redirectAgain && req.url==='/token-1'){res.writeHead(302,{Location:'/changed'});res.end();return;}
+    ranges++;active++;maxActive=Math.max(maxActive,active);
+    const [start,end]=req.headers.range.slice(6).split('-').map(Number);
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${size}`,'Content-Length':end-start+1});
+    res.on('finish',()=>active--);res.end(Buffer.alloc(end-start+1,req.url==='/token-1'?4:9));
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const sourceUrl=`http://127.0.0.1:${server.address().port}/entry`,h=brokerHarness();let next;
+  try{
+    const result=await validateRecentResume({plan:{kind:'sampled-recent-v1',ranges:[0,N,2*N,3*N].map(start=>({start,length:N}))},
+      acceptIdentity:()=>false,onFreshRejectedHeader:(broker,payload)=>{assert.equal(active,0);token=broker.takeFreshRejectedHeader(payload);},
+      createBroker:signal=>h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,freshResumeScope:scope,abortSignal:signal,completedReleaseDelayMs:0})});
+    assert.equal(result,null);assert.ok(token);assert.equal(ranges,1);assert.equal(h.strictLidBrokers.size,0);
+    next=await h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,freshResumeScope:scope,freshResumeHandoff:token,
+      pathPrefix:'finite-mkv-seek',finiteWindowBytes:N,finiteWarmupWindowBytes:0,finiteCacheBytes:4*N,completedReleaseDelayMs:0});
+    assert.equal(next.currentPrefixBytes,N);
+    const header=await fetch(next.inputUrl,{headers:{Range:'bytes=0-4095'}});assert.equal(header.status,206);
+    assert.equal(Buffer.from(await header.arrayBuffer()).equals(Buffer.alloc(4096,4)),true);assert.equal(ranges,1);
+    const body=await fetch(next.inputUrl,{headers:{Range:`bytes=${N}-${2*N-1}`}});assert.equal(body.status,206);
+    assert.equal(Buffer.from(await body.arrayBuffer()).equals(Buffer.alloc(N,4)),true);assert.equal(entries,1);
+    redirectAgain=true;
+    const changed=await fetch(next.inputUrl,{headers:{Range:`bytes=${6*N}-${7*N-1}`}});await changed.arrayBuffer();
+    assert.equal(next.terminalError?.code,'VOD_CHANGED');assert.equal(maxActive,1);
+  }finally{await next?.close();await new Promise(resolve=>server.close(resolve));}
+});
+
 function brokerHarness(diagnosticLogs = null) {
   const startMarker = '// ── Strict LID loopback broker (mono-account provider barrier)';
   const endMarker = '// ── End strict LID loopback broker';
@@ -99,6 +130,7 @@ function brokerHarness(diagnosticLogs = null) {
       crypto: require('node:crypto'),
       ...require('../services/media-gateway/src/recent-resume-samples'),
       ...require('../services/media-gateway/src/recent-resume-validation'),
+      ...require('../services/media-gateway/src/fresh-resume-handoff'),
       createStrictRangeCollector,
       createMp4SizeEvidence: require('../services/media-gateway/src/mp4-size-evidence').createMp4SizeEvidence,
       fetch,
