@@ -10344,6 +10344,14 @@ function normalizeGatewayExactSubtitleHls(
     maxRenditions,
     sourceTrackCount,
     preparedTrackCount,
+    ...(recordOrEmpty(raw.delivery).protocol === 1 &&
+        recordOrEmpty(raw.delivery).kind === "committed-webvtt" &&
+        recordOrEmpty(raw.delivery).clock === "source-pes-v1" &&
+        Array.isArray(recordOrEmpty(raw.delivery).streamIndexes) &&
+        JSON.stringify(recordOrEmpty(raw.delivery).streamIndexes) ===
+          JSON.stringify(renditions.map(track => track.streamIndex))
+      ? { delivery: { protocol: 1, kind: "committed-webvtt", clock: "source-pes-v1",
+        streamIndexes: renditions.map(track => track.streamIndex) } } : {}),
   };
 }
 

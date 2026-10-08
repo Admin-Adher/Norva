@@ -118,6 +118,8 @@ class WatchPage {
         this.subtitleTracks = [];
         this._hlsOwnsExactSubtitles = false;
         this._exactSubtitleHlsTopology = null;
+        this._committedSubtitleStreams = null;
+        this._committedSubtitleClock = null;
         // Exact subtitle evidence is kept separately from the render list. The
         // latter can also contain native/browser/preference-derived tracks and
         // must never be promoted to an exact provider-file observation.
@@ -992,6 +994,40 @@ class WatchPage {
         return value.cacheEligible === false && preparedTrackCount < sourceTrackCount;
     }
 
+    committedSubtitleStreams(topology, renditions) {
+        const d = topology?.delivery;
+        if (!this.isExactHlsSubtitleTopology(topology) || d?.protocol !== 1
+            || d.kind !== 'committed-webvtt' || d.clock !== 'source-pes-v1'
+            || !Array.isArray(renditions) || !Array.isArray(d.streamIndexes)
+            || renditions.length !== Number(topology.preparedTrackCount)
+            || d.streamIndexes.length !== renditions.length
+            || d.streamIndexes.some((n, i) => !Number.isInteger(n) || n < 0 || n > 128
+                || n !== renditions[i]?.streamIndex)
+            || new Set(d.streamIndexes).size !== d.streamIndexes.length) return null;
+        return new Set(d.streamIndexes);
+    }
+
+    hasCommittedSubtitleTrack(index) {
+        return Number.isInteger(Number(index)) && this._committedSubtitleStreams?.has(Number(index)) === true;
+    }
+
+    acceptCommittedSubtitleClock(data) {
+        if (!this._committedSubtitleStreams || data?.id !== 'main') return false;
+        const offset = Number(data.initPTS) / Number(data.timescale);
+        if (!Number.isFinite(offset) || Number(data.timescale) <= 0) return false;
+        const engine = this._subEngine;
+        if (this._committedSubtitleClock !== offset && engine?.committed) {
+            const track = engine.trackEl?.track;
+            for (const cue of Array.from(track?.cues || [])) track.removeCue(cue);
+            engine.seenCues.clear();
+            engine.lastEtag = null;
+            engine.clockVersion = (engine.clockVersion || 0) + 1;
+            engine.streamStartOffset = offset;
+        }
+        this._committedSubtitleClock = offset;
+        return true;
+    }
+
     hlsTrackSourceStreamIndex(track) {
         if (!track || typeof track !== 'object') return null;
         const attrs = track.attrs || track.attributes || {};
@@ -1131,6 +1167,17 @@ class WatchPage {
                 for (let i = 0; i < textTracks.length; i++) textTracks[i].mode = 'hidden';
             }
             this.clearExternalSubtitleTracks();
+            return true;
+        }
+
+        if (this._committedSubtitleStreams) {
+            const tracks = this.getExtractableSubtitleTracks();
+            const track = this.findTrackByPreference(tracks, preference, Number(preference.index), 'subtitle');
+            if (!track || !this.hasCommittedSubtitleTrack(track.index)) return false;
+            this.selectedSubtitleStreamIndex = track.index;
+            this.subtitleOffsetSeconds = this.normalizeSubtitleOffset(preference.offsetSeconds ?? preference.offset_seconds ?? 0);
+            this.selectedSubtitleTrackUserChoice = true;
+            this._pendingSubtitlePreferenceApplied = true;
             return true;
         }
 
@@ -3496,6 +3543,8 @@ class WatchPage {
         this.subtitleTracks = [];
         this._hlsOwnsExactSubtitles = false;
         this._exactSubtitleHlsTopology = null;
+        this._committedSubtitleStreams = null;
+        this._committedSubtitleClock = null;
         this.subtitleSourceUrl = null;
         this.subtitleStartOffset = 0;
         this.selectedSubtitleStreamIndex = null;
@@ -5506,7 +5555,13 @@ class WatchPage {
         const validExactSubtitleHls = this.isExactHlsSubtitleTopology(exactSubtitleHls)
             ? exactSubtitleHls
             : null;
-        this._hlsOwnsExactSubtitles = Boolean(privateMediaCacheAccess || validExactSubtitleHls);
+        this._committedSubtitleStreams = !privateMediaCacheAccess
+            ? this.committedSubtitleStreams(validExactSubtitleHls,
+                options.subtitleRenditions ?? options.subtitle_renditions
+                ?? options.gatewaySession?.subtitleRenditions ?? options.gatewaySession?.subtitle_renditions) : null;
+        this._committedSubtitleClock = null;
+        this._hlsOwnsExactSubtitles = Boolean(privateMediaCacheAccess
+            || (validExactSubtitleHls && !this._committedSubtitleStreams));
         this._exactSubtitleHlsTopology = validExactSubtitleHls;
         if (this.video) {
             this.video.dataset.playbackAttemptId = String(playbackAttemptId);
@@ -6306,6 +6361,7 @@ class WatchPage {
             // be rendered by hls.js. Legacy probe subtitles remain external
             // <track> elements, where hls.js ownership would reset their state.
             renderTextTracksNatively: options.nativeHlsSubtitles === true,
+            ...(this._committedSubtitleStreams ? { enableWebVTT: false, enableIMSC1: false } : {}),
             // Cloud gateway sessions are real-time VOD transcodes too: start at
             // the beginning, never the live edge (otherwise hls.js chases the
             // edge on the growing EVENT playlist and never loads a fragment).
@@ -6398,6 +6454,13 @@ class WatchPage {
             }, 250);
         };
 
+        if (this._committedSubtitleStreams && Hls.Events.INIT_PTS_FOUND) {
+            this.hls.on(Hls.Events.INIT_PTS_FOUND, (_event, data) => {
+                if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+                this.acceptCommittedSubtitleClock(data);
+            });
+        }
+
         this.hls.loadSource(url);
         this.hls.attachMedia(this.video);
 
@@ -6476,6 +6539,11 @@ class WatchPage {
         // Listen for subtitle track updates
         this.hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, (event, data) => {
             console.log('[WatchPage] Subtitle tracks updated:', data.subtitleTracks);
+            if (this._committedSubtitleStreams) {
+                if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
+                activeHls.subtitleTrack = -1;
+                activeHls.subtitleDisplay = false;
+            }
             this.restorePendingSubtitlePreference();
             // Wait a moment for native text tracks to populate
             setTimeout(() => this.updateCaptionsTracks(), 100);
@@ -11621,9 +11689,36 @@ class WatchPage {
             const end = (parseInt(m[5] || 0) * 3600) + (parseInt(m[6]) * 60) + parseInt(m[7]) + parseInt(m[8]) / 1000;
             const text = lines.slice(timingIdx + 1).join('\n').trim();
             if (!text || !(end > start)) continue;
-            cues.push({ start, end, text });
+            cues.push({ start, end, text, ...(timingIdx === 1 ? { id: lines[0] } : {}),
+                settings: lines[timingIdx].slice(m.index + m[0].length).trim() });
         }
         return cues;
+    }
+
+    applyVttCueSettings(cue, parsed) {
+        if (parsed.id) cue.id = parsed.id;
+        for (const setting of String(parsed.settings || '').split(/\s+/)) {
+            const [key, value] = setting.split(':');
+            if (!value) continue;
+            const [primary, align] = value.split(',');
+            const percent = /^\d+(?:\.\d+)?%$/.test(primary) ? Number(primary.slice(0, -1)) : NaN;
+            try {
+                if (key === 'align' && ['start', 'center', 'end', 'left', 'right'].includes(value)) cue.align = value;
+                if (key === 'vertical' && ['rl', 'lr'].includes(value)) cue.vertical = value;
+                if (key === 'size' && percent >= 0 && percent <= 100) cue.size = percent;
+                if (key === 'position' && percent >= 0 && percent <= 100) {
+                    cue.position = percent;
+                    if (['line-left', 'center', 'line-right', 'auto'].includes(align)) cue.positionAlign = align;
+                }
+                if (key === 'line') {
+                    if (percent >= 0 && percent <= 100) { cue.snapToLines = false; cue.line = percent; }
+                    else if (/^-?\d+$/.test(primary)) { cue.snapToLines = true; cue.line = Number(primary); }
+                    else if (primary === 'auto') cue.line = 'auto';
+                    if (['start', 'center', 'end'].includes(align)) cue.lineAlign = align;
+                }
+            } catch (_) { /* Browser may not implement every WebVTT setting. */ }
+        }
+        return cue;
     }
 
     stopSubtitleEngine() {
@@ -11640,6 +11735,7 @@ class WatchPage {
      */
     async fetchSubtitleCues(engine, url, timeOffset = 0, { headers } = {}) {
         let text;
+        const clockVersion = engine.clockVersion || 0;
         try {
             const res = await fetch(url, headers ? { headers } : undefined);
             // 304 Not Modified: the growing .vtt hasn't changed since last tick
@@ -11661,7 +11757,8 @@ class WatchPage {
             return -1;
         }
 
-        if (engine !== this._subEngine || !engine.trackEl?.track) return -1;
+        if (engine !== this._subEngine || !engine.trackEl?.track
+            || clockVersion !== (engine.clockVersion || 0)) return -1;
         engine.failures = 0;
 
         const textTrack = engine.trackEl.track;
@@ -11669,13 +11766,14 @@ class WatchPage {
         let inferredLanguage = false;
         const subtitleOffset = this.normalizeSubtitleOffset(engine.subtitleOffsetSeconds || 0);
         for (const cue of this.parseVttCues(text)) {
+            if (engine.committed && cue.end + timeOffset + subtitleOffset <= 0) continue;
             const start = Math.max(0, cue.start + timeOffset + subtitleOffset);
             const end = Math.max(start + 0.05, cue.end + timeOffset + subtitleOffset);
-            const key = `${start.toFixed(3)}|${end.toFixed(3)}|${cue.text}`;
+            const key = `${start.toFixed(3)}|${end.toFixed(3)}|${cue.text}|${cue.id || ''}|${cue.settings || ''}`;
             if (engine.seenCues.has(key)) continue;
             engine.seenCues.add(key);
             try {
-                textTrack.addCue(new VTTCue(start, end, cue.text));
+                textTrack.addCue(this.applyVttCueSettings(new VTTCue(start, end, cue.text), cue));
                 inferredLanguage = this.maybeInferSubtitleLanguage(engine, cue.text) || inferredLanguage;
                 added++;
             } catch (e) { /* malformed cue, skip */ }
@@ -11881,6 +11979,7 @@ class WatchPage {
     async subtitleSessionTick(engine) {
         if (engine !== this._subEngine) return null;
         if (engine.done || engine.busy) return null;
+        if (engine.committed && !Number.isFinite(this._committedSubtitleClock)) return null;
         engine.busy = true;
 
         // If-None-Match + size-based ETag: ticks are sub-second so a freshly
@@ -11896,7 +11995,7 @@ class WatchPage {
         }
         const headers = engine.lastEtag ? { 'If-None-Match': engine.lastEtag } : undefined;
         const sessionTimeOffset = engine.sourceTimestamps
-            ? -Math.max(0, Number(engine.streamStartOffset) || 0)
+            ? -(engine.committed ? this._committedSubtitleClock : Math.max(0, Number(engine.streamStartOffset) || 0))
             : 0;
         const added = await this.fetchSubtitleCues(engine, url, sessionTimeOffset, { headers });
         engine.busy = false;
@@ -11914,7 +12013,7 @@ class WatchPage {
             const duration = this.getDisplayDuration();
             const track = engine.trackEl?.track;
             const lastCue = track?.cues?.length ? track.cues[track.cues.length - 1] : null;
-            if (engine.idleRounds >= 60 && duration && lastCue && lastCue.endTime >= duration - 120) {
+            if (!engine.committed && engine.idleRounds >= 60 && duration && lastCue && lastCue.endTime >= duration - 120) {
                 engine.done = true;
             }
         }
@@ -12034,6 +12133,7 @@ class WatchPage {
 
         const selected = this.getSelectedSubtitleTrack();
         this.clearExternalSubtitleTracks();
+        if (selected && this._committedSubtitleStreams && !this.hasCommittedSubtitleTrack(selected.index)) return false;
         if (!selected) {
             this.selectedSubtitleStreamIndex = null;
             this.updateCaptionsTracks();
@@ -12095,8 +12195,9 @@ class WatchPage {
             gatewaySubtitleUrl,
             gatewayWindowBase,
             sourceUrl: this.subtitleSourceUrl || this.baseStreamUrl || this.currentUrl,
+            committed: this.hasCommittedSubtitleTrack(selected.index),
             sourceTimestamps: this.currentPlaybackMode === 'gateway-session'
-                && this.gatewaySourceTimestamps === true,
+                && (this.gatewaySourceTimestamps === true || this.hasCommittedSubtitleTrack(selected.index)),
             streamStartOffset: this.streamStartOffset || 0,
             failures: 0,
             trackReady: false,
@@ -13355,7 +13456,8 @@ class WatchPage {
                 const active = Number(track.index) === Number(this.selectedSubtitleStreamIndex);
                 anyActive = anyActive || active;
                 return {
-                    source: 'probe',
+                    source: this._committedSubtitleStreams && !this.hasCommittedSubtitleTrack(track.index)
+                        ? 'unprepared-hls' : 'probe',
                     index,
                     streamIndex: track.index,
                     label: this.getSubtitleMenuLabel(track, probeSubtitleTracks, index, probeSubtitleTracks.length > 1 ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_182da8bf4542", {defaultValue: "Subtitles {{p0}}", p0:(index + 1)}) : `Subtitles ${index + 1}`) : (globalThis.NorvaI18n?.t("ui_web_0ee695bdeb26", { defaultValue: "Subtitles" }) ?? 'Subtitles')),
@@ -13617,7 +13719,8 @@ class WatchPage {
                     this.updateCaptionsTracks();
                     return false;
                 }
-            } else if (Number(this.video.readyState) >= 2 || this.getPlaybackPosition() > 0.25) {
+            } else if (!loadUnpreparedExactTrack && !this.hasCommittedSubtitleTrack(streamIndex)
+                && (Number(this.video.readyState) >= 2 || this.getPlaybackPosition() > 0.25)) {
                 const track = this.getExtractableSubtitleTracks()
                     .find(candidate => Number(candidate?.index) === Number(streamIndex));
                 this.setSubtitleSwitchFeedback('deferred', this.getSubtitleTrackLabel(track, 'Selected'));
@@ -13720,7 +13823,8 @@ class WatchPage {
         const laneChanged = selectedIsOff
             ? !previousWasOff
             : Number.isInteger(selectedStreamIndex) && selectedStreamIndex !== previousStreamIndex;
-        if (gatewayBacked && subtitlePreference?.source === 'probe' && laneChanged) {
+        if (gatewayBacked && subtitlePreference?.source === 'probe' && laneChanged
+            && !this.hasCommittedSubtitleTrack(selectedStreamIndex)) {
             await this.queueSelectedSubtitleTrackRestart(subtitlePreference);
         } else if (subtitlePreference?.source === 'probe') {
             this.attachSelectedProbeSubtitleTrack();
@@ -14899,4 +15003,5 @@ class WatchPage {
     }
 }
 
+WatchPage.committedSubtitleDelivery = 1;
 window.WatchPage = WatchPage;

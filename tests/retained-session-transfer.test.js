@@ -304,10 +304,11 @@ test('request binding is private, revision/track/config exact, order stable and 
     const h=harness();t.after(h.stop);const body={sourceUrl:'http://synthetic.invalid/movie',ownerKey:owner,
         playbackIdentity:{sourceId:'fixture',sourceRevision:'generation1',vodIdentityKey:'b'.repeat(64)},
         codecProfile:{audioCodec:'aac',tracks:[{index:1}]},seekOffset:10,playbackSessionId:'one',
-        playbackHint:{seekOffset:10,container:'mkv'}};
+        playbackHint:{seekOffset:10,container:'mkv',committedSubtitleDelivery:1}};
     const binding=h.retainedSessionRequestBinding(body,owner);assert.match(binding,/^[a-f0-9]{64}$/);
+    assert.equal(h.retainedSessionRequestBinding({...body,playbackHint:{}},owner),null);
     assert.equal(binding,h.retainedSessionRequestBinding({...body,seekOffset:99,playbackSessionId:'two',
-        playbackHint:{container:'mkv',seekOffset:99}},owner));
+        playbackHint:{container:'mkv',seekOffset:99,committedSubtitleDelivery:1}},owner));
     for(const changed of [{...body,audioStreamIndex:2},{...body,sourceUrl:'http://synthetic.invalid/other'},
         {...body,playbackIdentity:{...body.playbackIdentity,sourceRevision:'generation2'}},
         {...body,codecProfile:{audioCodec:'ac3'}}]) assert.notEqual(binding,h.retainedSessionRequestBinding(changed,owner));
