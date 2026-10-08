@@ -22,14 +22,14 @@ const samples = [0, N, 2*N, 3*N].map(start => ({ start, payload: Buffer.alloc(N,
 const playlist = '#EXTM3U\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-MEDIA-SEQUENCE:0\n'
     + [0,1,2,3].map(n => `#EXTINF:4,\ns${n}.ts\n`).join('');
 function harness({ drain, validation, gate = true } = {}) {
-    const sessions = new Map(), counts = { stop: 0, releases: 0, validation: 0, commits: 0, socket: 1 };
+    const sessions = new Map(), activeVideoEncoderAdmissions = new Set(), counts = { stop: 0, releases: 0, validation: 0, commits: 0, socket: 1 };
     let timer, now = Date.now();
     const ctx = { RetainedSessionTransfer, crypto, Date, Set, Buffer, Number, Promise, AbortController,
         sampleProof, samplesMatch, canonicalResumeProfile, parseResumeMediaPlaylist,
         asRecord: x => x && typeof x === 'object' ? x : {}, sha256Hex: s => crypto.createHash('sha256').update(s).digest('hex'),
         retainedSessionOwnerGate: x => gate && x === owner, canUsePrivateResumeCache: () => gate,
         canUseRecentResumeSamples: () => gate, randomToken: () => crypto.randomBytes(32).toString('hex'),
-        sessions, DEFAULT_TTL_SECONDS: 600, exactSubtitleHlsEnabled: s => s.subtitles,
+        sessions, activeVideoEncoderAdmissions, DEFAULT_TTL_SECONDS: 600, exactSubtitleHlsEnabled: s => s.subtitles,
         multiAudioHlsEnabled: () => false, readPrivateResumeAsset: async s => Buffer.from(s.playlist),
         fileSizeBytesForSession: s => s.size, recentDeliveryRouteKey: s => s.route,
         timingSafeEqual: (a,b) => a === b,
@@ -90,7 +90,7 @@ function harness({ drain, validation, gate = true } = {}) {
         const res = { statusCode: 200, status(n) { this.statusCode=n;return this; }, json(payload) { this.payload=payload;return this; } };
         await ctx.deleteHandler(req,res);return res;
     };
-    return { ...api, session, sessions, counts, request, remove, setProfilePending: p => { ctx.profilePending=p; }, transfer: ctx.retainedSessionTransfer,
+    return { ...api, session, sessions, activeVideoEncoderAdmissions, counts, request, remove, setProfilePending: p => { ctx.profilePending=p; }, transfer: ctx.retainedSessionTransfer,
         getTimer: () => timer,
         stop: () => ctx.stopSession(session), expire: async()=> { now += 10001; await timer?.(); },
         setNow: x => { now = x; }, get now() { return now; } };
@@ -113,6 +113,26 @@ test('session transfer revokes first, drains, revalidates and atomically rekeys 
     assert.equal(result.playbackSessionId, 'new-playback'); assert.equal(result.status, 'ready');
     assert.equal(h.counts.validation, 1); assert.equal(h.counts.commits, 1); assert.equal(h.counts.releases, 0);
     assert.equal(await h.tryResumeRetainedSession(h.request()), null, 'no replay');
+});
+
+test('encoder reservation follows the adopted session and releases through the ordinary cleanup', async t => {
+    const h=harness();t.after(h.stop);
+    h.session.videoEncoderAdmissionHeld=true;h.activeVideoEncoderAdmissions.add('old');
+    assert.equal(await h.tryParkRetainedSession(h.session,105),true);
+    const result=await h.tryResumeRetainedSession(h.request());assert.equal(result,h.session);
+    assert.equal(h.activeVideoEncoderAdmissions.has('old'),false);
+    assert.equal(h.activeVideoEncoderAdmissions.has(result.id),true);
+    assert.equal(h.activeVideoEncoderAdmissions.size,1);
+    const release=vm.runInNewContext(`(${section('function releaseVideoEncoderAdmission(', '// sourceUrl ->')})`,
+        {activeVideoEncoderAdmissions:h.activeVideoEncoderAdmissions});
+    release(result);assert.equal(h.activeVideoEncoderAdmissions.size,0);
+});
+
+test('missing encoder reservation refuses adoption before exposing a new access', async t => {
+    const h=harness();t.after(h.stop);h.session.videoEncoderAdmissionHeld=true;
+    assert.equal(await h.tryParkRetainedSession(h.session,105),true);
+    assert.equal(await h.tryResumeRetainedSession(h.request()),null);
+    assert.equal(h.session.id,'old');assert.equal(h.counts.stop,1);
 });
 
 test('real HTTP old media response is destroyed and old token stays revoked after transfer', async t => {
