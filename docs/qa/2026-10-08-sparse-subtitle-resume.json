@@ -546,5 +546,1127 @@
       ]
     }
   },
-  "rootEvidencePhase": "historical PR706; later prototype and browser evidence is nested under followupObservedCueLedger"
+  "rootEvidencePhase": "historical PR706; later prototype and browser evidence is nested under followupObservedCueLedger",
+  "followupClockAlignment": {
+    "atUtc": "2026-10-08T12:53:45.255388+00:00",
+    "baseline": {
+      "time": 36.008729,
+      "paused": true,
+      "ready": 4,
+      "error": null,
+      "tracks": [
+        {
+          "label": "Future",
+          "mode": "disabled",
+          "active": [],
+          "cues": []
+        },
+        {
+          "label": "Crossing",
+          "mode": "showing",
+          "active": [
+            {
+              "start": 0,
+              "end": 46.063333333312144,
+              "text": "Crossing",
+              "id": "1775573737638493841346203"
+            },
+            {
+              "start": 0,
+              "end": 46.021,
+              "text": "Crossing",
+              "id": "1775573782529146841346203"
+            }
+          ],
+          "cues": [
+            {
+              "start": 0,
+              "end": 46.063333333312144,
+              "text": "Crossing",
+              "id": "1775573737638493841346203"
+            },
+            {
+              "start": 0,
+              "end": 46.021,
+              "text": "Crossing",
+              "id": "1775573782529146841346203"
+            },
+            {
+              "start": 126.06333333332273,
+              "end": 131.06333333332273,
+              "text": "Ending",
+              "id": "334637874833463691141389016490"
+            }
+          ]
+        }
+      ],
+      "origins": [
+        {
+          "id": "main",
+          "cc": 0,
+          "sn": 0,
+          "initPTS": 5889810,
+          "timescale": 90000
+        },
+        {
+          "id": "main",
+          "cc": 1,
+          "sn": 8,
+          "initPTS": 8587180592,
+          "timescale": 90000
+        }
+      ],
+      "errors": [],
+      "boundarySamples": 116,
+      "activeCueCounts": [
+        2
+      ],
+      "frameCallbacks": 143,
+      "maxMediaFrameStepNearBoundarySeconds": 0.08533399999999958
+    },
+    "aligned": {
+      "time": 36.026106,
+      "paused": true,
+      "ready": 4,
+      "error": null,
+      "tracks": [
+        {
+          "label": "Future",
+          "mode": "disabled",
+          "active": [],
+          "cues": []
+        },
+        {
+          "label": "Crossing",
+          "mode": "showing",
+          "active": [
+            {
+              "start": 0,
+              "end": 46.021,
+              "text": "Crossing",
+              "id": "1775573782529146841346203"
+            }
+          ],
+          "cues": [
+            {
+              "start": 0,
+              "end": 46.021,
+              "text": "Crossing",
+              "id": "1775573782529146841346203"
+            },
+            {
+              "start": 126.02099999999997,
+              "end": 131.02099999999996,
+              "text": "Ending",
+              "id": "33051810724710196121389016490"
+            }
+          ]
+        }
+      ],
+      "origins": [
+        {
+          "id": "main",
+          "cc": 0,
+          "sn": 0,
+          "initPTS": 5889810,
+          "timescale": 90000
+        },
+        {
+          "id": "main",
+          "cc": 1,
+          "sn": 8,
+          "initPTS": 5889810,
+          "timescale": 90000
+        }
+      ],
+      "errors": [],
+      "boundarySamples": 116,
+      "activeCueCounts": [
+        1
+      ],
+      "frameCallbacks": 145,
+      "maxMediaFrameStepNearBoundarySeconds": 0.04200000000000159
+    },
+    "future": {
+      "time": 88.004211,
+      "paused": true,
+      "ready": 4,
+      "error": null,
+      "tracks": [
+        {
+          "label": "Future",
+          "mode": "showing",
+          "active": [
+            {
+              "start": 86.02099999999999,
+              "end": 91.02099999999999,
+              "text": "Forced second",
+              "id": "5203803345203801043540924972"
+            }
+          ],
+          "cues": [
+            {
+              "start": 86.02099999999999,
+              "end": 91.02099999999999,
+              "text": "Forced second",
+              "id": "5203803345203801043540924972"
+            }
+          ]
+        },
+        {
+          "label": "Crossing",
+          "mode": "disabled",
+          "active": [],
+          "cues": []
+        }
+      ],
+      "origins": [
+        {
+          "id": "main",
+          "cc": 0,
+          "sn": 0,
+          "initPTS": 5889810,
+          "timescale": 90000
+        },
+        {
+          "id": "main",
+          "cc": 1,
+          "sn": 8,
+          "initPTS": 5889810,
+          "timescale": 90000
+        }
+      ],
+      "errors": []
+    },
+    "rawShift": {
+      "parent": {
+        "name": "parent",
+        "seek": 0,
+        "stopAt": 100,
+        "videoEnd": 100.166667,
+        "firstVideoMs": 446,
+        "exit": {
+          "code": 255,
+          "signal": null
+        },
+        "arrivals": [
+          {
+            "track": 0,
+            "wallMs": 52,
+            "videoEnd": 0,
+            "cues": []
+          },
+          {
+            "track": 1,
+            "wallMs": 53,
+            "videoEnd": 0,
+            "cues": [
+              {
+                "start": 2.021,
+                "end": 14.021
+              }
+            ]
+          },
+          {
+            "track": 1,
+            "wallMs": 5061,
+            "videoEnd": 56,
+            "cues": [
+              {
+                "start": 2.021,
+                "end": 14.021
+              },
+              {
+                "start": 60.021,
+                "end": 110.021
+              }
+            ]
+          },
+          {
+            "track": 0,
+            "wallMs": 5062,
+            "videoEnd": 56,
+            "cues": [
+              {
+                "start": 70.021,
+                "end": 75.021
+              }
+            ]
+          },
+          {
+            "track": 0,
+            "wallMs": 6373,
+            "videoEnd": 68,
+            "cues": [
+              {
+                "start": 70.021,
+                "end": 75.021
+              },
+              {
+                "start": 150.021,
+                "end": 155.021
+              }
+            ]
+          }
+        ],
+        "tracks": [
+          [
+            {
+              "start": 70.021,
+              "end": 75.021
+            },
+            {
+              "start": 150.021,
+              "end": 155.021
+            }
+          ],
+          [
+            {
+              "start": 2.021,
+              "end": 14.021
+            },
+            {
+              "start": 60.021,
+              "end": 110.021
+            }
+          ]
+        ],
+        "bytes": 150,
+        "stderr": ""
+      },
+      "child": {
+        "name": "child",
+        "seek": 81,
+        "stopAt": null,
+        "videoEnd": 144,
+        "firstVideoMs": 1703,
+        "exit": {
+          "code": 0,
+          "signal": null
+        },
+        "arrivals": [
+          {
+            "track": 0,
+            "wallMs": 53,
+            "videoEnd": 0,
+            "cues": []
+          },
+          {
+            "track": 1,
+            "wallMs": 53,
+            "videoEnd": 0,
+            "cues": []
+          },
+          {
+            "track": 1,
+            "wallMs": 9137,
+            "videoEnd": 92,
+            "cues": [
+              {
+                "start": 190.021,
+                "end": 195.021
+              }
+            ]
+          }
+        ],
+        "tracks": [
+          [],
+          [
+            {
+              "start": 190.021,
+              "end": 195.021
+            }
+          ]
+        ],
+        "bytes": 46,
+        "stderr": ""
+      },
+      "shifted": {
+        "name": "shifted",
+        "seek": 81,
+        "stopAt": null,
+        "videoEnd": 144,
+        "firstVideoMs": 1704,
+        "exit": {
+          "code": 0,
+          "signal": null
+        },
+        "arrivals": [
+          {
+            "track": 0,
+            "wallMs": 54,
+            "videoEnd": 0,
+            "cues": []
+          },
+          {
+            "track": 1,
+            "wallMs": 54,
+            "videoEnd": 0,
+            "cues": []
+          },
+          {
+            "track": 1,
+            "wallMs": 9138,
+            "videoEnd": 92,
+            "cues": [
+              {
+                "start": 190.021,
+                "end": 195.021
+              }
+            ]
+          }
+        ],
+        "tracks": [
+          [],
+          [
+            {
+              "start": 190.021,
+              "end": 195.021
+            }
+          ]
+        ],
+        "bytes": 46,
+        "stderr": ""
+      },
+      "clocks": {
+        "parentFirst": {
+          "streams": [
+            {
+              "index": 0,
+              "id": "0x100",
+              "type": "video",
+              "codec": "h264",
+              "profile": "Constrained Baseline",
+              "timeBase": "1/90000",
+              "width": 128,
+              "height": 128,
+              "extradataHash": "SHA256:bffbe2541ec2302fa1d4aaf1dad089d26426de1155bafda280131e2c615efd3b"
+            },
+            {
+              "index": 1,
+              "id": "0x101",
+              "type": "audio",
+              "codec": "aac",
+              "profile": "LC",
+              "timeBase": "1/90000",
+              "sampleRate": "48000",
+              "channels": 2
+            }
+          ],
+          "packets": [
+            {
+              "type": "video",
+              "count": 96,
+              "first": {
+                "pts": 65.442333,
+                "dts": 65.442333,
+                "duration": null
+              },
+              "last": {
+                "pts": 69.400333,
+                "dts": 69.400333,
+                "duration": null
+              }
+            },
+            {
+              "type": "audio",
+              "count": 188,
+              "first": {
+                "pts": 65.442667,
+                "dts": 65.442667,
+                "duration": 0.021333
+              },
+              "last": {
+                "pts": 69.432,
+                "dts": 69.432,
+                "duration": 0.021333
+              }
+            }
+          ]
+        },
+        "parentLast": {
+          "streams": [
+            {
+              "index": 0,
+              "id": "0x100",
+              "type": "video",
+              "codec": "h264",
+              "profile": "Constrained Baseline",
+              "timeBase": "1/90000",
+              "width": 128,
+              "height": 128,
+              "extradataHash": "SHA256:bffbe2541ec2302fa1d4aaf1dad089d26426de1155bafda280131e2c615efd3b"
+            },
+            {
+              "index": 1,
+              "id": "0x101",
+              "type": "audio",
+              "codec": "aac",
+              "profile": "LC",
+              "timeBase": "1/90000",
+              "sampleRate": "48000",
+              "channels": 2
+            }
+          ],
+          "packets": [
+            {
+              "type": "video",
+              "count": 96,
+              "first": {
+                "pts": 93.442333,
+                "dts": 93.442333,
+                "duration": null
+              },
+              "last": {
+                "pts": 97.400333,
+                "dts": 97.400333,
+                "duration": null
+              }
+            },
+            {
+              "type": "audio",
+              "count": 187,
+              "first": {
+                "pts": 93.453333,
+                "dts": 93.453333,
+                "duration": 0.021333
+              },
+              "last": {
+                "pts": 97.421333,
+                "dts": 97.421333,
+                "duration": 0.021333
+              }
+            }
+          ]
+        },
+        "childFirst": {
+          "streams": [
+            {
+              "index": 0,
+              "id": "0x100",
+              "type": "video",
+              "codec": "h264",
+              "profile": "Constrained Baseline",
+              "timeBase": "1/90000",
+              "width": 128,
+              "height": 128,
+              "extradataHash": "SHA256:5ec073a3f13e9cdd246cc19896ced37e85943f3428943749acb5ff376ad4ed0d"
+            },
+            {
+              "index": 1,
+              "id": "0x101",
+              "type": "audio",
+              "codec": "aac",
+              "profile": "LC",
+              "timeBase": "1/90000",
+              "sampleRate": "48000",
+              "channels": 2
+            }
+          ],
+          "packets": [
+            {
+              "type": "video",
+              "count": 96,
+              "first": {
+                "pts": 1.442333,
+                "dts": 1.442333,
+                "duration": null
+              },
+              "last": {
+                "pts": 5.400333,
+                "dts": 5.400333,
+                "duration": null
+              }
+            },
+            {
+              "type": "audio",
+              "count": 190,
+              "first": {
+                "pts": 1.4,
+                "dts": 1.4,
+                "duration": 0.021333
+              },
+              "last": {
+                "pts": 5.432,
+                "dts": 5.432,
+                "duration": 0.021333
+              }
+            }
+          ]
+        },
+        "shiftedFirst": {
+          "streams": [
+            {
+              "index": 0,
+              "id": "0x100",
+              "type": "video",
+              "codec": "h264",
+              "profile": "Constrained Baseline",
+              "timeBase": "1/90000",
+              "width": 128,
+              "height": 128,
+              "extradataHash": "SHA256:5ec073a3f13e9cdd246cc19896ced37e85943f3428943749acb5ff376ad4ed0d"
+            },
+            {
+              "index": 1,
+              "id": "0x101",
+              "type": "audio",
+              "codec": "aac",
+              "profile": "LC",
+              "timeBase": "1/90000",
+              "sampleRate": "48000",
+              "channels": 2
+            }
+          ],
+          "packets": [
+            {
+              "type": "video",
+              "count": 96,
+              "first": {
+                "pts": 97.421,
+                "dts": 97.421,
+                "duration": null
+              },
+              "last": {
+                "pts": 101.379,
+                "dts": 101.379,
+                "duration": null
+              }
+            },
+            {
+              "type": "audio",
+              "count": 190,
+              "first": {
+                "pts": 97.378667,
+                "dts": 97.378667,
+                "duration": 0.021333
+              },
+              "last": {
+                "pts": 101.410667,
+                "dts": 101.410667,
+                "duration": 0.021333
+              }
+            }
+          ]
+        }
+      },
+      "videoBoundaryDeltaSeconds": null,
+      "audioBoundaryDeltaSeconds": -0.06399900000000969,
+      "fullCuesPreserved": true,
+      "providerRequests": 0,
+      "productionChanged": false,
+      "coverageProven": false,
+      "browserValidated": false,
+      "exportedBytes": 16479599
+    },
+    "alignedClock": {
+      "parent": {
+        "name": "parent",
+        "seek": 0,
+        "stopAt": 100,
+        "videoEnd": 100.208333,
+        "firstVideoMs": 448,
+        "exit": {
+          "code": 255,
+          "signal": null
+        },
+        "arrivals": [
+          {
+            "track": 0,
+            "wallMs": 53,
+            "videoEnd": 0,
+            "cues": []
+          },
+          {
+            "track": 1,
+            "wallMs": 53,
+            "videoEnd": 0,
+            "cues": [
+              {
+                "start": 2.021,
+                "end": 14.021
+              }
+            ]
+          },
+          {
+            "track": 1,
+            "wallMs": 5062,
+            "videoEnd": 56,
+            "cues": [
+              {
+                "start": 2.021,
+                "end": 14.021
+              },
+              {
+                "start": 60.021,
+                "end": 110.021
+              }
+            ]
+          },
+          {
+            "track": 0,
+            "wallMs": 5062,
+            "videoEnd": 56,
+            "cues": [
+              {
+                "start": 70.021,
+                "end": 75.021
+              }
+            ]
+          },
+          {
+            "track": 0,
+            "wallMs": 6387,
+            "videoEnd": 68,
+            "cues": [
+              {
+                "start": 70.021,
+                "end": 75.021
+              },
+              {
+                "start": 150.021,
+                "end": 155.021
+              }
+            ]
+          }
+        ],
+        "tracks": [
+          [
+            {
+              "start": 70.021,
+              "end": 75.021
+            },
+            {
+              "start": 150.021,
+              "end": 155.021
+            }
+          ],
+          [
+            {
+              "start": 2.021,
+              "end": 14.021
+            },
+            {
+              "start": 60.021,
+              "end": 110.021
+            }
+          ]
+        ],
+        "bytes": 150,
+        "stderr": ""
+      },
+      "child": {
+        "name": "child",
+        "seek": 81,
+        "stopAt": null,
+        "videoEnd": 144,
+        "firstVideoMs": 1691,
+        "exit": {
+          "code": 0,
+          "signal": null
+        },
+        "arrivals": [
+          {
+            "track": 0,
+            "wallMs": 51,
+            "videoEnd": 0,
+            "cues": []
+          },
+          {
+            "track": 1,
+            "wallMs": 52,
+            "videoEnd": 0,
+            "cues": []
+          },
+          {
+            "track": 1,
+            "wallMs": 9135,
+            "videoEnd": 92,
+            "cues": [
+              {
+                "start": 190.021,
+                "end": 195.021
+              }
+            ]
+          }
+        ],
+        "tracks": [
+          [],
+          [
+            {
+              "start": 190.021,
+              "end": 195.021
+            }
+          ]
+        ],
+        "bytes": 46,
+        "stderr": ""
+      },
+      "shifted": {
+        "name": "aligned",
+        "seek": 81,
+        "stopAt": null,
+        "videoEnd": 144,
+        "firstVideoMs": 1712,
+        "exit": {
+          "code": 0,
+          "signal": null
+        },
+        "arrivals": [
+          {
+            "track": 0,
+            "wallMs": 58,
+            "videoEnd": 0,
+            "cues": []
+          },
+          {
+            "track": 1,
+            "wallMs": 59,
+            "videoEnd": 0,
+            "cues": []
+          },
+          {
+            "track": 1,
+            "wallMs": 9147,
+            "videoEnd": 92,
+            "cues": [
+              {
+                "start": 190.021,
+                "end": 195.021
+              }
+            ]
+          }
+        ],
+        "tracks": [
+          [],
+          [
+            {
+              "start": 190.021,
+              "end": 195.021
+            }
+          ]
+        ],
+        "bytes": 46,
+        "stderr": ""
+      },
+      "clocks": {
+        "parentFirst": {
+          "streams": [
+            {
+              "index": 0,
+              "id": "0x100",
+              "type": "video",
+              "codec": "h264",
+              "profile": "Constrained Baseline",
+              "timeBase": "1/90000",
+              "width": 128,
+              "height": 128,
+              "extradataHash": "SHA256:bffbe2541ec2302fa1d4aaf1dad089d26426de1155bafda280131e2c615efd3b"
+            },
+            {
+              "index": 1,
+              "id": "0x101",
+              "type": "audio",
+              "codec": "aac",
+              "profile": "LC",
+              "timeBase": "1/90000",
+              "sampleRate": "48000",
+              "channels": 2
+            }
+          ],
+          "packets": [
+            {
+              "type": "video",
+              "count": 96,
+              "first": {
+                "pts": 65.442333,
+                "dts": 65.442333,
+                "duration": null
+              },
+              "last": {
+                "pts": 69.400333,
+                "dts": 69.400333,
+                "duration": null
+              }
+            },
+            {
+              "type": "audio",
+              "count": 188,
+              "first": {
+                "pts": 65.442667,
+                "dts": 65.442667,
+                "duration": 0.021333
+              },
+              "last": {
+                "pts": 69.432,
+                "dts": 69.432,
+                "duration": 0.021333
+              }
+            }
+          ]
+        },
+        "parentLast": {
+          "streams": [
+            {
+              "index": 0,
+              "id": "0x100",
+              "type": "video",
+              "codec": "h264",
+              "profile": "Constrained Baseline",
+              "timeBase": "1/90000",
+              "width": 128,
+              "height": 128,
+              "extradataHash": "SHA256:bffbe2541ec2302fa1d4aaf1dad089d26426de1155bafda280131e2c615efd3b"
+            },
+            {
+              "index": 1,
+              "id": "0x101",
+              "type": "audio",
+              "codec": "aac",
+              "profile": "LC",
+              "timeBase": "1/90000",
+              "sampleRate": "48000",
+              "channels": 2
+            }
+          ],
+          "packets": [
+            {
+              "type": "video",
+              "count": 96,
+              "first": {
+                "pts": 93.442333,
+                "dts": 93.442333,
+                "duration": null
+              },
+              "last": {
+                "pts": 97.400333,
+                "dts": 97.400333,
+                "duration": null
+              }
+            },
+            {
+              "type": "audio",
+              "count": 187,
+              "first": {
+                "pts": 93.453333,
+                "dts": 93.453333,
+                "duration": 0.021333
+              },
+              "last": {
+                "pts": 97.421333,
+                "dts": 97.421333,
+                "duration": 0.021333
+              }
+            }
+          ]
+        },
+        "childFirst": {
+          "streams": [
+            {
+              "index": 0,
+              "id": "0x100",
+              "type": "video",
+              "codec": "h264",
+              "profile": "Constrained Baseline",
+              "timeBase": "1/90000",
+              "width": 128,
+              "height": 128,
+              "extradataHash": "SHA256:5ec073a3f13e9cdd246cc19896ced37e85943f3428943749acb5ff376ad4ed0d"
+            },
+            {
+              "index": 1,
+              "id": "0x101",
+              "type": "audio",
+              "codec": "aac",
+              "profile": "LC",
+              "timeBase": "1/90000",
+              "sampleRate": "48000",
+              "channels": 2
+            }
+          ],
+          "packets": [
+            {
+              "type": "video",
+              "count": 96,
+              "first": {
+                "pts": 1.442333,
+                "dts": 1.442333,
+                "duration": null
+              },
+              "last": {
+                "pts": 5.400333,
+                "dts": 5.400333,
+                "duration": null
+              }
+            },
+            {
+              "type": "audio",
+              "count": 190,
+              "first": {
+                "pts": 1.4,
+                "dts": 1.4,
+                "duration": 0.021333
+              },
+              "last": {
+                "pts": 5.432,
+                "dts": 5.432,
+                "duration": 0.021333
+              }
+            }
+          ]
+        },
+        "shiftedFirst": {
+          "streams": [
+            {
+              "index": 0,
+              "id": "0x100",
+              "type": "video",
+              "codec": "h264",
+              "profile": "Constrained Baseline",
+              "timeBase": "1/90000",
+              "width": 128,
+              "height": 128,
+              "extradataHash": "SHA256:5ec073a3f13e9cdd246cc19896ced37e85943f3428943749acb5ff376ad4ed0d"
+            },
+            {
+              "index": 1,
+              "id": "0x101",
+              "type": "audio",
+              "codec": "aac",
+              "profile": "LC",
+              "timeBase": "1/90000",
+              "sampleRate": "48000",
+              "channels": 2
+            }
+          ],
+          "packets": [
+            {
+              "type": "video",
+              "count": 96,
+              "first": {
+                "pts": 97.442333,
+                "dts": 97.442333,
+                "duration": null
+              },
+              "last": {
+                "pts": 101.400333,
+                "dts": 101.400333,
+                "duration": null
+              }
+            },
+            {
+              "type": "audio",
+              "count": 188,
+              "first": {
+                "pts": 97.442667,
+                "dts": 97.442667,
+                "duration": 0.021333
+              },
+              "last": {
+                "pts": 101.431833,
+                "dts": 101.431833,
+                "duration": 0.021333
+              }
+            }
+          ]
+        }
+      },
+      "videoLastToFirstSeconds": 0.04200000000000159,
+      "audioBoundaryDeltaSeconds": 9.999999974752427e-07,
+      "discontinuityPreserved": true,
+      "fixtureSpecificAudioPrerollPacketsRemoved": 2,
+      "fullCuesPreserved": true,
+      "providerRequests": 0,
+      "productionChanged": false,
+      "coverageProven": false,
+      "browserValidated": false,
+      "exportedBytes": 16478637
+    },
+    "rawConcatenationAudioDiagnostic": {
+      "windowSeconds": [
+        3.8,
+        4.2
+      ],
+      "samplesCompared": 19200,
+      "maxAbsoluteDifference": 0.04037272930145264,
+      "rmsDifference": 0.002571053139441097,
+      "longestNearZeroRunSamples": 0,
+      "stitchedSamples": 384000,
+      "oracleSamples": 384000,
+      "stitchedStderr": "[mpegts @ 0x5e5683c21840] Packet corrupt (stream = 0, dts = 8766030).\n[mpegts @ 0x5e5683c21840] Packet corrupt (stream = 0, dts = 8766030).\n",
+      "oracleStderr": "",
+      "scope": "synthetic sine only; no subjective listening claim"
+    },
+    "productionChanged": false,
+    "providerRequests": 0,
+    "normalLatencyGainProven": false,
+    "coverageProven": false,
+    "generalTimestampRuleProven": false,
+    "experimentalAudioDropCountIsFixtureSpecific": true,
+    "allHlsDiscontinuitiesRetainedInAlignedCandidate": true,
+    "fullCueDurationsRetained": true,
+    "health": {
+      "atUtc": "2026-10-08T12:56:47.488035+00:00",
+      "productionChanged": false,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T08:44:27.201045016Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T08:44:29.77608402Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        }
+      ],
+      "dispatcherRunning": true,
+      "proofContainerAbsent": true
+    },
+    "scriptSha256": {
+      "aligned-audio-hls-oracle.cjs": "ef48e2031099271678e72e6ac549ba37000e57da9ce6e17bbc3426c8148114ae",
+      "aligned-audio-oracle.cjs": "fd356c91113e34e52888d0a291cef953d5996a2ece6cdcb6fd2ee17285b2df31",
+      "aligned-audio-ts-discontinuity.cjs": "36852aeba1c19839fd0b1fd18e4c045991a5a6da76828ade03bb99bbc8eb67af",
+      "aligned-clock.cjs": "b23cf5e45fb80bfeade197361fe0e15fc50cacfd1f8555e0df4455b110483a22",
+      "clock-options.cjs": "cad9c588a9b222b03da43b88e7e117db21a9be1cbe6b9148aeac3fa30b8997c8",
+      "continuous-clock.cjs": "8faa583e83e32fa32eb2bf7968cf8d12e7c082cc1971ddca8a4b2d7ebbd5ea65"
+    },
+    "hlsAudioDiagnostic": {
+      "windowSeconds": [
+        3.8,
+        4.2
+      ],
+      "samplesCompared": 19200,
+      "maxAbsoluteDifference": 0.04037272930145264,
+      "rmsDifference": 0.002571053139441097,
+      "longestNearZeroRunSamples": 0,
+      "stitchedSamples": 384000,
+      "oracleSamples": 384000,
+      "stitchedStderr": "[mpegts @ 0x56fe947a6f00] Packet corrupt (stream = 0, dts = 8766030).\n[hls @ 0x56fe947a3840] Packet corrupt (stream = 0, dts = 8762340).\n",
+      "oracleStderr": "",
+      "input": "HLS with discontinuity for stitched; ordinary HLS for oracle",
+      "scope": "synthetic sine only; no subjective listening claim"
+    },
+    "hlsAudioWithTsDiscontinuityDiagnostic": {
+      "windowSeconds": [
+        3.8,
+        4.2
+      ],
+      "samplesCompared": 19200,
+      "maxAbsoluteDifference": 0.04037272930145264,
+      "rmsDifference": 0.002571053139441097,
+      "longestNearZeroRunSamples": 0,
+      "stitchedSamples": 384000,
+      "oracleSamples": 384000,
+      "stitchedStderr": "",
+      "oracleStderr": "",
+      "input": "HLS with discontinuity for stitched; ordinary HLS for oracle",
+      "scope": "synthetic sine only; no subjective listening claim"
+    },
+    "localBrowserAndServerStopped": true
+  }
 }

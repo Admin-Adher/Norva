@@ -121,3 +121,51 @@ Une piste réellement parcourue de l'origine jusqu'au vrai EOF naturel, sans see
 **Décision :** piste prometteuse prouvée sur les répliques connues, conservée comme prototype. Aucun gain de démarrage réel de Normal, aucune nouvelle lecture fournisseur, aucun changement de seuil, durée de vie, route ou concurrence. Le pilote de production reste restreint. Preuves : `.codex-artifacts/subtitle-ledger-20261008/`, scripts FFmpeg, registre et tests, reçus de collecte, horloges PES, états navigateur et capture `future-cue-browser.png`.
 
 Contrôle final read-only à **2026-10-08 10:15:30 UTC** : les deux Gateways sont sains, même image PR706 et mêmes démarrages ; `owner-allowlist` conservé, dispatcher permanent actif et conteneur de preuve absent. Onglet synthétique fermé et serveur local arrêté. Aucun déploiement. Les cinq contrôles documentaires de PR707 sont désormais réussis, paquets compris.
+
+## Horloges au raccord — expérimentation suivante, hors production
+
+Les contrôles suivants utilisent encore une fixture locale de 240 s, H.264 24 images/s et AAC-LC stéréo 48 kHz, dans l'image PR706 isolée du réseau. Ils ne lisent aucune VOD fournisseur. La collecte emploie ici le premier collecteur expérimental, borné par assertion à 64 Kio dans cette fixture, et non une nouvelle intégration du helper de 21 tests.
+
+### Conserver les répliques entières
+
+La partition à la frontière de deux époques, testée précédemment, n'est pas retenue pour intégration. Un segment WebVTT HLS doit porter la durée complète de chaque réplique qui le chevauche ; scinder artificiellement une réplique au raccord n'est donc pas une solution générale conforme à cette règle. La nouvelle expérience conserve les blocs originaux entiers dans chaque fragment pertinent. Elle conserve également `EXT-X-DISCONTINUITY` entre les producteurs. [RFC 8216, sections 3.5 et 4.3.2.3](https://datatracker.ietf.org/doc/html/rfc8216).
+
+### Un simple décalage ne suffit pas
+
+Le premier essai ajoute 96 s aux timestamps de la continuation : sa première vidéo vaut **97,421 s**, au lieu de **97,442333 s** dans la continuation témoin du parent. Son audio commence à **97,378667 s**, alors que le dernier paquet parent finit vers **97,442667 s**. Le calcul initial de durée vidéo utilisait un champ absent de ffprobe et donnait `null` ; il n'est pas interprété comme un écart nul. Une lecture des paquets de la séquence parent continue fournit ensuite la référence réelle.
+
+Une matrice distincte de six encodages synthétiques de 120 s compare parent, continuation sans décalage, décalage seul, `avoid_negative_ts=disabled`, `mpegts_copyts=1`, puis ces deux dernières options ensemble. Désactiver `avoid_negative_ts` ne résout pas le raccord. Préserver les timestamps MPEG-TS enlève le décalage de transport de 1,4 s, mais conserve le même décalage relatif audio/vidéo : ce n'est pas une correction suffisante.
+
+Les empreintes d'extradata H.264 différaient aussi. Leur lecture montre les mêmes octets SPS/PPS affichés et un octet nul final supplémentaire côté parent. Cette seule différence d'empreinte ne prouve donc pas des paramètres de codec différents. Aucun contrôle de compatibilité de production n'est supprimé.
+
+### Résultat positif, borné à cette fixture
+
+Le candidat ajoute **96 + 1 024/48 000 s** et retire les **deux premiers paquets AAC** de la continuation, qui recouvrent ici l'audio déjà fourni. Ces valeurs sont déterminées pour cette expérience ; elles ne constituent pas une règle applicable à tous les fichiers, fréquences, codecs ou positions de reprise. Aucun paquet ni timestamp de production n'est modifié.
+
+Après cet ajustement, la première vidéo de continuation est **97,442333 s**, identique à celle du parent poursuivi, et le premier audio est **97,442667 s**. La dernière vidéo parent vaut 97,400333 s : l'intervalle suivant est 42 ms, cohérent avec la cadence quantifiée de la fixture. L'écart audio calculé depuis les décimales ffprobe est 1 microseconde, en deçà d'un tick 90 kHz ; cela ne certifie pas l'identité des échantillons.
+
+Comparaison dans Chromium avec hls.js 1.7.3, même page et mêmes segments parent complets 64–96 s, six secondes de lecture autour du raccord, sans modification du lecteur :
+
+| Mesure | Témoin avec répliques entières | Candidat aligné avec répliques entières |
+| --- | --- | --- |
+| Répliques traversantes actives, 116 observations | Deux | Une |
+| Fin de la réplique traversante | 46,021 et 46,063333 s | 46,021 s |
+| Plus grand intervalle de `mediaTime` près du raccord | 85,334 ms | 42 ms |
+| Origine hls.js des deux époques | Différentes | 5 889 810 ticks pour les deux |
+| Erreurs hls.js / erreur média | Aucune | Aucune |
+
+Le sous-titre futur est également visible après un saut local : intervalle **86,021–91,021 s**, une seule réplique active, `readyState=4`. Le marqueur de discontinuité HLS reste présent. L'absence de doublon résulte des horloges concordantes, sans raccourcir les répliques ni ajouter de déduplication approximative. Le parseur hls.js crée ses identifiants de répliques sans identifiant explicite à partir des temps ajustés et du texte. [Code du parseur 1.7.3](https://github.com/video-dev/hls.js/blob/v1.7.3/src/utils/webvtt-parser.ts).
+
+### Limites d'acceptation
+
+Ce résultat lève le décalage de 42 ms **sur cette fixture**, pas la preuve de couverture complète des sous-titres ni celle du point source exact d'une reprise réelle. Il utilise des segments assemblés après la fin des producteurs. Les mesures de première playlist avec entrée synthétique à vitesse 12 ne sont pas des délais utilisateur. Aucune validation Android, aucun nouvel essai sur Normal et aucun gain de démarrage réel ne sont revendiqués.
+
+Une comparaison audio plus stricte décode deux segments autour du raccord et les compare au parent continu. Les deux sorties ont **384 000 échantillons par canal**. Sur 19 200 échantillons du canal gauche de la fenêtre de 0,4 s autour du raccord, l'écart maximal vaut **0,040373** et l'erreur RMS **0,002571** en PCM flottant ; aucune séquence de valeurs proches de zéro n'y est observée. Il s'agit d'une sinusoïde, sans acceptation à l'écoute. L'alignement des timestamps n'implique donc pas l'identité du signal ; cet écart entre deux encodages ne prouve pas non plus un défaut audible. Le démarrage d'un nouvel encodeur est une piste à approfondir, sans attribution causale complète à ce stade.
+
+Les premières comparaisons par concaténation TS brute puis par playlist HLS avec discontinuité émettent aussi des diagnostics `Packet corrupt` sur la vidéo à la jonction. Ils sont conservés dans les reçus et ne sont pas attribués à Norva en production. La signalisation de cette jonction dans les paquets TS fait l'objet du contrôle complémentaire ci-dessous.
+
+Ce contrôle ajoute `mpegts_flags=+initial_discontinuity` uniquement aux nouveaux segments synthétiques. Les diagnostics disparaissent dans le décodage HLS ; les timestamps et les mesures PCM restent identiques. Le drapeau du transport et le marqueur de playlist répondent donc ici à deux besoins distincts. Cette variation est validée par FFmpeg, pas rejouée dans Chromium ; les preuves navigateur précédentes portent sur le candidat sans ce drapeau. Aucun réglage MPEG-TS du produit n'est changé.
+
+**Décision :** aucun déploiement. Les deux difficultés restantes sont la preuve de parcours complet des paquets de sous-titres et une règle de raccord audio/vidéo valable au-delà de la fixture. Le pilote reste borné au compte autorisé ; aucune réserve, garde, route, durée de vie ni concurrence modifiée. Preuves et scripts : `.codex-artifacts/subtitle-continuity-20261008/`, notamment `clock-options`, `aligned-clock`, les deux contrôles audio, les états navigateur et `aligned-future-browser.png`. Les cinq contrôles documentaires de PR708 ont maintenant réussi, paquets compris.
+
+Contrôle final read-only à **2026-10-08T12:56:47.488035+00:00** : deux Gateways sains, image PR706 et démarrages inchangés, portée `owner-allowlist`, dispatcher permanent actif. Conteneur de preuve absent, onglet synthétique fermé et serveur local arrêté. Le raccord de la fixture est amélioré, mais aucune accélération supplémentaire de Normal n’est validée.
