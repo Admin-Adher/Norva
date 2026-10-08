@@ -132,6 +132,7 @@ const { RetainedInputBarrier } = require('./retained-input-barrier');
 const { RetainedSessionTransfer } = require('./retained-session-transfer');
 const { retainRecentDeliveryTarget, consumeRecentDeliveryTarget } = require('./recent-delivery-target');
 const { privateResumeProfile, canonicalResumeProfile } = require('./private-resume-profile');
+const { SOURCE_CLOCK, retainedSubtitleClock, retainedSubtitleClockArgs } = require('./retained-subtitle-clock');
 const { captureSamples, sampleProof, samplesMatch, SAMPLE_BYTES, captureInputWindows, RECENT_INPUT_MAX_BYTES,
     RECENT_HEADER_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES } = require('./recent-resume-samples');
 const { validateRecentResume, recentResumeTargetParts, compareRecentResumeTargetParts } = require('./recent-resume-validation');
@@ -13033,7 +13034,7 @@ function gatewayCreatedSessionPayload(req, session) {
         subtitleRenditions: exactSubtitleRenditionsForSession(session),
         exactSubtitleHls: exactSubtitleHlsDiagnosticsForSession(session),
         requestedSeekOffset: session.retainedResumePosition ?? session.seekOffset ?? 0,
-        actualStartOffset: session.actualStartOffset || 0,
+        actualStartOffset: session.retainedViewerStartOffset ?? session.actualStartOffset ?? 0,
         localSeekTarget: session.localSeekTarget || 0,
         sourceTimestamps: session.sourceTimestamps === true,
         codecProfile: publicMkvCodecProfile(session.codecProfile),
@@ -13383,7 +13384,8 @@ app.get('/sessions/:id/playlist.m3u8', requirePlaybackToken, async (req, res) =>
                 await handle.close().catch(() => {});
             }
         } else {
-            playlist = await fsp.readFile(session.playlistPath, 'utf8');
+            playlist = session.retainedViewerFirstPlaylist?.name === 'playlist.m3u8'
+                ? session.retainedViewerFirstPlaylist.text : await fsp.readFile(session.playlistPath, 'utf8');
         }
         res.send(rewritePlaylistSegments(playlist, req.playbackToken, session));
     } catch (err) {
@@ -13439,6 +13441,7 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
                 // growing movie. Long playback must not exhaust the cache budget.
                 const fragment = await captureSubtitleWindow({ renditions: [rendition],
                     videoSegments: [segment], prefix: 'continuation', startIndex: index,
+                    sourcePesClock: retainedSubtitleClock(session),
                     readAsset: (name, limit) => readPrivateResumeAsset(session, name, limit) });
                 session.privateResumeLease.assertValid();
                 const bytes = fragment?.assets.get(requested);
@@ -13487,7 +13490,8 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
             // Every child playlist is an authenticated resource graph. Rewrite
             // its media/segment URIs exactly like the master; serving it raw
             // would drop the playback token on the very next hls.js request.
-            let playlist = await fsp.readFile(filePath, 'utf8');
+            let playlist = session.retainedViewerFirstPlaylist?.name === requested
+                ? session.retainedViewerFirstPlaylist.text : await fsp.readFile(filePath, 'utf8');
             if (session.boundedHlsOutput && playlist.includes('#EXTINF:') && !playlist.includes('#EXT-X-START:')) {
                 playlist = playlist.replace('#EXTM3U', '#EXTM3U\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES');
             }
@@ -13501,7 +13505,12 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
         // 30-second browser cache makes a valid selection look empty until the
         // cache expires, so every subtitle poll must revalidate the live file.
         res.setHeader('Cache-Control', isGrowingSubtitle ? 'no-store' : 'private, max-age=30');
-        res.once('finish', () => { if (res.statusCode >= 200 && res.statusCode < 300) session.hlsOutputControl?.served(requested); });
+        res.once('finish', () => {
+            if (res.statusCode >= 200 && res.statusCode < 300 && req.method === 'GET') {
+                acknowledgeRetainedViewerSegment(session, requested);
+                session.hlsOutputControl?.served(requested);
+            }
+        });
         return res.sendFile(filePath);
     } catch (error) {
         if (session.completeHlsCacheLease) {
@@ -15566,6 +15575,7 @@ function revokeSessionPlaybackAccess(session) {
 }
 
 async function retainedSessionPositionAvailable(session, position) {
+    session.retainedViewCandidate = null;
     if (!Number.isFinite(session.actualStartOffset)) return false;
     const name = exactSubtitleHlsEnabled(session) ? 'video.m3u8' : 'playlist.m3u8';
     const bytes = await readPrivateResumeAsset(session, name, 2 * 1024 * 1024).catch(() => null);
@@ -15576,7 +15586,18 @@ async function retainedSessionPositionAvailable(session, position) {
     const local = position - session.actualStartOffset - origin;
     // Keep at least one complete segment beyond the requested point. The
     // ordinary client startup reserve still decides when playback may start.
-    return local >= parsed.segments[0].start && local < parsed.segments.at(-1).start;
+    if (!(local >= parsed.segments[0].start && local < parsed.segments.at(-1).start)) return false;
+    session.retainedViewCandidate = { name, text, origin, position,
+        segments: parsed.segments.map(segment => segment.name) };
+    return true;
+}
+
+function acknowledgeRetainedViewerSegment(session, name) {
+    // HEAD and repeated/aborted manifest requests must keep the same first
+    // origin. Release the snapshot only after a segment from it was delivered.
+    if (session.retainedViewerFirstPlaylist?.segments?.includes(name)) {
+        session.retainedViewerFirstPlaylist = null;
+    }
 }
 
 async function tryParkRetainedSession(session, position) {
@@ -15623,15 +15644,20 @@ async function tryResumeRetainedSession({ lookup, binding, playbackSessionId, ex
                 // This decoder keeps its original resolved transport target.
                 // Even equal samples must not adopt an expired/rotated URL or
                 // a new validator that its live broker would later reject.
-                return !signal.aborted && !validationSignal.aborted
+                const valid = !signal.aborted && !validationSignal.aborted
                     && /^[a-f0-9]{64}$/.test(session.vodInputEffectiveUrlSha256 || '')
                     && observed?.effectiveUrlSha256 === session.vodInputEffectiveUrlSha256
                     && canonicalResumeProfile(observed?.validator || null) === canonicalResumeProfile(session.vodInputValidator || null)
                     && samplesMatch(plan, observed?.samples,
                     observed?.fileSizeBytes, observed?.effectiveUrlIdentitySha256);
+                // Buffered input can still advance output during validation.
+                // Bind the new viewer to the latest durable playlist origin.
+                return valid && await retainedSessionPositionAvailable(session, lookup.seekOffset);
             },
             adopt: session => {
                 if (signal.aborted || session.expiresAt.getTime() <= Date.now()) return false;
+                const view = session.retainedViewCandidate;
+                if (!view || view.position !== lookup.seekOffset) return false;
                 const oldId = session.id, newId = crypto.randomUUID(), token = randomToken();
                 if (sessions.get(oldId) !== session || sessions.has(newId)) return false;
                 if (session.videoEncoderAdmissionHeld && !activeVideoEncoderAdmissions.has(oldId)) return false;
@@ -15645,7 +15671,10 @@ async function tryResumeRetainedSession({ lookup, binding, playbackSessionId, ex
                 session.playbackSessionId = String(playbackSessionId || '').slice(0, 128);
                 session.expiresAt = new Date(Math.min(expiry, session.expiresAt.getTime()));
                 session.retainedResumePosition = lookup.seekOffset;
-                session.localSeekTarget = lookup.seekOffset - session.actualStartOffset;
+                session.retainedViewerStartOffset = session.actualStartOffset + view.origin;
+                session.localSeekTarget = lookup.seekOffset - session.retainedViewerStartOffset;
+                session.retainedViewerFirstPlaylist = view;
+                session.retainedViewCandidate = null;
                 session.privateResumeStopPosition = null;
                 session.retainedDetachPromise = null;
                 session.primaryViewerAttached = true; session.status = 'ready';
@@ -15696,6 +15725,7 @@ function privateResumeHlsBindingForSession(session) {
     if (!audio || !Number.isInteger(audio.index) || !profile.videoCodec || !audio.codec) return null;
     const resumeProfile = privateResumeProfile({ format, audio, audioMode: session.audioMode,
         clientAudioPassthrough: session.clientAudioPassthrough, encoder: VIDEO_ENCODER_CONFIG.backend,
+        subtitleClock: retainedSubtitleClock(session) ? SOURCE_CLOCK : undefined,
         subtitles: exactSubtitleRenditionsForSession(session).map(r => ({
             streamIndex: r.streamIndex, language: r.language, sourceCodec: r.sourceCodec,
             default: r.default, forced: r.forced, hearingImpaired: r.hearingImpaired,
@@ -15801,6 +15831,7 @@ async function capturePrivateResumeWindow(session, playlistClock = null) {
         // SIGTERM can write ENDLIST on an incomplete movie. A stopped encoder
         // must never turn that marker into evidence of the provider's EOF.
         playlist: playlist.replace(/^#EXT-X-ENDLIST\s*$/gm, ''),
+        sourcePesClock: retainedSubtitleClock(session),
         readAsset: (name, remainingBytes) => readPrivateResumeAsset(session, name, remainingBytes) });
 }
 
@@ -17718,6 +17749,7 @@ function startFfmpeg(session) {
         '-hls_time', String(session.hlsTargetSeconds || 4),
         ...boundedHlsArgs(session.boundedHlsOutput, outputAdmission, session.retainCompleteHlsOutput),
         '-hls_segment_type', 'mpegts',
+        ...retainedSubtitleClockArgs(retainedSubtitleClock(session)),
         // No `append_list`: it injected a spurious leading #EXT-X-DISCONTINUITY
         // that stalled hls.js fragment indexing. Local temp_file or the admitted
         // HTTP writer publishes each segment atomically before its playlist.
@@ -19739,6 +19771,9 @@ function scheduleSharedMediaCachePublication(session) {
 
 async function maybePublishMkvCompleteHlsCache(session) {
     if (!mkvCompleteHlsCache || session?.assetSource === 'complete-hls-cache') return null;
+    // The retained pilot has a separate clock binding. Do not publish it into
+    // the existing complete-file cache graph until that graph supports it.
+    if (retainedSubtitleClock(session)) return null;
     if (
         session?.inputFailure || session?.lastError ||
         session?.inputPump?.completed !== true
@@ -23063,7 +23098,7 @@ function serializeSession(req, session) {
         subtitleRenditions: exactSubtitleRenditionsForSession(session),
         exactSubtitleHls: exactSubtitleHlsDiagnosticsForSession(session),
         requestedSeekOffset: session.retainedResumePosition ?? session.seekOffset ?? 0,
-        actualStartOffset: session.actualStartOffset || 0,
+        actualStartOffset: session.retainedViewerStartOffset ?? session.actualStartOffset ?? 0,
         localSeekTarget: session.localSeekTarget || 0,
         sourceTimestamps: session.sourceTimestamps === true,
         codecProfile: publicMkvCodecProfile(session.codecProfile),
@@ -23121,7 +23156,7 @@ function debugSession(session) {
         subtitleRenditions: exactSubtitleRenditionsForSession(session),
         exactSubtitleHls: exactSubtitleHlsDiagnosticsForSession(session),
         requestedSeekOffset: session.retainedResumePosition ?? session.seekOffset ?? 0,
-        actualStartOffset: session.actualStartOffset || 0,
+        actualStartOffset: session.retainedViewerStartOffset ?? session.actualStartOffset ?? 0,
         localSeekTarget: session.localSeekTarget || 0,
         sourceTimestamps: session.sourceTimestamps === true,
         audioMap: session.actualAudioMap || audioMapForSession(session),

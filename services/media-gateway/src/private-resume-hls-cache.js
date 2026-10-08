@@ -207,7 +207,7 @@ class PrivateResumeHlsCache {
         } finally { this.reservedBytes -= reservation; }
     }
     async capture({ binding, observed, position, actualStartOffset, playlist, playlistClock = null,
-        playlistName = 'playlist.m3u8', readAsset, subtitleRenditions = [], inputWindows = [] } = {}) {
+        playlistName = 'playlist.m3u8', readAsset, subtitleRenditions = [], inputWindows = [], sourcePesClock = false } = {}) {
         if (!binding || !Number.isFinite(position) || position <= 0 || !Number.isFinite(actualStartOffset)
             || actualStartOffset < 0 || typeof readAsset !== 'function') return this.rejectCapture('invalid-capture-input');
         const identity = strongResumeIdentity(observed, binding.fileSizeBytes);
@@ -260,7 +260,7 @@ class PrivateResumeHlsCache {
                 segments.push({ name, duration: segment.duration });
             }
             const subtitles = await captureSubtitleWindow({ renditions: subtitleRenditions,
-                videoSegments: selected, readAsset, maxBytes: Math.min(4 * 1024 * 1024, this.perFileBytes - bytes) });
+                videoSegments: selected, readAsset, sourcePesClock, maxBytes: Math.min(4 * 1024 * 1024, this.perFileBytes - bytes) });
             if (!subtitles || epoch !== this.epoch) return this.rejectCapture('subtitle-coverage-or-revoked');
             for (const [name, payload] of subtitles.assets) assets.set(name, payload);
             bytes += subtitles.bytes;
