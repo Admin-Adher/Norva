@@ -153,5 +153,35 @@
     "No global rollout"
   ],
   "evidenceDirectory": ".codex-artifacts/sparse-subtitle-resume-20261008/",
-  "automaticChatScheduleCreated": false
+  "automaticChatScheduleCreated": false,
+  "followupSeekCause": {
+    "runtime": "FFmpeg 5.1.9",
+    "providerRequests": 0,
+    "browserPlaybackTests": 0,
+    "productionChanged": false,
+    "futureCueTimeSeconds": 150.021,
+    "futureCueByteOffset": 3201354,
+    "videoSeekTimeSeconds": 116.021,
+    "videoSeekByteOffset": 5314388,
+    "previousFfprobeControl": "subtitle-selected index; different from FFmpeg video seek",
+    "newControl": "all streams enabled; matches missing cue",
+    "backtrack": {
+      "newNetworkLatencyGainProven": false,
+      "additionalPositionBytes": 2204322,
+      "allRequiredCuesAfter132Observed": true,
+      "videoStartSeconds": 68.021,
+      "requestedSeconds": 70,
+      "videoByteOffset": 3110066
+    },
+    "fixtureRemux": {
+      "futureCueByteOffset": 6862624,
+      "maxInterleaveDelta": 0,
+      "providerFileRepair": false,
+      "cueRetainedAfterSeek117": true
+    },
+    "nativeCandidateDeployed": false,
+    "exactSyntheticCauseEstablished": true,
+    "normalSameCauseProven": false,
+    "evidenceDirectory": ".codex-artifacts/subtitle-seek-cause-20261008/"
+  }
 }
