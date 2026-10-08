@@ -6627,5 +6627,981 @@
         "sha256": "6ad3ee05951f9e85cd3d8f65c76c4b3b2d92f9d0f327531e2174419ec7a20939"
       }
     ]
+  },
+  "brokerInputIntegration20261008": {
+    "status": "isolated broker/input-cache integration validated; no production admission",
+    "productionChanged": false,
+    "externalProviderRequests": 0,
+    "browserTests": 0,
+    "androidTests": 0,
+    "normalGainDemonstrated": false,
+    "targetedUnitTests": {
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "previous39NotRerunOrAdded": true
+    },
+    "scope": {
+      "broker": "unchanged PR706 image broker, VM-extracted by repository harness",
+      "cache": "real PrivateResumeHlsCache input snapshot and four fresh validation samples",
+      "provider": "HTTP loopback fixture in network-none container",
+      "excludes": [
+        "Edge/API authenticated session",
+        "real provider claim/takeover",
+        "complete subtitle time coverage",
+        "production HLS admission",
+        "perceptual audio acceptance"
+      ]
+    },
+    "regular": {
+      "atUtc": "2026-10-08T15:59:48.091Z",
+      "localFixtureRequests": 17,
+      "requestsByPhase": {
+        "initial": 5,
+        "revalidation": 4,
+        "ffmpeg": 7,
+        "bad-range": 1
+      },
+      "seededBytes": 4259840,
+      "reparseMs": 36.270937,
+      "counters": {
+        "providerFetches": 7,
+        "providerBytes": 6793838,
+        "cacheHits": 4,
+        "seededBytes": 4259840
+      },
+      "finalStatus": {
+        "nextOffset": 10988142,
+        "committedOffset": 10986834,
+        "packets": 5,
+        "subtitlePayloadBytes": 38,
+        "maxBufferedBytes": 250715,
+        "timeCoverage": false,
+        "closed": false,
+        "reason": null,
+        "pendingBytes": 0,
+        "pendingWindows": 0,
+        "peakPendingBytes": 1114112,
+        "seenWindows": 12
+      },
+      "allPacketFactsEqualOracle": true,
+      "packetCount": 5,
+      "badRange": {
+        "callbacks": 0,
+        "terminalCode": "RANGE_UNSUPPORTED"
+      }
+    },
+    "unfilledSeek": {
+      "atUtc": "2026-10-08T16:00:53.362Z",
+      "localFixtureRequests": 17,
+      "requestsByPhase": {
+        "initial": 5,
+        "revalidation": 4,
+        "ffmpeg": 7,
+        "bad-range": 1
+      },
+      "seededBytes": 4259840,
+      "reparseMs": 35.203721,
+      "counters": {
+        "providerFetches": 7,
+        "providerBytes": 6593316,
+        "cacheHits": 7,
+        "seededBytes": 4259840
+      },
+      "finalStatus": {
+        "nextOffset": 4194304,
+        "committedOffset": 4023279,
+        "packets": 4,
+        "subtitlePayloadBytes": 32,
+        "maxBufferedBytes": 241374,
+        "timeCoverage": false,
+        "closed": false,
+        "reason": null,
+        "pendingBytes": 6593316,
+        "pendingWindows": 7,
+        "peakPendingBytes": 6593316,
+        "seenWindows": 12
+      },
+      "allPacketFactsEqualOracle": false,
+      "packetCount": 4,
+      "badRange": {
+        "callbacks": 0,
+        "terminalCode": "RANGE_UNSUPPORTED"
+      }
+    },
+    "boundedGapSeek": {
+      "atUtc": "2026-10-08T16:03:03.645Z",
+      "localFixtureRequests": 18,
+      "requestsByPhase": {
+        "initial": 5,
+        "revalidation": 4,
+        "ffmpeg": 8,
+        "bad-range": 1
+      },
+      "seededBytes": 4259840,
+      "reparseMs": 37.502897,
+      "counters": {
+        "providerFetches": 8,
+        "providerBytes": 6793838,
+        "cacheHits": 7,
+        "seededBytes": 4259840
+      },
+      "finalStatus": {
+        "nextOffset": 10988142,
+        "committedOffset": 10986834,
+        "packets": 5,
+        "subtitlePayloadBytes": 38,
+        "maxBufferedBytes": 250715,
+        "timeCoverage": false,
+        "closed": false,
+        "reason": null,
+        "pendingBytes": 0,
+        "pendingWindows": 0,
+        "peakPendingBytes": 2162688,
+        "seenWindows": 13
+      },
+      "allPacketFactsEqualOracle": true,
+      "packetCount": 5,
+      "badRange": {
+        "callbacks": 0,
+        "terminalCode": "RANGE_UNSUPPORTED"
+      },
+      "gap": {
+        "start": 4194304,
+        "end": 4394825,
+        "bytes": 200522,
+        "completed": true
+      },
+      "maxExperimentGapBytes": 262144,
+      "attempts": 1
+    },
+    "combinedHlsAudio": {
+      "atUtc": "2026-10-08T16:13:01.881Z",
+      "localFixtureRequests": 17,
+      "requestsByPhase": {
+        "initial": 5,
+        "revalidation": 4,
+        "audio-anchor": 1,
+        "ffmpeg": 6,
+        "bad-range": 1
+      },
+      "seededBytes": 4259840,
+      "reparseMs": 36.453501,
+      "counters": {
+        "providerFetches": 7,
+        "providerBytes": 6793838,
+        "cacheHits": 17,
+        "seededBytes": 4259840
+      },
+      "finalStatus": {
+        "nextOffset": 10988142,
+        "committedOffset": 10986834,
+        "packets": 5,
+        "subtitlePayloadBytes": 38,
+        "maxBufferedBytes": 250715,
+        "timeCoverage": false,
+        "closed": false,
+        "reason": null,
+        "pendingBytes": 0,
+        "pendingWindows": 0,
+        "peakPendingBytes": 1114112,
+        "seenWindows": 12
+      },
+      "allPacketFactsEqualOracle": true,
+      "packetCount": 5,
+      "badRange": {
+        "callbacks": 0,
+        "terminalCode": "RANGE_UNSUPPORTED"
+      },
+      "audio": {
+        "cut": 100,
+        "anchorDiagnostic": {
+          "firstAudioFrame": {
+            "pts": 4225008,
+            "pos": 4028142,
+            "n": 1024
+          },
+          "past": {
+            "pts": 4225024,
+            "pos": 4028142,
+            "n": 1024,
+            "cursor": 4225024
+          },
+          "correctionInputSamples": 16,
+          "sourceByteWithinRetainedPrefix": true,
+          "localProviderRequests": 1,
+          "historyFromParentEncoder": true,
+          "secondFullDecode": false,
+          "retainedFrameRecords": 4687
+        },
+        "audioBoundaryDeltaTicks": 0,
+        "videoOracleDeltaTicks": 0,
+        "around": {
+          "startSample": 4859136,
+          "endSample": 4878336,
+          "sampleValues": 38400,
+          "missingOrAmbiguousTimestamps": 0,
+          "duplicateCandidateTimestamps": 0,
+          "duplicateOracleTimestamps": 0,
+          "rms": 0,
+          "maxAbsolute": 0,
+          "correlation": 1
+        },
+        "after": {
+          "startSample": 4883136,
+          "endSample": 4916736,
+          "sampleValues": 67200,
+          "missingOrAmbiguousTimestamps": 0,
+          "duplicateCandidateTimestamps": 0,
+          "duplicateOracleTimestamps": 0,
+          "rms": 2.249192828769665e-09,
+          "maxAbsolute": 3.725290298461914e-08,
+          "correlation": 0.9999999999999991
+        },
+        "channels": [
+          {
+            "channel": 0,
+            "peak": 0.08858006447553635,
+            "clippedSamples": 0,
+            "rms": 0.0624449755095216,
+            "stepAtBoundary": 0.0019189491868019104,
+            "maxStepInTenMsWindow": 0.00510860700160265,
+            "maxStepInSixHundredMsWindow": 0.005110773257911205,
+            "maxNearZeroRunSamples": 0,
+            "levelChangeDb": -0.004836832602358395,
+            "crossChannelCorrelation": 1
+          },
+          {
+            "channel": 1,
+            "peak": 0.08858006447553635,
+            "clippedSamples": 0,
+            "rms": 0.0624449755095216,
+            "stepAtBoundary": 0.0019189491868019104,
+            "maxStepInTenMsWindow": 0.00510860700160265,
+            "maxStepInSixHundredMsWindow": 0.005110773257911205,
+            "maxNearZeroRunSamples": 0,
+            "levelChangeDb": -0.004836832602358395,
+            "crossChannelCorrelation": 1
+          }
+        ],
+        "parentErr": "",
+        "childErr": "",
+        "decodeDiagnostics": "",
+        "oracleDiagnostics": "",
+        "outputStreams": [
+          {
+            "index": 0,
+            "codec_name": "h264",
+            "profile": "Constrained Baseline",
+            "codec_type": "video",
+            "time_base": "1/90000",
+            "disposition": {
+              "default": 0,
+              "dub": 0,
+              "original": 0,
+              "comment": 0,
+              "lyrics": 0,
+              "karaoke": 0,
+              "forced": 0,
+              "hearing_impaired": 0,
+              "visual_impaired": 0,
+              "clean_effects": 0,
+              "attached_pic": 0,
+              "timed_thumbnails": 0,
+              "captions": 0,
+              "descriptions": 0,
+              "metadata": 0,
+              "dependent": 0,
+              "still_image": 0
+            }
+          },
+          {
+            "index": 1,
+            "codec_name": "aac",
+            "profile": "LC",
+            "codec_type": "audio",
+            "sample_rate": "48000",
+            "channels": 2,
+            "time_base": "1/90000",
+            "disposition": {
+              "default": 0,
+              "dub": 0,
+              "original": 0,
+              "comment": 0,
+              "lyrics": 0,
+              "karaoke": 0,
+              "forced": 0,
+              "hearing_impaired": 0,
+              "visual_impaired": 0,
+              "clean_effects": 0,
+              "attached_pic": 0,
+              "timed_thumbnails": 0,
+              "captions": 0,
+              "descriptions": 0,
+              "metadata": 0,
+              "dependent": 0,
+              "still_image": 0
+            }
+          }
+        ],
+        "source": "48 kHz mono sine fixture upmixed to stereo; not speech or listening acceptance",
+        "audibleAcceptance": false
+      },
+      "gapReadNeeded": false
+    },
+    "abortDuringPartialBody": {
+      "atUtc": "2026-10-08T16:15:07.076Z",
+      "productionChanged": false,
+      "externalProviderRequests": 0,
+      "localFixtureRequests": 10,
+      "requestsByPhase": {
+        "initial": 5,
+        "revalidation": 4,
+        "abort-window": 1
+      },
+      "maxActive": 1,
+      "active": 0,
+      "seededBytes": 4259840,
+      "partialResponseBytes": 16384,
+      "requestedResponseBytes": 1048576,
+      "incompleteCallbacks": 0,
+      "outcome": "aborted",
+      "invalidCode": "RESUME_CACHE_REVOKED",
+      "receiptRevoked": true,
+      "cacheAfter": {
+        "protocol": 1,
+        "stores": 0,
+        "hits": 1,
+        "misses": 0,
+        "invalidations": 1,
+        "evictions": 0,
+        "inputStores": 1,
+        "inputHits": 1,
+        "sampledStores": 0,
+        "sampledHits": 0,
+        "captureRejects": 0,
+        "lastCaptureRejection": null,
+        "lastSampledValidation": {
+          "complete": true,
+          "sameSize": true,
+          "sameTarget": true,
+          "matchingSamples": 4,
+          "outcome": "accepted"
+        },
+        "entries": 0,
+        "bytes": 0,
+        "reservedBytes": 0,
+        "maxBytes": 67108864,
+        "perFileBytes": 16777216,
+        "ttlMs": 1800000,
+        "windowSeconds": 48,
+        "recentRevalidation": true,
+        "recentTtlMs": 600000,
+        "scope": "private-owner-source-revision",
+        "revalidation": "current-strong-etag-size-target"
+      },
+      "timeCoverageProven": false,
+      "hlsAdmissionProven": false
+    },
+    "runtime": {
+      "atUtc": "2026-10-08T16:16:17.611407+00:00",
+      "productionChanged": false,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        }
+      ],
+      "dispatcherRunning": true,
+      "proofContainerAbsent": true
+    },
+    "previousPr": {
+      "number": 713,
+      "merged": true,
+      "head": "bc6990b858b2bc8d086001dee83a638c9361b17e",
+      "merge": "150aa77e277935952d78a3a6ed6775d637c0eff7",
+      "checks": [
+        {
+          "name": "Build Android TV APK",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build Windows Portable",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build Android Phone APK",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Vercel Preview Comments",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify cloud contracts",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    "limitations": [
+      "Remaining input-prefix holes can exceed the one-shot 256 KiB experiment limit; no general gap backfill enabled.",
+      "Complete five-packet census is compared at fixture EOF; no earlier silence or time-completeness certificate is granted.",
+      "Audio parent history is generated during the original local encoder and retained in the harness, not persisted as production cache metadata.",
+      "Audio source is continuous 48 kHz mono sine; output stereo is an upmix. No speech or new listening/browser acceptance.",
+      "Optional extra request uses the same queue; its delay on a slow real source and cancellation policy remain unvalidated.",
+      "Reparse wall times are local fixture observations, not user-visible startup gains."
+    ],
+    "preservedFailures": [
+      "Initial pending-tail overlap rejected the optional ledger while media continued; fixed by comparing every overlapping retained byte.",
+      "The first gap harness incorrectly asserted the void return of lease.assertValid; corrected to rely on its exception.",
+      "First combined-audio harness shadowed the initial collector variable with an audio-frame variable; renamed.",
+      "The unfilled seek deliberately leaves an observed 200522-byte hole and only four packets."
+    ],
+    "artifacts": [
+      {
+        "file": "audio-compare.cjs",
+        "sha256": "db240023f607a47ea51f7ec59d95cf8096863b87b96a63921eb6df6019f0cc8b"
+      },
+      {
+        "file": "audio-prepare-separate-history.cjs",
+        "sha256": "bd212debfab91142c3e5bf2b025e532afb1aa2295653edd9cd82507bc87972d4"
+      },
+      {
+        "file": "audio-prepare.cjs",
+        "sha256": "668a1a8dbe2a85399557f9981707eb30a10453871fa88129257b67c1e386dd30"
+      },
+      {
+        "file": "audio-separate-history.safe.json",
+        "sha256": "f108dc130ad3b0045bb9162f1a0d0bc672b837fe5450608921aa925aa9619f23"
+      },
+      {
+        "file": "broker-abort-body.cjs",
+        "sha256": "6937b570ca40194cef72b0c2bb0ffb8242e4796357ac9df28b2834530bc8ff51"
+      },
+      {
+        "file": "broker-abort-proof.cjs",
+        "sha256": "a7b860dd598cfa94bc18801834b40f946c066b247e965dae7a327f7bd5f8c8a0"
+      },
+      {
+        "file": "broker-abort-proof.safe.json",
+        "sha256": "ab4355b2e053b35b3af1dda8aa035a91fe16d8d77e32dc63f6bbfa2807157add"
+      },
+      {
+        "file": "broker-audio-body.cjs",
+        "sha256": "dd00b476b3f7e4846ab9356dfb7a0ee27d08c089f3093c2af36370873c984a6b"
+      },
+      {
+        "file": "broker-audio-proof.cjs",
+        "sha256": "35c9e7bde138d7d926d47bdd9cd8e1f3bafc7c0b951b0a7466b56df44f68cb47"
+      },
+      {
+        "file": "broker-audio-proof.safe.json",
+        "sha256": "80a5acf02e128ab2c4b587dc019c2801a913168d28760cfb74c8bb776e3fd6fe"
+      },
+      {
+        "file": "broker-body.cjs",
+        "sha256": "d9dc162687a2c4001af05630d81aaec8dd522279cc26d826bef972a44ee6b8f1"
+      },
+      {
+        "file": "broker-gap-body.cjs",
+        "sha256": "3a2e7b3d17814f0cb447ee69a217b27904bd7431f769f1d1ceadbec8ed38c431"
+      },
+      {
+        "file": "broker-gap-proof.cjs",
+        "sha256": "1c0f80bb92f5f0bc527bea92a3d92c0dfb4f02b0fc46bbb6e017eaf8a66900be"
+      },
+      {
+        "file": "broker-gap-proof.safe.json",
+        "sha256": "ad0f583201d016f7c86497676d4dd3a9b06abc8652ae14d69e33dc0bc0155e9a"
+      },
+      {
+        "file": "broker-overlap-rejection.safe.json",
+        "sha256": "cb43a89dc9000eb49696bb47dea488c930c35d5f1871683f9ada2db8be694c24"
+      },
+      {
+        "file": "broker-proof.cjs",
+        "sha256": "059c2103ae962505519a120423e163c8f09fec12daba438290d32bd4a5332aba"
+      },
+      {
+        "file": "broker-proof.safe.json",
+        "sha256": "59fa64d019062be1d57e6e16da55d6a8871da7e5ad32c2f0e5aad0e72657e659"
+      },
+      {
+        "file": "broker-seek-proof.cjs",
+        "sha256": "3fe87e998f812ae2f504224ea4cc6f50be134984beb788fe344fc15f1623d947"
+      },
+      {
+        "file": "broker-seek-proof.safe.json",
+        "sha256": "7a45ab88bb1f790cf04a3ff2a71c59d0001bbc469e29b4eee5feccd3af0b98c2"
+      },
+      {
+        "file": "build-abort-proof.py",
+        "sha256": "e12d16a07b89b2695a720652c40753b932a5b63246f1022ff51688117519308d"
+      },
+      {
+        "file": "build-audio-proof.py",
+        "sha256": "574c963e0c72973ddf36afd445418ddcaff6fa23af3772440b9dfdfb25ad5d30"
+      },
+      {
+        "file": "build-gap-proof.py",
+        "sha256": "4918fed27d04b86a33eb631081dd180c1db251be54e7929bef1a1c7c336a9d8f"
+      },
+      {
+        "file": "build-proof.py",
+        "sha256": "8f6e4036585ce8c5ee3b42c1b22330ad02ad97933a80fff30643dc66b417e252"
+      },
+      {
+        "file": "byte-prefix-proof.cjs",
+        "sha256": "22fc65cb0e604cf839d6e4a26543b19e12f58466e1fbf9d9ceda4d8ddbd96954"
+      },
+      {
+        "file": "pr713-checks.safe.json",
+        "sha256": "fc224073b93e1904111a04b9176bd71c08b2b29f5cea121f85e273ad52784156"
+      },
+      {
+        "file": "progressive-ledger.cjs",
+        "sha256": "c87f40c77b2e6e1f392aef73d0621c58cca1df5904d1a867c446ecd8cbafba2d"
+      },
+      {
+        "file": "run-proof.py",
+        "sha256": "034de5d9ecabd524e12ab34cf51358f91f2617c909fd9fcfe035019674b19784"
+      },
+      {
+        "file": "runtime-check.py",
+        "sha256": "f533f1e0823eddc81f7129b5459271c4a5fa378fdf5bd6e739d51ededaab128b"
+      },
+      {
+        "file": "runtime-check.safe.json",
+        "sha256": "a36413905c803bd6e974ece8f7a850bfcec07165e92284d608ecb131896879a0"
+      },
+      {
+        "file": "summarize.py",
+        "sha256": "bd317bfb27ca22ad9b2f8cea81fef0dae32d514ec1a3a71b53337b40f7949c95"
+      },
+      {
+        "file": "unit-tests.tap",
+        "sha256": "1b1197ac39d155b24f22528f53c401b09abd542ff88972157ab6094f4f351bb2"
+      },
+      {
+        "file": "window-ledger-before-overlap.cjs",
+        "sha256": "efd32b024f68790b5b592136f0ee321610574857be2824be8de3c66be2ec73ff"
+      },
+      {
+        "file": "window-ledger.cjs",
+        "sha256": "38769211cad3cd06ea3d0d7959f5a0f4c17cf028c33da17725a127e5d13b2cf1"
+      },
+      {
+        "file": "window-ledger.test.cjs",
+        "sha256": "e2410c444619e5dd9feaca9b232404057244d3f7b505a2878ca799eadd1bc238"
+      }
+    ]
+  },
+  "boundedAudioHistory20261008": {
+    "atUtc": "2026-10-08T16:27:59.870Z",
+    "status": "isolated history guard and eight synthetic HLS joins validated; deployment gate remains closed",
+    "productionChanged": false,
+    "normalGainDemonstrated": false,
+    "externalProviderRequests": 0,
+    "newBrowserTests": 0,
+    "newAndroidTests": 0,
+    "audibleAcceptance": false,
+    "targetedUnitTests": {
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0
+    },
+    "results": [
+      {
+        "source": {
+          "name": "pink48",
+          "fps": "24",
+          "rate": 48000,
+          "codec": "aac"
+        },
+        "cutSeconds": 16,
+        "history": {
+          "reason": null,
+          "framesObserved": 750,
+          "retainedFrames": 750,
+          "maxFrames": 2048,
+          "maxClockQuantizationErrorSamples": 8,
+          "quantizationBoundSamples": 48,
+          "originSamples": 0,
+          "cursor": 768000
+        },
+        "audioBoundaryDeltaTicks": 0,
+        "videoOracleDeltaTicks": 0,
+        "estimatedLagSamples": 0,
+        "missingOrAmbiguousTimestamps": 0,
+        "rmsAround": 0.003256135995762299,
+        "rmsAfter": 0.00621769528972006,
+        "maxAbsAfter": 0.044280167669057846,
+        "levelChangeDeltaDb": [
+          -0.00042995461203954033,
+          0.00963689046734606
+        ],
+        "clippedSamples": 0,
+        "diagnostics": []
+      },
+      {
+        "source": {
+          "name": "pink48",
+          "fps": "24",
+          "rate": 48000,
+          "codec": "aac"
+        },
+        "cutSeconds": 20,
+        "history": {
+          "reason": null,
+          "framesObserved": 937,
+          "retainedFrames": 937,
+          "maxFrames": 2048,
+          "maxClockQuantizationErrorSamples": 8,
+          "quantizationBoundSamples": 48,
+          "originSamples": 0,
+          "cursor": 959488
+        },
+        "audioBoundaryDeltaTicks": 0,
+        "videoOracleDeltaTicks": 0,
+        "estimatedLagSamples": 0,
+        "missingOrAmbiguousTimestamps": 0,
+        "rmsAround": 0.006547926363401681,
+        "rmsAfter": 0.01431286660070074,
+        "maxAbsAfter": 0.06727392226457596,
+        "levelChangeDeltaDb": [
+          -0.0891580438292996,
+          -0.13925751099748052
+        ],
+        "clippedSamples": 0,
+        "diagnostics": []
+      },
+      {
+        "source": {
+          "name": "pink44",
+          "fps": "25",
+          "rate": 44100,
+          "codec": "aac"
+        },
+        "cutSeconds": 16,
+        "history": {
+          "reason": null,
+          "framesObserved": 689,
+          "retainedFrames": 689,
+          "maxFrames": 2048,
+          "maxClockQuantizationErrorSamples": 12,
+          "quantizationBoundSamples": 45,
+          "originSamples": 0,
+          "cursor": 705536
+        },
+        "audioBoundaryDeltaTicks": 0,
+        "videoOracleDeltaTicks": 0,
+        "estimatedLagSamples": 0,
+        "missingOrAmbiguousTimestamps": 0,
+        "rmsAround": 0.010332308261868772,
+        "rmsAfter": 0.015382561295632789,
+        "maxAbsAfter": 0.06418244540691376,
+        "levelChangeDeltaDb": [
+          0.1349514771670599,
+          0.09660689852373916
+        ],
+        "clippedSamples": 0,
+        "diagnostics": []
+      },
+      {
+        "source": {
+          "name": "pink44",
+          "fps": "25",
+          "rate": 44100,
+          "codec": "aac"
+        },
+        "cutSeconds": 20,
+        "history": {
+          "reason": null,
+          "framesObserved": 861,
+          "retainedFrames": 861,
+          "maxFrames": 2048,
+          "maxClockQuantizationErrorSamples": 12,
+          "quantizationBoundSamples": 45,
+          "originSamples": 0,
+          "cursor": 881664
+        },
+        "audioBoundaryDeltaTicks": 0,
+        "videoOracleDeltaTicks": 0,
+        "estimatedLagSamples": 0,
+        "missingOrAmbiguousTimestamps": 0,
+        "rmsAround": 0.010918650669395381,
+        "rmsAfter": 0.015328251083999506,
+        "maxAbsAfter": 0.07000313699245453,
+        "levelChangeDeltaDb": [
+          0.08452671347070545,
+          -0.043463400391749674
+        ],
+        "clippedSamples": 0,
+        "diagnostics": []
+      },
+      {
+        "source": {
+          "name": "chirps-silence",
+          "fps": "24",
+          "rate": 48000,
+          "codec": "aac",
+          "tones": true
+        },
+        "cutSeconds": 16,
+        "history": {
+          "reason": null,
+          "framesObserved": 750,
+          "retainedFrames": 750,
+          "maxFrames": 2048,
+          "maxClockQuantizationErrorSamples": 8,
+          "quantizationBoundSamples": 48,
+          "originSamples": 0,
+          "cursor": 768000
+        },
+        "audioBoundaryDeltaTicks": 0,
+        "videoOracleDeltaTicks": 0,
+        "estimatedLagSamples": 0,
+        "missingOrAmbiguousTimestamps": 0,
+        "rmsAround": 1.3217981470954613e-07,
+        "rmsAfter": 8.693565297562864e-06,
+        "maxAbsAfter": 0.0003215223550796509,
+        "levelChangeDeltaDb": [
+          1.8953393998797502e-08,
+          6.091679586976706e-08
+        ],
+        "clippedSamples": 0,
+        "diagnostics": []
+      },
+      {
+        "source": {
+          "name": "chirps-silence",
+          "fps": "24",
+          "rate": 48000,
+          "codec": "aac",
+          "tones": true
+        },
+        "cutSeconds": 20,
+        "history": {
+          "reason": null,
+          "framesObserved": 937,
+          "retainedFrames": 937,
+          "maxFrames": 2048,
+          "maxClockQuantizationErrorSamples": 8,
+          "quantizationBoundSamples": 48,
+          "originSamples": 0,
+          "cursor": 959488
+        },
+        "audioBoundaryDeltaTicks": 0,
+        "videoOracleDeltaTicks": 0,
+        "estimatedLagSamples": 0,
+        "missingOrAmbiguousTimestamps": 0,
+        "rmsAround": 4.5173574665346406e-08,
+        "rmsAfter": 2.276418075298332e-07,
+        "maxAbsAfter": 3.3229589462280273e-06,
+        "levelChangeDeltaDb": [
+          -6.581644966877076e-09,
+          3.2784061979908297e-09
+        ],
+        "clippedSamples": 0,
+        "diagnostics": []
+      },
+      {
+        "source": {
+          "name": "offset-five",
+          "fps": "24",
+          "rate": 48000,
+          "codec": "aac",
+          "offset": 5
+        },
+        "cutSeconds": 21,
+        "history": {
+          "reason": null,
+          "framesObserved": 750,
+          "retainedFrames": 750,
+          "maxFrames": 2048,
+          "maxClockQuantizationErrorSamples": 8,
+          "quantizationBoundSamples": 48,
+          "originSamples": 238992,
+          "cursor": 1006992
+        },
+        "audioBoundaryDeltaTicks": 0,
+        "videoOracleDeltaTicks": 0,
+        "estimatedLagSamples": 0,
+        "missingOrAmbiguousTimestamps": 0,
+        "rmsAround": 0.011780567316369006,
+        "rmsAfter": 0.016547772547820323,
+        "maxAbsAfter": 0.06850013509392738,
+        "levelChangeDeltaDb": [
+          0.04560915287571632,
+          0.10134425064272456
+        ],
+        "clippedSamples": 0,
+        "diagnostics": []
+      },
+      {
+        "source": {
+          "name": "offset-five",
+          "fps": "24",
+          "rate": 48000,
+          "codec": "aac",
+          "offset": 5
+        },
+        "cutSeconds": 25,
+        "history": {
+          "reason": null,
+          "framesObserved": 938,
+          "retainedFrames": 938,
+          "maxFrames": 2048,
+          "maxClockQuantizationErrorSamples": 8,
+          "quantizationBoundSamples": 48,
+          "originSamples": 238992,
+          "cursor": 1199504
+        },
+        "audioBoundaryDeltaTicks": 0,
+        "videoOracleDeltaTicks": 0,
+        "estimatedLagSamples": 0,
+        "missingOrAmbiguousTimestamps": 0,
+        "rmsAround": 0.011295848321621348,
+        "rmsAfter": 0.016403742320134414,
+        "maxAbsAfter": 0.07270173542201519,
+        "levelChangeDeltaDb": [
+          0.10295380887852604,
+          0.1471455884713811
+        ],
+        "clippedSamples": 0,
+        "diagnostics": []
+      }
+    ],
+    "rejected": [
+      {
+        "source": {
+          "name": "gap-200ms",
+          "fps": "24",
+          "rate": 48000,
+          "codec": "aac",
+          "gap": true
+        },
+        "cut": 16,
+        "history": {
+          "reason": "audio-clock-discontinuity",
+          "framesObserved": 564,
+          "retainedFrames": 0,
+          "maxFrames": 2048,
+          "maxClockQuantizationErrorSamples": 9600,
+          "quantizationBoundSamples": 48,
+          "originSamples": 0,
+          "cursor": 577536
+        },
+        "newChildEncoderStarted": false
+      },
+      {
+        "source": {
+          "name": "gap-200ms",
+          "fps": "24",
+          "rate": 48000,
+          "codec": "aac",
+          "gap": true
+        },
+        "cut": 20,
+        "history": {
+          "reason": "audio-clock-discontinuity",
+          "framesObserved": 564,
+          "retainedFrames": 0,
+          "maxFrames": 2048,
+          "maxClockQuantizationErrorSamples": 9600,
+          "quantizationBoundSamples": 48,
+          "originSamples": 0,
+          "cursor": 577536
+        },
+        "newChildEncoderStarted": false
+      }
+    ],
+    "runtime": {
+      "atUtc": "2026-10-08T16:31:24.099215+00:00",
+      "productionChanged": false,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        }
+      ],
+      "dispatcherRunning": true,
+      "proofContainerAbsent": true
+    },
+    "limits": [
+      "Fresh file/track/profile identity is required outside this helper; position/PCM checksum alone is not identity.",
+      "Rolling history retains at most 2048 input frame descriptors; production persistence and restart recovery remain unimplemented.",
+      "The discontinuity guard is tied to the actual one-millisecond Matroska timestamp scale of these fixtures, never a user-visible buffering threshold.",
+      "Distinct source channel signals, intentional silence, timestamp origin and two rates are covered; no real speech/listening acceptance, 5.1 or variable-rate streams.",
+      "Audio is re-encoded. Zero estimated lag is not waveform identity or perceptual equivalence.",
+      "No before-EOF complete subtitle time certificate; no production cache admission or Normal performance claim."
+    ],
+    "artifacts": [
+      {
+        "file": "audio-history-matrix.cjs",
+        "sha256": "aaef18081f1f256d560c896e93f1adb9ba3233befcda2e1ee91dd9369a5cc33a"
+      },
+      {
+        "file": "audio-history-matrix.safe.json",
+        "sha256": "128e15c4ac8272048dc11e144173edfbb36a6e0cc6727ce6ff50fda4ad1a0fd1"
+      },
+      {
+        "file": "audio-history.cjs",
+        "sha256": "2d65ede2cfd6d711e4815afe1cce9728c589fe0465fe361fd342fe6e07f91cb0"
+      },
+      {
+        "file": "audio-history.test.cjs",
+        "sha256": "50f37274b4713f06206d32aa31dbe163bd5b4e026ecf398ceeaf70ff562b7abd"
+      },
+      {
+        "file": "build-matrix.py",
+        "sha256": "1eacd6974deb07737917ca7eae869d410b81c8e2ff0828d3cbb3ec2632ce986c"
+      },
+      {
+        "file": "run-proof.py",
+        "sha256": "034de5d9ecabd524e12ab34cf51358f91f2617c909fd9fcfe035019674b19784"
+      },
+      {
+        "file": "runtime-check.py",
+        "sha256": "f533f1e0823eddc81f7129b5459271c4a5fa378fdf5bd6e739d51ededaab128b"
+      },
+      {
+        "file": "runtime-check.safe.json",
+        "sha256": "ca0ae6f95a4d0b57a7da69401ae3fdb2e649271847f480fcedb6653429c26347"
+      },
+      {
+        "file": "summarize.py",
+        "sha256": "5f6f2e7d9743f0011f933359fe11db8355948195a22b11f3270ae4176ac197fa"
+      },
+      {
+        "file": "unit-tests.tap",
+        "sha256": "eb2599c914f83e8d9ac858ba68b19ffad1bf6b8846a5d2a9dff0e71af9d328ff"
+      }
+    ]
   }
 }
