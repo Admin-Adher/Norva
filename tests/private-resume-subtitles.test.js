@@ -3,6 +3,8 @@ const { captureSubtitleWindow, parseWebVtt, parseSubtitlePlaylist, videoTimestam
 const { PrivateResumeHlsCache } = require('../services/media-gateway/src/private-resume-hls-cache');
 const { privateResumeBinding } = require('../services/media-gateway/src/private-resume-binding');
 const fs = require('node:fs'), vm = require('node:vm');
+const { ResumePlaylistClock } = require('../services/media-gateway/src/private-resume-playlist-clock');
+const { parseResumeMediaPlaylist } = require('../services/media-gateway/src/private-resume-hls-cache');
 
 test('cached indexed subtitle continuation trims every output on the absolute source clock', () => {
     const source = fs.readFileSync(require.resolve('../services/media-gateway/src/index.js'), 'utf8');
@@ -97,6 +99,40 @@ test('missing coverage, bootstrap, unsupported clocks, escaping names and budget
     }
 });
 
+test('sliding subtitle continuation preserves original clocks, coverage and stable fragment names', async () => {
+    const source = fs.readFileSync(require.resolve('../services/media-gateway/src/index.js'), 'utf8');
+    const block = source.slice(source.indexOf('async function privateResumeSubtitleContinuation('),
+        source.indexOf('\nfunction recentDeliveryRouteKey('));
+    const make = sequence => '#EXTM3U\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-MEDIA-SEQUENCE:' + sequence + '\n'
+        + Array.from({ length: 4 }, (_, i) => `#EXTINF:4,\nsegment-${sequence+i}.ts\n`).join('');
+    let text = make(0), coverage = 16;
+    const clock = new ResumePlaylistClock(); clock.observe('video.m3u8', text);
+    const build = vm.runInNewContext(`(()=>{${block};return privateResumeSubtitleContinuation})()`, {
+        fsp: { readFile: async () => text }, parseResumeMediaPlaylist,
+        exactSubtitleRenditionsForSession: () => renditions,
+        readPrivateResumeAsset: async () => Buffer.from('subtitle'),
+        parseSubtitlePlaylist: () => ({ segments: [{ end: coverage }], ended: false }),
+    });
+    const session = { privateResumeContinuationReady: true, hlsOutputAdmission: { resumePlaylistClock: clock } };
+    const first = await build(session);
+    text = make(2);
+    assert.equal(await build(session), first, 'unattested publication does not invent a clock');
+    clock.observe('video.m3u8', text);
+    const second = await build(session);
+    assert.equal(second.sequence, 2);
+    assert.equal(second.segments.length, 2, 'only through the actual 16 second subtitle coverage');
+    assert.equal(second.segments[0].start, 8);
+    assert.equal(second.playlists.get('subtitle_0.m3u8')[0].name, 'continuation-subtitle_0-2.vtt');
+    coverage = 24;
+    const third = await build(session);
+    assert.equal(third.segments.length, 4);
+    const fragment = await captureSubtitleWindow({ renditions, videoSegments: [third.segments[0]], readAsset,
+        prefix: 'continuation', startIndex: third.sequence });
+    const bytes = fragment.assets.get('continuation-subtitle_0-2.vtt').toString();
+    assert.match(bytes, /MPEGTS:126000/);
+    assert.match(bytes, /00:00:07.000 --> 00:00:13.000/);
+});
+
 test('HLS cache captures video plus subtitle graph atomically, revalidates, splices, and revokes both', async () => {
     const cache = new PrivateResumeHlsCache();
     const binding = privateResumeBinding({ ownerKey: 'a'.repeat(64), sourceUrl: 'https://example.invalid/movie',
@@ -110,6 +146,11 @@ test('HLS cache captures video plus subtitle graph atomically, revalidates, spli
     assert.match(lease.asset('resume-subtitle_0-1.vtt').toString(), /Cross-boundary/);
     const joined = lease.subtitlePlaylist('subtitle_0.m3u8', [{ name: 'continuation-subtitle_0-0.vtt', duration: 4 }]);
     assert.equal((joined.match(/#EXT-X-DISCONTINUITY/g) || []).length, 1);
+    const rolled = lease.subtitlePlaylist('subtitle_0.m3u8', [{ name: 'continuation-subtitle_0-5.vtt', duration: 4 }], false, 5);
+    const prefixCount = (lease.subtitlePlaylist('subtitle_0.m3u8').match(/#EXTINF/g) || []).length;
+    assert.match(rolled, new RegExp(`MEDIA-SEQUENCE:${prefixCount + 5}\\n`));
+    assert.match(rolled, /DISCONTINUITY-SEQUENCE:1/);
+    assert.doesNotMatch(rolled, /resume-subtitle|PLAYLIST-TYPE/);
     lease.release();
     // Failed replacement must keep the still-valid prior window.
     assert.equal(await cache.capture({ ...args, readAsset: async () => null }), false);
