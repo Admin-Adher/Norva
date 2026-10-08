@@ -9416,6 +9416,37 @@
         "file": ".codex-artifacts/retained-watch-sliding-clock-20261008/resume-aac.safe.json",
         "sha256": "e7a3646badfde764de49e559c9e8065bc97b84e6e87ad38026c84b6b4715845c"
       }
-    ]
+    ],
+    "runtime": {
+      "atUtc": "2026-10-08T20:00:50.798135+00:00",
+      "productionChanged": false,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist",
+          "retainedEnabled": false
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist",
+          "retainedEnabled": false
+        }
+      ],
+      "dispatcherRunning": true,
+      "proofContainers": {
+        "norva-retained-watch-clock-20261008": true,
+        "norva-retained-watch-progressive-20261008": true,
+        "norva-retained-watch-progressive-flush-20261008": true,
+        "norva-retained-watch-sliding-clock-20261008": true,
+        "norva-retained-final-http-20261008": true
+      },
+      "proofContainerAbsent": true
+    }
   }
 }
