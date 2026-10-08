@@ -9456,5 +9456,227 @@
       "cause": "FFmpeg concurrency VM omitted new helper import",
       "productChangedByHarnessRepair": false
     }
+  },
+  "committedProgressiveSubtitlePrototype": {
+    "atUtc": "2026-10-08T20:32:58.709Z",
+    "productionChanged": false,
+    "externalProviderRequests": 0,
+    "retainedFlagEnabledInProduction": false,
+    "normalGainMeasured": false,
+    "libraryUsedByProduction": false,
+    "initialPlayingMs": 9323.900000095367,
+    "resumePlayingMs": 3528.4000000953674,
+    "resumeFirstFrameMs": 1186,
+    "sourceResumePosition": 123.225504,
+    "localResumeTarget": 73.225504,
+    "advanceAfterResume": 135.524496,
+    "sameDecoder": true,
+    "oldAccessRevoked": true,
+    "maxActive": 1,
+    "maxSockets": 1,
+    "providerRequestsDuringPark": 0,
+    "newDataAfterResume": true,
+    "newSourceBytes": 16777216,
+    "allResourcesReleased": true,
+    "errors": [],
+    "waiting": [],
+    "steadyFrameGapsOver250ms": [],
+    "startupGaps": [
+      {
+        "phase": "initial",
+        "gap": 7.7166,
+        "at": 0.042,
+        "mediaDelta": 0.042,
+        "depth": 99.972881,
+        "dropped": 0,
+        "visibility": "visible"
+      },
+      {
+        "phase": "resumed",
+        "gap": 2.383399999999994,
+        "at": 73.25,
+        "mediaDelta": 0.04200000000000159,
+        "depth": 102.76793099999999,
+        "dropped": 0,
+        "visibility": "visible"
+      }
+    ],
+    "minimumPlayingBufferSeconds": 114.46161199999999,
+    "longTasks": [],
+    "maxSimultaneousShowingTracks": 1,
+    "futureCueActiveObservations": [
+      {
+        "phase": "resumed",
+        "at": 100.535133,
+        "tracks": [
+          {
+            "mode": "showing",
+            "cues": [
+              {
+                "start": 20.000000000000004,
+                "end": 25.000000000000004,
+                "text": "Forced"
+              },
+              {
+                "start": 100,
+                "end": 105,
+                "text": "Forced second"
+              }
+            ],
+            "active": [
+              "Forced second"
+            ]
+          }
+        ]
+      }
+    ],
+    "subtitleClock": {
+      "phase": "resumed",
+      "offset": 20.023
+    },
+    "decode": {
+      "atUtc": "2026-10-08T20:30:34.996Z",
+      "segments": [
+        "video-00035.ts",
+        "video-00036.ts",
+        "video-00037.ts"
+      ],
+      "sourceBytes": 67429636,
+      "subtitlePackets": [
+        {
+          "stream": 2,
+          "cues": [
+            {
+              "start": 40.023,
+              "end": 45.023,
+              "text": "Forced"
+            },
+            {
+              "start": 120.023,
+              "end": 125.023,
+              "text": "Forced second"
+            }
+          ],
+          "timeCoverage": false,
+          "complete": false
+        },
+        {
+          "stream": 3,
+          "cues": [
+            {
+              "start": 30.023,
+              "end": 80.023,
+              "text": "Crossing"
+            },
+            {
+              "start": 160.023,
+              "end": 165.023,
+              "text": "Ending"
+            }
+          ],
+          "timeCoverage": false,
+          "complete": false
+        }
+      ],
+      "audio": [
+        {
+          "codec": "aac",
+          "profile": "LC",
+          "rate": "48000",
+          "channels": 2
+        }
+      ],
+      "audioPackets": 563,
+      "videoPackets": 288,
+      "decodeExit": 0,
+      "decodeErrors": "",
+      "probeErrors": ""
+    },
+    "tests": {
+      "targetedPassed": 46,
+      "newPublisherPassed": 18,
+      "overlapping": true
+    },
+    "limitations": [
+      "Fixture-only Gateway route/tee outputs and WatchPage subtitle ownership selection; no public contract integration.",
+      "Observed packet publication only, not temporal silence/completeness or private HLS cache eligibility.",
+      "No audible acceptance; synthetic fixture only; no authenticated production creation or Android replay."
+    ],
+    "runtime": {
+      "atUtc": "2026-10-08T20:33:12.456396+00:00",
+      "productionChanged": false,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist",
+          "retainedEnabled": false
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist",
+          "retainedEnabled": false
+        }
+      ],
+      "dispatcherRunning": true,
+      "proofContainers": {
+        "norva-retained-publish-unit-20261008": true,
+        "norva-retained-progressive-publish-20261008": true,
+        "norva-retained-progressive-publish-final-20261008": true,
+        "norva-retained-watch-clock-20261008": true,
+        "norva-retained-watch-progressive-20261008": true,
+        "norva-retained-watch-progressive-flush-20261008": true,
+        "norva-retained-watch-sliding-clock-20261008": true,
+        "norva-retained-final-http-20261008": true
+      },
+      "proofContainerAbsent": true
+    },
+    "artifacts": [
+      {
+        "file": ".codex-artifacts/retained-progressive-publish-20261008/packet-publish.safe.json",
+        "sha256": "f1ab75f4ef966de01ce6f9a411b66b7918945ecc3b8ba82f9e6df8dc1fc6e363"
+      },
+      {
+        "file": ".codex-artifacts/retained-progressive-publish-20261008/packet-snapshots.safe.json",
+        "sha256": "78dc7db96de0c4f0bb822f512722f117513c5fcb76a400e4b2e026e811f102ca"
+      },
+      {
+        "file": ".codex-artifacts/retained-progressive-publish-20261008/browser-proof.safe.json",
+        "sha256": "ed63c81d73beb8aaec57fb3996d5566a2cf74639aba2e2291b61d23a4435bad9"
+      },
+      {
+        "file": ".codex-artifacts/retained-progressive-publish-20261008/unit-tests.tap",
+        "sha256": "64b8ba449569fe29c1e3776e7320cb69231063053dacf44d80da181451eb86c0"
+      },
+      {
+        "file": ".codex-artifacts/retained-progressive-publish-20261008/build.py",
+        "sha256": "f6c01d74a337d5f828242c0bcaa5a3df5d85c7c4f3a083b8a79c59dc416c6d80"
+      },
+      {
+        "file": ".codex-artifacts/retained-progressive-publish-final-20261008/browser-proof.safe.json",
+        "sha256": "6515e9aecb3abc99b9b2a9516f070c8d422c0dd6c1f063a86253fc799ca287b1"
+      },
+      {
+        "file": ".codex-artifacts/retained-progressive-publish-final-20261008/decode-and-subtitles.safe.json",
+        "sha256": "82a434fce98e6b2d7ff02d1f9063a715c54de8e3bd117ef9e155f6ed457a7873"
+      },
+      {
+        "file": ".codex-artifacts/retained-progressive-publish-final-20261008/summary.safe.json",
+        "sha256": "2c1a574a38d0538f390aaed0de6eeea629fca45d470de9b1b04622e2ed281b41"
+      },
+      {
+        "file": ".codex-artifacts/retained-progressive-publish-final-20261008/runtime-check.safe.json",
+        "sha256": "4eae173a054c8adb619415a65b215844c6973bd970e4687412fcabdfa53828c7"
+      },
+      {
+        "file": ".codex-artifacts/retained-progressive-publish-final-20261008/browser-result.jpg",
+        "sha256": "3e8026fad1b6dece217dedcdaae126ff3f3e9a0dabf640ed4b86381b78cb92af"
+      }
+    ]
   }
 }
