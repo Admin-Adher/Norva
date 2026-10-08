@@ -275,3 +275,51 @@ La politique d'horloge est commune au parent et au second producteur de cette ex
 Le contrôle du **8 octobre à 16:48 Paris** trouve les deux Gateways sains, avec la même image PR706. Leurs dates de démarrage ont toutefois changé : **14:25:21 UTC** pour les deux, puis 14:25:22 pour le dispatcher. Le contrôle read-only complémentaire situe le démarrage de l'hôte vers **14:24:57 UTC**. Les conteneurs ont leurs anciennes dates de création, `OOMKilled=false` et un compteur Docker de redémarrage à zéro ; leurs champs `FinishedAt` indiquent 13:28:30–31 UTC. Ces champs situent les événements mais ne constituent pas à eux seuls une mesure complète d'indisponibilité. **La raison de l'arrêt/redémarrage de l'hôte n'est pas établie** et n'est pas attribuée aux expériences isolées. Aucun redémarrage n'a été demandé pendant ce travail.
 
 Reçus et scripts : `.codex-artifacts/subtitle-cache-integration-20261008/`. `cache-prefix-proof` porte sur la vraie classe de cache ; `audio-grid-retained-tail` est la dernière matrice ; `audio-grid-proof`, `audio-grid-clocked`, les diagnostics et variantes intermédiaires conservent les échecs. `summary.safe.json` sépare explicitement stockage, horloges, signal et admission de production.
+
+
+## Parcours synthétique jusqu'au navigateur — 8 octobre, 17:07–17:12 Paris
+
+Le test réunit désormais les éléments précédemment vérifiés séparément : **cache d'octets réel → reconstruction de l'entrée → nouveau producteur HLS → cache vidéo réel avec sous-titres → hls.js 1.7.3 dans Chromium**. Il s'agit d'un harnais isolé utilisant les classes de l'image PR706, pas du parcours de session Norva en production. Aucun appel média fournisseur.
+
+### Ce qui traverse réellement le cache
+
+La fixture de 240 s contient une vidéo H.264 à 24 i/s, un bruit rose AAC d'entrée à **44,1 kHz** et deux pistes UTF-8. Le cache conserve **4 570 316 octets** contigus, récupérés par `acquireInput` après les quatre échantillons de revalidation. Le helper reconstruit les quatre paquets de sous-titres du préfixe, puis suit le suffixe exact jusqu'à la fin connue de la fixture : les cinq paquets finaux concordent avec le témoin `ffprobe` sur positions, timestamps, durées et empreintes. L'entrée du second FFmpeg est réellement reconstruite avec les octets relus du cache ; son hash complet concorde.
+
+Le cache HLS retient ensuite **64–96 s** avec les deux pistes de sous-titres. Sa capture et son acquisition ordinaires réussissent, sans désactiver la garde de couverture. Le graphe destiné au navigateur utilise `lease.playlist` et `lease.subtitlePlaylist`, les segments `resume-*` et VTT proviennent de `lease.asset`. Une seule discontinuité HLS sépare le cache et le second encodeur. Les ressources sont exportées en lecture seule pour ce test loopback ; le bail n'est donc pas un bail de session navigateur de production. Les instances de cache sont libérées à zéro entrée/octet/réservation.
+
+**Limite déterminante :** les intervalles de sous-titres du harnais sont publiés seulement après avoir parcouru intégralement la source synthétique jusqu'à sa fin connue. Cette condition permet la comparaison exhaustive mais ne démontre pas une publication progressive rapide. Le helper de préfixe reste `timeCoverage:false` ; ni la dernière date de paquet ni un fichier VTT finalisé ne sont transformés en preuve de silence futur. Une intégration qui attendrait ce parcours entier pourrait annuler le gain recherché sur une VOD longue.
+
+### Rejeu navigateur et sauts
+
+Le saut local à 30 s précède de 2 s la frontière cache/continuation. La lecture se poursuit jusqu'à **48,023 s**, soit environ 18 s d'observation, puis le harnais la met volontairement en pause.
+
+- **433 callbacks vidéo**, écart maximal de **42 ms** entre timestamps d'images, compatible avec les 24 i/s de cette fixture ; compteur navigateur **471 images / zéro image abandonnée** à la fin de cette séquence.
+- Un événement `waiting` accompagne le saut initial ; aucun autre `waiting` ou `stalled` pendant le franchissement et la suite observée. Aucun `mediaError` ni erreur hls.js. Il s'agit d'assets locaux préchargés, pas d'un benchmark de démarrage réseau.
+- Horloge `initPTS` identique avant et après la discontinuité : **5 888 070 ticks / 90 kHz**. Le `SourceBuffer` audio utilise **`mp4a.40.2`**, concordant avec l'AAC-LC 48 kHz stéréo des segments.
+- **356 observations de sous-titres**, au plus une réplique active. La réplique traversante reste affichée de part et d'autre du raccord et disparaît à **46 s**. Son début antérieur à la fenêtre est ramené à zéro par le navigateur ; aucun doublon ni raccourcissement de sa fin observé.
+- Sauts successifs et changements de piste : la réplique future `Forced second` apparaît à **86–91 s**, la dernière réplique à **126–131 s**, puis le retour avant raccord retrouve `Forced` à **6–11 s**. Ces trois vérifications n'ajoutent aucune erreur HLS.
+
+Les coordonnées sont locales à la fenêtre débutant à 64 s. La réplique future correspond aux 150–155 s de la fixture ; elle était déjà présente dans le préfixe physique conservé et manquait dans le contrôle FFmpeg avec seek. La nouvelle chaîne la conserve jusqu'à l'affichage. Capture : `.codex-artifacts/subtitle-playback-chain-20261008/browser-future.png`.
+
+### Audio : horloges exactes, signal encore différent
+
+À la frontière 96 s de ce nouveau test, les premiers PTS audio et vidéo correspondent au témoin. Le premier paquet audio commence exactement après le dernier paquet conservé. Les deux fenêtres PCM à temps égal ne contiennent aucun timestamp manquant ou ambigu. Aucun diagnostic d'encodage/décodage. Le diagnostic par corrélation retrouve cependant **−13 échantillons (−0,271 ms)** sur le canal gauche ; l'erreur RMS vaut **0,02075** autour du raccord et **0,03097** après. Le signal n'est pas identique au témoin ; ce résultat ne prouve ni un défaut audible ni une équivalence perceptuelle.
+
+Pour vérifier que la précédente duplication mono ne masquait pas un problème entre canaux, quatre raccords supplémentaires utilisent deux bruits roses indépendants, à deux frontières pour chaque fréquence d'entrée. La sortie reste AAC-LC stéréo 48 kHz.
+
+| Source stéréo | Frontière | Écarts PTS audio / vidéo | Décalage estimé, canal gauche |
+| --- | --- | --- | --- |
+| AAC 48 kHz / 24 i/s | 16 s | 0 / 0 tick | 0 ms |
+| AAC 48 kHz / 24 i/s | 20 s | 0 / 0 tick | +0,167 ms |
+| AAC 44,1 kHz / 25 i/s | 16 s | 0 / 0 tick | −0,229 ms |
+| AAC 44,1 kHz / 25 i/s | 20 s | 0 / 0 tick | −0,167 ms |
+
+Les quatre raccords n'ont ni timestamp manquant/ambigu dans les fenêtres contrôlées, ni erreur de décodage. Sur les **600 ms** autour de chaque frontière, aucun échantillon saturé et aucune série d'échantillons proches de zéro (seuil diagnostic `1e-7`) ; les deux canaux restent distincts. Cela ne certifie pas la qualité sonore. La différence de variation de niveau avant/après, face au témoin, atteint **−0,620 dB** sur un canal du cas 48 kHz/20 s ; les différences de forme d'onde et de phase restent consignées. Aucun seuil perceptuel n'est inventé pour les déclarer acceptables. Le navigateur était muet ; aucune validation à l'écoute n'est revendiquée.
+
+### État et prochaine condition d'intégration
+
+**Aucun déploiement et aucun nouveau gain sur Normal.** Le premier parcours synthétique assemblé est fonctionnel, mais les gardes et le broker de session réels ne sont pas encore reliés au collecteur. Il faut établir une couverture progressive sûre des sous-titres sans lire tout le fichier à l'avance, puis valider le signal et le cycle de vie réel (révocation, interruption, changement de piste, reprise). La politique de timestamps doit rester liée au profil de cache : ces nouveaux résultats n'autorisent pas la réutilisation des anciennes fenêtres sous une autre horloge. Le format UTF-8 et le graphe à un audio sélectionné ne couvrent pas toutes les pistes/formats du catalogue. Aucun changement d'interface produit ni validation Android dans cette phase.
+
+Les assertions des deux expériences et du récapitulatif passent ; les **27 tests du helper n'ont pas été recomptés**. Les cinq checks de PR711 passent désormais, paquets compris. Reçus reproductibles sous `.codex-artifacts/subtitle-playback-chain-20261008/` : `chain`, `stereo-grid`, les quatre lectures DOM et `summary.safe.json`.
+
+Le contrôle read-only à **17:11:58 Paris** trouve les deux Gateways sains, l'image PR706 et leurs démarrages de 16:25:21 inchangés, le dispatcher actif et le pilote `owner-allowlist`. Le conteneur de preuve est absent, le serveur loopback est arrêté et l'onglet synthétique fermé. L'incident d'hôte signalé précédemment conserve sa cause inconnue ; ce contrôle de santé ne l'efface pas.
