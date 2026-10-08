@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-    android:gravity="fill"
-    android:src="@drawable/norva_app_icon" />
+<!-- Adaptive layers include 25% overscan. This inset keeps the N within the
+     circular safe area while the decorative tile border stays outside it. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:inset="8%">
+    <bitmap android:gravity="fill" android:src="@drawable/norva_app_icon" />
+</inset>

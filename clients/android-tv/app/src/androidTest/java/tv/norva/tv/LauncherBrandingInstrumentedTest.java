@@ -94,6 +94,23 @@ public class LauncherBrandingInstrumentedTest {
         assertNotNull("Actual TV launcher is visible", root);
         assertFalse("Test must return to the launcher", context.getPackageName().contentEquals(root.getPackageName()));
         save(instrumentation.getUiAutomation().takeScreenshot(), "tv-launcher-home.png");
+        // The fresh launcher has no favourites. Open its Apps tab via the
+        // actual accessibility node, then capture Norva in the installed grid.
+        for (AccessibilityNodeInfo node : root.findAccessibilityNodeInfosByText("Apps")) {
+            if ("Apps".contentEquals(node.getText() == null ? "" : node.getText())) {
+                AccessibilityNodeInfo target = node;
+                for (int i=0; i<4 && target != null && !target.isClickable(); i++) target=target.getParent();
+                if (target != null) target.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                break;
+            }
+        }
+        boolean found = false;
+        for (int i=0; i<40; i++) {
+            root=instrumentation.getUiAutomation().getRootInActiveWindow();
+            if (root!=null && !root.findAccessibilityNodeInfosByText("Norva").isEmpty()) { found=true; break; }
+            SystemClock.sleep(250);
+        }
+        save(instrumentation.getUiAutomation().takeScreenshot(), "tv-launcher-apps.png");
         StringBuilder tree = new StringBuilder();
         dump(root, tree, 0);
         try (FileOutputStream out = new FileOutputStream(new File(context.getExternalFilesDir(null), "tv-launcher-home.txt"))) {
@@ -101,6 +118,7 @@ public class LauncherBrandingInstrumentedTest {
         }
         // The workflow copies screenshots every five seconds, before test APK removal.
         SystemClock.sleep(6000);
+        assertTrue("Norva must be visible in the real launcher Apps grid", found);
     }
 
     private void dump(AccessibilityNodeInfo node, StringBuilder result, int depth) {
