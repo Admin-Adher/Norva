@@ -9447,6 +9447,14 @@
         "norva-retained-final-http-20261008": true
       },
       "proofContainerAbsent": true
+    },
+    "initialCloudFailure": {
+      "total": 6142,
+      "passed": 6106,
+      "failed": 5,
+      "skipped": 31,
+      "cause": "FFmpeg concurrency VM omitted new helper import",
+      "productChangedByHarnessRepair": false
     }
   }
 }
