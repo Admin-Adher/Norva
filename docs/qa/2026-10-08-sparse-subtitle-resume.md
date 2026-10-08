@@ -80,3 +80,44 @@ Le saut vidéo dépasse physiquement les octets de la réplique future. Le dému
 La piste nommée « forced » dans cette fixture ne porte pas de disposition forcée : aucune anomalie propre à ce drapeau n'est démontrée. Pour rendre une recherche antérieure fiable sur des fichiers réels, il faudrait une preuve de complétude des index de chaque piste et conserver les répliques chevauchantes. Matroska recommande les entrées d'index pour chaque sous-titre mais autorise des index sélectifs : une entrée absente ne prouve pas le silence. [Recommandations Cues](https://www.matroska.org/technical/cues.html), [index sélectifs](https://www.matroska.org/technical/diagram.html).
 
 **Décision :** aucun nouveau correctif ni réglage déployé sur ces expériences. Le candidat reste rejeté, Normal n'est pas davantage accéléré. La cause de l'échec synthétique est désormais expliquée, et le contrôle d'acceptation devra comparer tous les flux après le même saut, avec un inventaire complet des répliques attendues. Reçus et scripts supplémentaires : `.codex-artifacts/subtitle-seek-cause-20261008/seek-matrix.*`, `seek-packet-path.*` et `backtrack-cost.*`.
+
+
+## Prototype suivant — conserver les répliques déjà rencontrées
+
+Nouvelle approche expérimentale, **non intégrée au produit et non déployée** : conserver les répliques entières déjà décodées, même si leur affichage est prévu après la fin de la vidéo actuellement préparée. Deux sorties WebVTT supplémentaires du même processus FFmpeg alimentent le registre ; aucune seconde entrée média ni nouvelle connexion fournisseur. Les expériences restent synthétiques, réseau `none`, sous l'image PR706 et les mêmes bornes d'isolation.
+
+Dans la fixture, la réplique prévue à **150,021–155,021 s** arrive dans le pipe alors que la playlist vidéo n'atteint que **68 s**. L'arrêter vers 100 s puis repartir après ses octets ne la fait plus perdre si le nouveau producteur hérite de ce registre. La réplique **60,021–110,021 s**, qui traverse le raccord, est également conservée. Les voies de registre n'appliquent aucun seek de sortie qui couperait cette réplique. La réplique nouvelle à 190,021 s provient bien du second parcours. Le résultat conserve les trois répliques attendues après le raccord de cette fixture ; ce n'est pas une preuve exhaustive pour d'autres placements de paquets.
+
+### Ressources et cycle de vie
+
+Un helper expérimental vérifie l’égalité des identifiants fournis pour le fichier/profil, les pistes, l’époque du producteur et l’horloge déclarée ; il borne le texte et le nombre de répliques. Il ne valide pas lui-même l’identité réelle du fichier fournisseur. Il conserve les blocs complets, décode l'UTF-8 fragmenté, refuse les fins malformées ou non confirmées et attend le drainage de toutes les voies avant d'émettre un instantané. Après dépassement d'une borne, il invalide le registre tout en continuant à vider les pipes : fermer un pipe pourrait casser la lecture vidéo. Les instantanés sont immuables et révocables dans le même processus ; leur sérialisation JSON ne vaut pas preuve.
+
+**21 tests du helper réussissent.** Les premiers essais de collecte et de navigateur utilisent le collecteur initial. Le raccordement du helper borné aux vrais pipes FFmpeg a d’abord échoué à leur fin : FFmpeg termine chaque dernière réplique par une seule LF, et le parseur en exigeait deux. Diagnostic conservé : queues de 38 et 33 octets, UTF-8 complet, fins des deux pipes observées, sortie contrôlée 255, aucune erreur FFmpeg. Le bloc final terminé par LF/CRLF est désormais conservé en attente puis intégré seulement après fermeture gracieuse et drainage de toutes les pistes ; une fermeture anormale, un bloc malformé ou un dépassement reste refusé. Une troncature textuelle restant syntaxiquement valide ne peut pas être détectée par ce registre.
+
+Le rejeu isolé avec le helper corrigé réussit : quatre répliques parent ; après conservation à partir du raccord de 100,25 s, deux répliques héritées (future et traversante) ; trois répliques finales après la nouvelle réplique à 190 s. Les deux producteurs ferment leurs deux pipes, sans reste non analysé ni erreur FFmpeg. Ce résultat de collecte est distinct de la projection navigateur décrite plus bas. La revue a intercepté une allocation répétée d'instantanés et une libération prématurée de leur réservation par `prune` : le producteur fermé est désormais figé, l'instantané est mémorisé et sa réservation conservée. Le budget cumulé entre producteurs reste à intégrer au propriétaire réel du cache. Les blocs strictement identiques sont dédupliqués ; le helper ne certifie pas le nombre de paquets source et ne contient aucun champ affirmant une couverture ou un silence.
+
+### Vérification avec le lecteur réel, sur média local synthétique
+
+hls.js **1.7.3** est utilisé dans le navigateur Chromium sur une page locale, sans session Norva ni fichier fournisseur. Les fragments de cette preuve navigateur sont assemblés après la fin des deux producteurs synthétiques : ce contrôle ne valide ni leur publication en direct ni le délai utilisateur. Le premier assemblage incluait un dernier segment partiel et montrait deux copies d'une réplique avec un écart de fin de 635 ms. Sa cause précise n'est pas établie ; cet essai reste un échec conservé.
+
+Le second assemblage utilise uniquement les segments complets du parent, aux bornes de playlist **64 à 96 s**, puis une continuation avec prélecture à 81 s et découpe vidéo à 96 s. Les répliques héritées réapparaissent, mais recopier leur durée entière dans les deux époques HLS crée encore un doublon : fins **46,021** et **46,063333 s**. Les horloges extraites des TS et celles du lecteur expliquent les **42,333 ms** : la nouvelle vidéo commence à 1,442333 s et son audio à 1,4 s ; hls.js choisit cette origine audio pour initialiser la nouvelle époque. Changer arbitrairement la map WebVTT pour supprimer l'écart avancerait aussi les répliques par rapport à la vidéo. Sources primaires : [remuxeur hls.js 1.7.3](https://github.com/video-dev/hls.js/blob/v1.7.3/src/remux/mp4-remuxer.ts), [parseur WebVTT](https://github.com/video-dev/hls.js/blob/v1.7.3/src/utils/webvtt-parser.ts).
+
+Le prototype conserve donc le registre original entier et partitionne seulement sa projection à la frontière des deux époques. Observation DOM du lecteur :
+
+| Contrôle | Résultat observé |
+| --- | --- |
+| Avant raccord, temps local 15,211 s | Une seule réplique, intervalle 0–32 s |
+| Après raccord, temps local 37,261 s | Une seule réplique, intervalle 32,042333–46,063333 s |
+| Réplique future, temps local 87,232 s | Réplique précédemment perdue visible, intervalle 86,063333–91,063333 s |
+
+Les trois contrôles ont `readyState=4` et aucune erreur hls.js ; pause volontaire pour lire les états. **Le trou de 42,333 ms au raccord subsiste** et la frontière utilisée vient des durées de playlist, pas encore d'une mesure complète des PTS source. Ce test prouve la récupération et l'absence de doublon dans ces états ; il ne certifie pas un raccord parfaitement continu, l'audio à l'écoute, Android ou un film entier.
+
+### Ce qui empêche encore l'intégration
+
+L'avancement de la vidéo et le recouvrement de quinze secondes ne prouvent pas que tous les octets de sous-titres antérieurs au nouveau point d'entrée ont été conservés. Il manque un point de progression du démultiplexeur, validé après drainage, ou une preuve équivalente de parcours contigu sans trou, ainsi qu'une règle de publication qui ne déclare pas trop tôt un intervalle vide. Le maximum d'octets reçus par le broker, le PTS vidéo et `ENDLIST` ne suffisent pas.
+
+Une piste réellement parcourue de l'origine jusqu'au vrai EOF naturel, sans seek omettant des paquets, sans troncature ni limite de durée, après conversion réussie et drainage complet, pourrait être réutilisée comme piste complète. Ce domaine est plus simple mais apporte peu aux reprises habituelles au milieu de Normal, avec la fenêtre vidéo actuelle. Il ne justifie pas de lire préventivement tout le film.
+
+**Décision :** piste prometteuse prouvée sur les répliques connues, conservée comme prototype. Aucun gain de démarrage réel de Normal, aucune nouvelle lecture fournisseur, aucun changement de seuil, durée de vie, route ou concurrence. Le pilote de production reste restreint. Preuves : `.codex-artifacts/subtitle-ledger-20261008/`, scripts FFmpeg, registre et tests, reçus de collecte, horloges PES, états navigateur et capture `future-cue-browser.png`.
+
+Contrôle final read-only à **2026-10-08 10:15:30 UTC** : les deux Gateways sont sains, même image PR706 et mêmes démarrages ; `owner-allowlist` conservé, dispatcher permanent actif et conteneur de preuve absent. Onglet synthétique fermé et serveur local arrêté. Aucun déploiement. Les cinq contrôles documentaires de PR707 sont désormais réussis, paquets compris.
