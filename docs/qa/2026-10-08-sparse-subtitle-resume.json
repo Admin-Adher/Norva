@@ -183,5 +183,368 @@
     "exactSyntheticCauseEstablished": true,
     "normalSameCauseProven": false,
     "evidenceDirectory": ".codex-artifacts/subtitle-seek-cause-20261008/"
-  }
+  },
+  "followupObservedCueLedger": {
+    "productionChanged": false,
+    "deployed": false,
+    "providerRequests": 0,
+    "syntheticBrowserPlayback": true,
+    "hlsVersion": "1.7.3",
+    "futureCueSourceSeconds": 150.021,
+    "futureCueObservedAtVideoSeconds": 68,
+    "crossingCueSourceSeconds": [
+      60.021,
+      110.021
+    ],
+    "helperTests": {
+      "passed": 21,
+      "failed": 0
+    },
+    "boundedRealPipeProof": {
+      "helperSha256": "3ba2e630bd48f8db84ec9250ac564dc9fccdaf7348b3214b16457df38a50dcd0",
+      "limits": {
+        "maxBytes": 262144,
+        "maxBlockBytes": 16384,
+        "maxRemainderBytes": 16384,
+        "maxCues": 128
+      },
+      "parent": {
+        "name": "parent",
+        "seek": 0,
+        "stopAt": 100,
+        "fine": 0,
+        "videoEnd": 100.25,
+        "firstVideoMs": 456,
+        "exit": {
+          "code": 255,
+          "signal": null
+        },
+        "stopRequested": true,
+        "arrivals": [
+          {
+            "track": 0,
+            "wallMs": 53,
+            "videoEnd": 0,
+            "accepted": true,
+            "committedCueCount": 0
+          },
+          {
+            "track": 1,
+            "wallMs": 53,
+            "videoEnd": 0,
+            "accepted": true,
+            "committedCueCount": 0
+          },
+          {
+            "track": 1,
+            "wallMs": 54,
+            "videoEnd": 0,
+            "accepted": true,
+            "committedCueCount": 0
+          },
+          {
+            "track": 1,
+            "wallMs": 5062,
+            "videoEnd": 56,
+            "accepted": true,
+            "committedCueCount": 1
+          },
+          {
+            "track": 0,
+            "wallMs": 5063,
+            "videoEnd": 56,
+            "accepted": true,
+            "committedCueCount": 1
+          },
+          {
+            "track": 0,
+            "wallMs": 6358,
+            "videoEnd": 68,
+            "accepted": true,
+            "committedCueCount": 2
+          }
+        ],
+        "arrivalsDropped": 0,
+        "tracks": [
+          [
+            {
+              "start": 70.021,
+              "end": 75.021
+            },
+            {
+              "start": 150.021,
+              "end": 155.021
+            }
+          ],
+          [
+            {
+              "start": 2.021,
+              "end": 14.021
+            },
+            {
+              "start": 60.021,
+              "end": 110.021
+            }
+          ]
+        ],
+        "pipeBytes": [
+          78,
+          72
+        ],
+        "bytes": 150,
+        "seeded": {
+          "beforePruneCueCount": 0,
+          "retainedCueCount": 0,
+          "retainFrom": 0,
+          "inherited": false
+        },
+        "ledger": {
+          "valid": true,
+          "closed": true,
+          "reason": null,
+          "bytes": 140,
+          "remainderBytes": 0,
+          "cueCount": 4,
+          "discardedBytes": 0
+        },
+        "processCloseObservedBeforeLedgerClose": true,
+        "pipeEnds": [
+          true,
+          true
+        ],
+        "stderr": ""
+      },
+      "child": {
+        "name": "child",
+        "seek": 85.25,
+        "stopAt": null,
+        "fine": 100.25,
+        "videoEnd": 139.75,
+        "firstVideoMs": 1702,
+        "exit": {
+          "code": 0,
+          "signal": null
+        },
+        "stopRequested": false,
+        "arrivals": [
+          {
+            "track": 0,
+            "wallMs": 54,
+            "videoEnd": 0,
+            "accepted": true,
+            "committedCueCount": 2
+          },
+          {
+            "track": 1,
+            "wallMs": 54,
+            "videoEnd": 0,
+            "accepted": true,
+            "committedCueCount": 2
+          },
+          {
+            "track": 1,
+            "wallMs": 8783,
+            "videoEnd": 88,
+            "accepted": true,
+            "committedCueCount": 2
+          }
+        ],
+        "arrivalsDropped": 0,
+        "tracks": [
+          [
+            {
+              "start": 150.021,
+              "end": 155.021
+            }
+          ],
+          [
+            {
+              "start": 60.021,
+              "end": 110.021
+            },
+            {
+              "start": 190.021,
+              "end": 195.021
+            }
+          ]
+        ],
+        "pipeBytes": [
+          7,
+          39
+        ],
+        "bytes": 46,
+        "seeded": {
+          "beforePruneCueCount": 4,
+          "retainedCueCount": 2,
+          "retainFrom": 100.25,
+          "inherited": true
+        },
+        "ledger": {
+          "valid": true,
+          "closed": true,
+          "reason": null,
+          "bytes": 111,
+          "remainderBytes": 0,
+          "cueCount": 3,
+          "discardedBytes": 0
+        },
+        "processCloseObservedBeforeLedgerClose": true,
+        "pipeEnds": [
+          true,
+          true
+        ],
+        "stderr": ""
+      },
+      "merged": [
+        [
+          {
+            "start": 150.021,
+            "end": 155.021
+          }
+        ],
+        [
+          {
+            "start": 60.021,
+            "end": 110.021
+          },
+          {
+            "start": 190.021,
+            "end": 195.021
+          }
+        ]
+      ],
+      "knownCueRecovered": true,
+      "crossingCueRecovered": true,
+      "spliceSourceSeconds": 100.25,
+      "providerRequests": 0,
+      "boundedLedgerUsed": true,
+      "fullHandoffCompletenessProven": false,
+      "subtitleCoverageProven": false,
+      "automaticClockCalibrationProven": false,
+      "browserPlaybackValidated": false
+    },
+    "initialBrowserFailure": {
+      "duplicateCueEndDifferenceMs": 635,
+      "preciseCauseEstablished": false
+    },
+    "fullSegmentBrowserFailure": {
+      "duplicateCueEndDifferenceMs": 42.333333,
+      "cause": "child audio/video origin differ; whole crossing cue duplicated across discontinuity"
+    },
+    "partitionedBrowserProof": {
+      "hlsVersion": "1.7.3",
+      "syntheticOnly": true,
+      "parentSourceFrom": 64,
+      "spliceSourceSeconds": 96,
+      "partitionBoundarySourceMeasured": false,
+      "before": {
+        "time": 15.211,
+        "cue": {
+          "start": 0,
+          "end": 32,
+          "text": "Crossing"
+        },
+        "activeCueCount": 1,
+        "readyState": 4
+      },
+      "after": {
+        "time": 37.261,
+        "cue": {
+          "start": 32.04233333332274,
+          "end": 46.06333333332274,
+          "text": "Crossing"
+        },
+        "activeCueCount": 1,
+        "readyState": 4
+      },
+      "future": {
+        "time": 87.232,
+        "cue": {
+          "start": 86.06333333332273,
+          "end": 91.06333333332273,
+          "text": "Forced second"
+        },
+        "activeCueCount": 1,
+        "readyState": 4
+      },
+      "hlsErrors": [],
+      "nominalCueGapMs": 42.33333332274,
+      "acceptedForDeployment": false,
+      "fullHandoffCompletenessProven": false,
+      "screenshot": "future-cue-browser.png"
+    },
+    "fullCoverageProven": false,
+    "normalLatencyGainProven": false,
+    "sourceClockBoundaryProven": false,
+    "evidenceDirectory": ".codex-artifacts/subtitle-ledger-20261008",
+    "initialBoundedProofFailure": {
+      "reason": "partial-block-at-eof",
+      "diagnosticOnly": true,
+      "realTailSizes": [
+        38,
+        33
+      ],
+      "tailEndsWithSingleLf": true,
+      "retained": true
+    },
+    "terminalFramingFix": {
+      "commitAfterAllPipeEndsAndGracefulClose": true,
+      "textCompletenessProven": false
+    },
+    "finalHealth": {
+      "atUtc": "2026-10-08T10:15:30.639161+00:00",
+      "productionChanged": false,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T08:44:27.201045016Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T08:44:29.77608402Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        }
+      ],
+      "dispatcherRunning": true,
+      "proofContainerAbsent": true
+    },
+    "localBrowserAndServerStopped": true,
+    "previousDocumentationCi": {
+      "commit": "96e9fb398c19e701acb4b3842f97c84f046be824",
+      "observedDuringThisFollowup": true,
+      "checks": [
+        {
+          "name": "Build Android Phone APK",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build Android TV APK",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build Windows Portable",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Vercel Preview Comments",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify cloud contracts",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    }
+  },
+  "rootEvidencePhase": "historical PR706; later prototype and browser evidence is nested under followupObservedCueLedger"
 }
