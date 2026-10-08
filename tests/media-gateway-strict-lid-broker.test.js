@@ -131,6 +131,7 @@ function brokerHarness(diagnosticLogs = null) {
       ...require('../services/media-gateway/src/recent-resume-samples'),
       ...require('../services/media-gateway/src/recent-resume-validation'),
       ...require('../services/media-gateway/src/fresh-resume-handoff'),
+      ...require('../services/media-gateway/src/retained-input-barrier'),
       ...require('../services/media-gateway/src/recent-delivery-target'),
       createStrictRangeCollector,
       createMp4SizeEvidence: require('../services/media-gateway/src/mp4-size-evidence').createMp4SizeEvidence,
@@ -158,6 +159,100 @@ function brokerHarness(diagnosticLogs = null) {
     },
   );
 }
+
+test('retained finite input parks outside network deadlines and destroys its private transport', async t => {
+  const N=65536,data=Buffer.alloc(8*N,9),scope={};let calls=0,sockets=0,factories=0;
+  const provider=http.createServer((req,res)=>{calls++;sendExactRange(req,res,data);});
+  provider.on('connection',socket=>{sockets++;socket.on('close',()=>sockets--);});
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,pathPrefix:'finite-mkv-seek',
+    finiteWindowBytes:N,finiteCacheBytes:N,completedReleaseDelayMs:0,supersededReleaseDelayMs:0,
+    firstByteTimeoutMs:100,idleTimeoutMs:100,retainedInputScope:scope,retainedInputTtlMs:3000,
+    dispatcherFactory:()=>{factories++;return new(require('undici').Agent)({connections:1,pipelining:1});}});
+  t.after(()=>broker.close());
+  await (await fetch(broker.inputUrl,{headers:{Range:`bytes=0-${N-1}`}})).arrayBuffer();
+  const token=await broker.parkRetainedInput(scope);assert.ok(token);
+  for(let i=0;i<30&&sockets;i++)await new Promise(r=>setTimeout(r,5));
+  assert.equal(sockets,0);const before=calls;
+  const pending=fetch(broker.inputUrl,{headers:{Range:`bytes=${2*N}-${3*N-1}`}}).then(async r=>({status:r.status,body:Buffer.from(await r.arrayBuffer())}));
+  await new Promise(r=>setTimeout(r,250)); // Greater than both unchanged 100-ms network deadlines.
+  assert.equal(calls,before);assert.equal(broker.retainedInputStatus.activeWindows,0);assert.equal(broker.terminalError,null);
+  assert.equal(await broker.resumeRetainedInput({},scope,async()=>true),false);
+  assert.equal(await broker.resumeRetainedInput(token,{},async()=>true),false);
+  assert.equal(await broker.resumeRetainedInput(token,scope,async signal=>!signal.aborted),true);
+  const result=await pending;assert.equal(result.status,206);assert.deepEqual(result.body,data.subarray(2*N,3*N));
+  assert.equal(factories,2);assert.equal(calls,before+1);assert.equal(await broker.resumeRetainedInput(token,scope,async()=>true),false);
+});
+
+test('retained pause waits for an active provider body and the normal release grace', async t => {
+  const N=65536,data=Buffer.alloc(8*N,7),scope={};let releaseBody,entered;
+  const started=new Promise(r=>entered=r);let active=0,maxActive=0,calls=0;
+  const provider=http.createServer((req,res)=>{
+    calls++;active++;maxActive=Math.max(maxActive,active);res.on('finish',()=>active--);
+    const [start,end]=req.headers.range.slice(6).split('-').map(Number);
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1});
+    releaseBody=()=>res.end(data.subarray(start,end+1));entered();
+  });
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,pathPrefix:'finite-mkv-seek',
+    finiteWindowBytes:N,finiteCacheBytes:N,completedReleaseDelayMs:100,retainedInputScope:scope,
+    dispatcherFactory:()=>new(require('undici').Agent)({connections:1,pipelining:1})});t.after(()=>broker.close());
+  const read=fetch(broker.inputUrl,{headers:{Range:`bytes=0-${N-1}`}}).then(r=>r.arrayBuffer());await started;
+  let parked=false;const p=broker.parkRetainedInput(scope).then(x=>{parked=true;return x;});
+  await new Promise(r=>setTimeout(r,20));assert.equal(parked,false);assert.equal(active,1);
+  releaseBody();await read;await new Promise(r=>setTimeout(r,20));assert.equal(parked,false);
+  assert.ok(await p);assert.equal(active,0);assert.equal(calls,1);assert.equal(maxActive,1);
+});
+
+for(const reason of ['expired','validation-refused','revoked']) test(`retained broker ${reason} cannot reopen pending input`,async t=>{
+  const N=65536,data=Buffer.alloc(8*N,9),scope={};let calls=0;
+  const provider=http.createServer((req,res)=>{calls++;sendExactRange(req,res,data);});
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,pathPrefix:'finite-mkv-seek',
+    finiteWindowBytes:N,finiteCacheBytes:N,completedReleaseDelayMs:0,retainedInputScope:scope,
+    retainedInputTtlMs:reason==='expired'?150:3000,
+    dispatcherFactory:()=>new(require('undici').Agent)({connections:1,pipelining:1})});t.after(()=>broker.close());
+  await (await fetch(broker.inputUrl,{headers:{Range:`bytes=0-${N-1}`}})).arrayBuffer();
+  const token=await broker.parkRetainedInput(scope);assert.ok(token);const before=calls;
+  const pending=fetch(broker.inputUrl,{headers:{Range:`bytes=${2*N}-${3*N-1}`}}).then(async r=>{await r.arrayBuffer();return r.status;}).catch(()=>0);
+  if(reason==='validation-refused')assert.equal(await broker.resumeRetainedInput(token,scope,async()=>false),false);
+  else if(reason==='revoked')await broker.close();
+  else await new Promise(r=>setTimeout(r,220));
+  await broker.close();assert.notEqual(await pending,206);assert.equal(calls,before);
+  assert.equal(broker.retainedInputStatus.state,'closed');assert.equal(await broker.resumeRetainedInput(token,scope,async()=>true),false);
+});
+
+test('retained input cannot use strict LID or a shared dispatcher', async()=>{
+  const create=brokerHarness().createStrictLidBroker;
+  for(const options of [{pathPrefix:'strict-lid',dispatcherFactory:()=>assert.fail()},
+    {pathPrefix:'finite-mkv-seek',dispatcher:null},
+    {pathPrefix:'finite-mkv-seek',retainedInputTtlMs:10001,dispatcherFactory:()=>assert.fail()}]) {
+    await assert.rejects(create({sourceUrl:'http://127.0.0.1/fixture',fileSizeBytes:65536,retainedInputScope:{},...options}),/private finite transport/);
+  }
+  let destroyed=0;
+  await assert.rejects(create({sourceUrl:'http://127.0.0.1/fixture',fileSizeBytes:65536,pathPrefix:'finite-mkv-seek',
+    retainedInputScope:{},dispatcherFactory:async()=>({destroy:async()=>{destroyed++;}})}),/disposable private transport/);
+  await Promise.resolve();assert.equal(destroyed,1);
+});
+
+test('retained broker closure awaits the aborted validation transport cleanup',async t=>{
+  const N=65536,data=Buffer.alloc(8*N,9),scope={};let validationOpened,releaseDrain;
+  const opened=new Promise(r=>validationOpened=r),drain=new Promise(r=>releaseDrain=r);
+  const provider=http.createServer((req,res)=>sendExactRange(req,res,data));
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const h=brokerHarness(),options={sourceUrl,fileSizeBytes:data.length,completedReleaseDelayMs:0,
+    dispatcherFactory:()=>new(require('undici').Agent)({connections:1,pipelining:1})};
+  const broker=await h.createStrictLidBroker({...options,pathPrefix:'finite-mkv-seek',retainedInputScope:scope});t.after(()=>broker.close());
+  const token=await broker.parkRetainedInput(scope);assert.ok(token);let signal,closed=false;
+  const resumed=broker.resumeRetainedInput(token,scope,async s=>{
+    signal=s;const fresh=await h.createStrictLidBroker(options);
+    await (await fetch(fresh.inputUrl,{headers:{Range:`bytes=0-${N-1}`}})).arrayBuffer();
+    validationOpened();await drain;await fresh.close();return true;
+  });await opened;
+  const stopping=broker.close().then(()=>closed=true);await new Promise(r=>setTimeout(r,25));
+  assert.equal(signal.aborted,true);assert.equal(closed,false);assert.equal(h.strictLidBrokers.size,1);
+  releaseDrain();await stopping;assert.equal(await resumed,false);assert.equal(closed,true);assert.equal(h.strictLidBrokers.size,0);
+});
 
 test('recent HLS samples use four fresh serialized broker responses, including a changed body', async t => {
   const { SAMPLE_BYTES: N, sampleProof, samplesMatch } = require('../services/media-gateway/src/recent-resume-samples');

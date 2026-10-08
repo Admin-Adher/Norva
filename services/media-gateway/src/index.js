@@ -128,6 +128,7 @@ const { FiniteMkvResumePrefixCache } = require('./finiteMkvResumePrefixCache');
 const { FinitePlaybackRangeReuse } = require('./finitePlaybackRangeReuse');
 const { privateResumeBinding, createPrivateResumeOwnerGate, createRecentResumeOwnerGate } = require('./private-resume-binding');
 const { createFreshResumeHandoff, consumeFreshResumeHandoff } = require('./fresh-resume-handoff');
+const { RetainedInputBarrier } = require('./retained-input-barrier');
 const { retainRecentDeliveryTarget, consumeRecentDeliveryTarget } = require('./recent-delivery-target');
 const { privateResumeProfile, canonicalResumeProfile } = require('./private-resume-profile');
 const { captureSamples, SAMPLE_BYTES, captureInputWindows, RECENT_INPUT_MAX_BYTES,
@@ -6003,6 +6004,7 @@ function maybePublishFiniteMkvResumePrefix(context) {
 }
 
 async function acquireFiniteMkvSeekProviderSlot(context, signal) {
+    if (context.retainedInputBarrier) await context.retainedInputBarrier.wait(signal);
     let releaseSlot = null;
     const slot = new Promise((resolve) => { releaseSlot = resolve; });
     const previous = context.finiteProviderQueue || Promise.resolve();
@@ -6032,6 +6034,14 @@ async function acquireFiniteMkvSeekProviderSlot(context, signal) {
             'Strict language media broker stopped',
             { status: 499 },
         );
+    }
+    if (context.retainedInputBarrier) {
+        const releaseWindow = context.retainedInputBarrier.enter();
+        if (!releaseWindow) {
+            release();
+            return acquireFiniteMkvSeekProviderSlot(context, signal);
+        }
+        return () => { releaseWindow(); release(); };
     }
     return release;
 }
@@ -7079,6 +7089,12 @@ async function createStrictLidBroker(options = {}) {
     }) : null;
     const handle = crypto.randomBytes(32).toString('base64url');
     const pathPrefix = options.pathPrefix === 'finite-mkv-seek' ? 'finite-mkv-seek' : 'strict-lid';
+    if (options.retainedInputScope && (pathPrefix !== 'finite-mkv-seek'
+        || typeof options.retainedInputScope !== 'object' || typeof options.dispatcherFactory !== 'function'
+        || !Number.isSafeInteger(options.retainedInputTtlMs ?? 5000)
+        || (options.retainedInputTtlMs ?? 5000) < 1 || (options.retainedInputTtlMs ?? 5000) > 10000)) {
+        throw strictLidBrokerError('RETAINED_INPUT_UNSUPPORTED', 'Retained input requires a private finite transport.', { status: 400 });
+    }
     const expectedPath = `/${pathPrefix}/${handle}`;
     const providerProxyKey = proxyKeyFromUrl(sourceUrl);
     const rangeReuse = pathPrefix === 'strict-lid' ? options.rangeReuse || null : null;
@@ -7117,6 +7133,11 @@ async function createStrictLidBroker(options = {}) {
             'The pinned media proxy could not be initialised.',
             { status: 502 },
         );
+    }
+    if (options.retainedInputScope && typeof initialDispatcher.destroy !== 'function') {
+        if (initialDispatcher?.then) Promise.resolve(initialDispatcher).then(disposeStrictLidBrokerDispatcher).catch(() => {});
+        else await disposeStrictLidBrokerDispatcher(initialDispatcher);
+        throw strictLidBrokerError('RETAINED_INPUT_UNSUPPORTED', 'Retained input requires a disposable private transport.', { status: 400 });
     }
     const controller = new AbortController();
     const context = {
@@ -7343,7 +7364,43 @@ async function createStrictLidBroker(options = {}) {
     server.unref?.();
     const address = server.address();
     let closePromise = null;
+    // Not enabled by any production session call site. This internal opt-in
+    // prepares the drained transport primitive without retaining user sessions.
+    if (options.retainedInputScope) context.retainedInputBarrier = new RetainedInputBarrier({
+        scope: options.retainedInputScope, ttlMs: options.retainedInputTtlMs ?? 5000,
+        onClose: () => { setImmediate(() => broker.close().catch(() => {})); },
+    });
     const broker = {
+        async parkRetainedInput(scope) {
+            return context.retainedInputBarrier?.park(scope, async () => {
+                const dispatcher = context.dispatcher;
+                if (!dispatcher || !context.ownsDispatcher || typeof dispatcher.destroy !== 'function') {
+                    throw new Error('RETAINED_INPUT_DRAIN_UNSUPPORTED');
+                }
+                // Unlike best-effort retry cleanup, failure here must not
+                // produce a capability attesting a drained transport.
+                await dispatcher.destroy();
+                if (context.dispatcher === dispatcher) context.dispatcher = null;
+                const remaining = Math.max(0, Number(context.nextOpenAt || 0) - Date.now());
+                if (remaining) await new Promise(resolve => setTimeout(resolve, remaining));
+            }) ?? null;
+        },
+        async resumeRetainedInput(token, scope, validate) {
+            if (!context.retainedInputBarrier || typeof validate !== 'function') return false;
+            return context.retainedInputBarrier.resume(token, scope, validate, () => {
+                if (context.closed || context.terminalError) return false;
+                const replacement = context.dispatcherFactory();
+                if (!replacement || typeof replacement.destroy !== 'function') {
+                    if (replacement?.then) Promise.resolve(replacement).then(disposeStrictLidBrokerDispatcher).catch(() => {});
+                    else void disposeStrictLidBrokerDispatcher(replacement);
+                    return false;
+                }
+                context.dispatcher = replacement;
+                context.dispatcherCreatedAtMs = Date.now();
+                return true;
+            });
+        },
+        get retainedInputStatus() { return context.retainedInputBarrier?.status() || null; },
         inputUrl: `http://127.0.0.1:${address.port}${expectedPath}`,
         get recentDeliveryTargetUsed() { return Boolean(recentDelivery); },
         retainDeliveryTarget({ ownerKey, routeKey }) {
@@ -7463,6 +7520,7 @@ async function createStrictLidBroker(options = {}) {
                     ));
                 }
                 context.closed = true;
+                context.retainedInputBarrier?.close();
                 context.latestRequestId++;
                 try { controller.abort(new Error(
                     reason === 'viewer-preempted'
@@ -7475,6 +7533,10 @@ async function createStrictLidBroker(options = {}) {
                         closeStrictLidBrokerAttempt(context, attempt, reason)
                     )),
                 );
+                // The fresh validation uses another uncached broker. Its
+                // callback must finish draining before this owner can attest
+                // closure and let a session release the real account claim.
+                if (context.retainedInputBarrier) await context.retainedInputBarrier.waitForValidation();
                 try { await context.queue; } catch (_) {}
                 await Promise.allSettled([...context.finiteLocalResponses]);
                 try { await context.finiteProviderQueue; } catch (_) {}
