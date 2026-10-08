@@ -14,7 +14,8 @@ namespace "tv.norva.tv"
 
     defaultConfig {
         applicationId "tv.norva.tv"
-        minSdk 23
+        // Google Play automatic protection requires Android 7 / API 24.
+        minSdk 24
         targetSdk 36
         versionCode 39
         versionName "3.8.26-hybrid"
