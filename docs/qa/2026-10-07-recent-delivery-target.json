@@ -2768,5 +2768,182 @@
       "Short sampled checks, not whole-file or Android playback certification",
       "No new independent range test, operator POST, deployment, route, reserve, codec, model, TTL, concurrency or guard change"
     ]
+  },
+  "normalSlowRegionControl20261008": {
+    "at": "2026-10-08T01:26:15.502845+00:00",
+    "endedAt": "2026-10-08T01:26:22.753885+00:00",
+    "question": "Does an independent curl read reproduce slow delivery on the exact range which took 18.335 s in the preceding Normal seek?",
+    "rangeStart": 3024093184,
+    "rangeBytes": 8388608,
+    "result": {
+      "httpStatus": 206,
+      "seconds": 5.892952,
+      "firstByteSeconds": 1.205047,
+      "connectSeconds": 0.217528,
+      "bytes": 8388608,
+      "sha256": "1eed7a7bb832d9bc5b042475816074304d7ee1047edc11b70f33bc363b1eb305",
+      "exit": 0,
+      "contentRanges": [
+        "bytes 3024093184-3032481791/13662582623"
+      ],
+      "redirects": 1,
+      "effectiveScheme": "http",
+      "proxyUsed": null
+    },
+    "routeCheck": {
+      "slot": 1,
+      "transport": "http",
+      "controlShadow": true,
+      "verifiedFromProductionModule": true,
+      "productionRouteUnchanged": true,
+      "diagnosticUsesProxy": true,
+      "diagnosticPort": 5432
+    },
+    "priorInPipelineDurationMs": 18335,
+    "historicalBodyHashAvailable": false,
+    "rangeAndSizeMatchPreviousTrace": true,
+    "analysis": {
+      "mbps": 11.387987548515582,
+      "samples": 12,
+      "sampledReceiveQueueMax": 0,
+      "sampledSendQueueMax": 239,
+      "curlCpuTicksChange": 7,
+      "states": [
+        "S"
+      ],
+      "waitChannels": [
+        "do_poll.constprop.0"
+      ],
+      "fileBytes": [
+        [
+          0.022,
+          0
+        ],
+        [
+          0.542,
+          0
+        ],
+        [
+          1.062,
+          0
+        ],
+        [
+          1.583,
+          176128
+        ],
+        [
+          2.103,
+          536576
+        ],
+        [
+          2.624,
+          978944
+        ],
+        [
+          3.144,
+          1511424
+        ],
+        [
+          3.664,
+          2236416
+        ],
+        [
+          4.186,
+          3170304
+        ],
+        [
+          4.706,
+          4390912
+        ],
+        [
+          5.226,
+          5885952
+        ],
+        [
+          5.747,
+          7770112
+        ]
+      ]
+    },
+    "guard": {
+      "ordinaryDirectClaim": true,
+      "heartbeatSeconds": 0.5,
+      "heartbeatTimeoutSeconds": 1,
+      "heartbeatFailures": [],
+      "expired": true,
+      "temporaryFilesRemoved": true,
+      "initialGets": 1,
+      "redirectRequests": 1
+    },
+    "localLoopbackTest": {
+      "name": "finite seek broker serves a newer cue while an older local response is backpressured",
+      "passed": 1,
+      "failed": 0,
+      "productionProviderCalls": 0
+    },
+    "support": {
+      "sent": true,
+      "readBySupportNotProven": true,
+      "noNewDiagnosisOrConfirmedIntervention": true,
+      "sensitiveSourceDetailsTransmitted": false
+    },
+    "closeout": {
+      "at": "2026-10-08T01:29:51.264940+00:00",
+      "activeTargetAccountReaders": 0,
+      "diagnosticSessionState": "expired",
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:43.148136674Z",
+          "healthy": true,
+          "activeSessions": 0,
+          "memoryLimitBytes": 10737418240,
+          "recentEnabled": true,
+          "allAuthenticatedOwners": false,
+          "allowlistConfigured": true,
+          "cache": {
+            "recentOwnerScope": "owner-allowlist",
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "bytes": 0,
+            "reservedBytes": 0,
+            "entries": 0,
+            "evictions": 0,
+            "hits": 0,
+            "misses": 0
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:45.72659218Z",
+          "healthy": true,
+          "activeSessions": 0,
+          "memoryLimitBytes": 10737418240,
+          "recentEnabled": true,
+          "allAuthenticatedOwners": false,
+          "allowlistConfigured": true,
+          "cache": {
+            "recentOwnerScope": "owner-allowlist",
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "bytes": 0,
+            "reservedBytes": 0,
+            "entries": 0,
+            "evictions": 0,
+            "hits": 4,
+            "misses": 0
+          }
+        }
+      ]
+    },
+    "limits": [
+      "Sequential later measurement, not a simultaneous benchmark or fixed throughput cap",
+      "Original URL, byte range and full size agree; no historic body hash exists for this particular range",
+      "No new browser playback or AAC/video decode in this byte-only follow-up",
+      "No production code, image, route, cache TTL, reserve, model, concurrency or guard modification"
+    ],
+    "receipts": ".codex-artifacts\\normal-slow-window-20261008"
   }
 }
