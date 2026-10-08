@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 160 x 90 dp = 320 x 180 px on the Android TV xhdpi launcher.
+     Keep the product name inside the banner; launchers need not add a label. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <size android:width="160dp" android:height="90dp" />
+            <solid android:color="@color/ic_launcher_background" />
+        </shape>
+    </item>
+    <item android:width="46dp" android:height="46dp" android:left="16dp" android:gravity="left|center_vertical">
+        <bitmap android:src="@drawable/norva_app_icon" android:gravity="fill" />
+    </item>
+    <item android:width="70dp" android:height="26dp" android:left="72dp" android:gravity="left|center_vertical"
+        android:drawable="@drawable/norva_wordmark" />
+</layer-list>

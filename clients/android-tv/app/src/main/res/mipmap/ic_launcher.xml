@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pre-26 launcher fallback. Adaptive launchers select mipmap-anydpi-v26. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/ic_launcher_background" />
+    <item>
+        <bitmap android:src="@drawable/norva_app_icon" android:gravity="fill" />
+    </item>
+</layer-list>
