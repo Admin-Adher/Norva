@@ -8568,5 +8568,198 @@
         "sha256": "f5020bae56d56fea04c73e9023eed9d2101aecbcfa28ad545117ea2b047c0543"
       }
     ]
+  },
+  "retainedSessionTransfer20261008": {
+    "status": "candidate-session-lifecycle-integrated-disabled",
+    "productionChanged": false,
+    "retentionEnabledInProduction": false,
+    "tests": {
+      "total": 235,
+      "passed": 230,
+      "skipped": 5,
+      "failed": 0,
+      "newTests": 22,
+      "groupsOverlap": true
+    },
+    "scope": {
+      "ownerAllowlistRequired": true,
+      "maximumParkedSessions": 1,
+      "ttlMilliseconds": 10000,
+      "positionToleranceSeconds": 0.25,
+      "noArbitrarySeek": true,
+      "currentProviderClaimRequiredFromCaller": true,
+      "wholeEdgeSqlClaimPathTested": false,
+      "realOutputReservationsTestedInFfmpegProof": false,
+      "newPlaybackIdentifiersAndTokens": true,
+      "oldInflightResponsesDestroyed": true,
+      "oldThroughputStartupPolicyDiscarded": true,
+      "freshSamples": 4,
+      "fullTargetAndValidatorMustMatch": true
+    },
+    "fixture": {
+      "atUtc": "2026-10-08T18:02:25.110Z",
+      "productionChanged": false,
+      "externalProviderRequests": 0,
+      "localFixtureRequests": 17,
+      "maxActive": 1,
+      "active": 0,
+      "maxSockets": 1,
+      "keptSameDecoderProcess": true,
+      "providerNetworkRequestsDuringPark": 0,
+      "providerSocketsDuringPark": 0,
+      "upstreamConnectionCloseUsed": false,
+      "privateDispatcherDestroyed": true,
+      "networkDeadlinePausedByOverride": false,
+      "observedParkMs": 1500,
+      "configuredParkTtlMs": 10000,
+      "parked": {
+        "rssKiB": 80556,
+        "cpuTicks": 94,
+        "state": "R"
+      },
+      "afterPark": {
+        "rssKiB": 80592,
+        "cpuTicks": 125,
+        "state": "S"
+      },
+      "cpuTicksDuringObservation": 31,
+      "parkedPlaylistEndSeconds": 56,
+      "parkedPlaylistUnchanged": false,
+      "parkedPlaylistFinal": false,
+      "validationRequests": 4,
+      "firstNewSegmentMs": 34,
+      "finalSegments": 60,
+      "allTransportStreamBytesEqualReference": true,
+      "subtitles": [
+        {
+          "name": "forced.vtt",
+          "count": 2,
+          "cues": [
+            {
+              "start": 70.023,
+              "end": 75.023
+            },
+            {
+              "start": 150.023,
+              "end": 155.023
+            }
+          ],
+          "hash": "3eed5073dc605bf093e34928d5be9968ffaaeae327ab9cf5fe553d2fbf3207a0"
+        },
+        {
+          "name": "full.vtt",
+          "count": 3,
+          "cues": [
+            {
+              "start": 2.023,
+              "end": 14.023
+            },
+            {
+              "start": 60.023,
+              "end": 110.023
+            },
+            {
+              "start": 190.023,
+              "end": 195.023
+            }
+          ],
+          "hash": "9fcff15e1a817237b221551064bcb5a9f323981a9cc3b059b4806e235007eac0"
+        }
+      ],
+      "decodedPcmHash": "SHA256=76020d4817f5b3529cf79c550f6e2db9268cb35b598d3f868f2daf36fd04b0e8",
+      "decodedPcmEqualsUninterruptedReference": true,
+      "stderr": "",
+      "scope": "candidate session helpers and coordinator with real broker/FFmpeg; synthetic reservations and normal-claim stand-in; no Edge/SQL or production activation",
+      "sessionIdentifierRotated": true,
+      "oldAccessRevoked": true,
+      "sameDecoderAdopted": true,
+      "localSeekTarget": 5,
+      "productionAdmissionProven": false,
+      "audibleAcceptance": false
+    },
+    "runtime": {
+      "atUtc": "2026-10-08T18:02:53.062034+00:00",
+      "productionChanged": false,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        }
+      ],
+      "dispatcherRunning": true,
+      "proofContainerAbsent": true
+    },
+    "knownLimits": [
+      "Synthetic Gateway helpers/broker/FFmpeg, not a production Edge/SQL session transfer",
+      "No browser or human listening acceptance in this stage",
+      "No new Normal measurement",
+      "Arbitrary seeks and durable subtitle coverage before EOF remain separate"
+    ],
+    "developmentFindings": [
+      "Actual DELETE test caught first patch targeting attachment cleanup instead of primary DELETE; corrected before commit",
+      "Late old DELETE now checks map identity after await and cannot stop the adopted session",
+      "Old expiration callbacks fenced by entry identity and barrier generation",
+      "CRLF test extraction normalized before final successful run"
+    ],
+    "files": [
+      {
+        "file": "services/media-gateway/src/index.js",
+        "sha256": "3bf852c16201d5b8aabd00a11196975ab41e79522c1ca178295c5dcb31efd670"
+      },
+      {
+        "file": "services/media-gateway/src/retained-input-barrier.js",
+        "sha256": "4ad44db917f466a68fc44a7547e246f8b9e576ec89bd50f6ee3bbef145222c34"
+      },
+      {
+        "file": "services/media-gateway/src/retained-session-transfer.js",
+        "sha256": "0d35a21ba05b84d0d0bb841ac0b030892f9ec01bbae2078aa910329c15e0be3e"
+      },
+      {
+        "file": "tests/retained-input-barrier.test.js",
+        "sha256": "8c5782c3865d6cc7c1b734a3022c13921ddd1dccfe7e1c08b52ef8ad7fa34bc0"
+      },
+      {
+        "file": "tests/retained-session-transfer.test.js",
+        "sha256": "aa52c1070a3ced8e86950a26fde25dc94d43b1f8440e4bc65be8be95b2efde41"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-transfer-20261008/build-proof.py",
+        "sha256": "dadd32ebfd4fc693a6ab9483c7af8ec7c74f165e078493aa3cb9e4efee814e1b"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-transfer-20261008/finalize-evidence.py",
+        "sha256": "bfb8fe5629173689288c2e77dd9a3a8c0c5ba5b655b6f8e6a09ee442088bd58b"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-transfer-20261008/run-proof.py",
+        "sha256": "74336c702ca1316e00f7018de3813b31a77e817327e69293ee5c88b9f0c085e9"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-transfer-20261008/runtime-check.py",
+        "sha256": "580f081fddd358f9d03c01894dd83c29a85d0ff8d2951804900490b3baced5d2"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-transfer-20261008/session-warm-proof.safe.json",
+        "sha256": "b7bf6f66da0699aa89b66a47884e1919e9c2ca411481ad56062a93419fa3fa43"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-transfer-20261008/runtime-check.safe.json",
+        "sha256": "8446e162a644a4afa4d54c61132c6af23f2052365ccdb817933ccaee03f2b199"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-transfer-20261008/tests-final.tap",
+        "sha256": "ce832220846c2e55a6e79b936fa02ff359e41ba97135145d56602b1d55d01751"
+      }
+    ]
   }
 }
