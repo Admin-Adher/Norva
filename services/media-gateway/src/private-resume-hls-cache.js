@@ -222,7 +222,7 @@ class PrivateResumeHlsCache {
         if (parsed.sequence > 0) {
             const origin = playlistClock?.originFor(playlistName, playlist);
             if (!Number.isFinite(origin) || origin < 0) return this.rejectCapture('sliding-playlist-unbound-clock');
-            for (const segment of parsed.segments) { segment.start += origin; segment.end += origin; }
+            parsed.segments = playlistClock.captureWindow(playlistName, playlist);
         }
         const localPosition = position - actualStartOffset;
         const index = parsed.segments.findIndex(s => s.start <= localPosition && s.end > localPosition);

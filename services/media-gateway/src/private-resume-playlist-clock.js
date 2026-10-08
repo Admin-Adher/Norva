@@ -28,7 +28,10 @@ function timedPlaylist(text) {
 // Missing history, changed overlaps, rollback or a discontinuity disable reuse
 // for this producer; they never interrupt its ordinary playback.
 class ResumePlaylistClock {
-    constructor() { this.states = new Map(); }
+    constructor({ retentionSeconds = 0 } = {}) {
+        this.states = new Map();
+        this.retentionUs = Math.min(300, Math.max(0, Number(retentionSeconds) || 0)) * 1e6;
+    }
     observe(name, text) {
         if (!eligibleName(name)) return false;
         const previous = this.states.get(name);
@@ -51,13 +54,27 @@ class ResumePlaylistClock {
             }
         }
         if (!Number.isSafeInteger(origin) || !Number.isSafeInteger(origin + next.duration)) return reject();
-        this.states.set(name, { ...next, origin });
+        const history = previous && this.retentionUs > 0 ? [...previous.history,
+            ...previous.segments.slice(0, next.sequence - previous.sequence)
+                .map(s => ({ ...s, start: previous.origin + s.start }))]
+            .filter(s => s.start + s.duration > origin - this.retentionUs).slice(-512) : [];
+        this.states.set(name, { ...next, origin, history });
         return true;
     }
     originFor(name, text) {
         const state = this.states.get(name);
         return state && typeof text === 'string' && text.length <= 2 * 1024 * 1024
             && state.digest === digest(text) ? state.origin / 1e6 : null;
+    }
+    captureWindow(name, text) {
+        if (this.originFor(name, text) === null) return null;
+        const state = this.states.get(name);
+        return [...state.history, ...state.segments.map(s => ({ ...s, start: state.origin + s.start }))]
+            .map(s => ({ name: s.name, duration: s.duration / 1e6, start: s.start / 1e6, end: (s.start + s.duration) / 1e6 }));
+    }
+    keepsAsset(name) {
+        for (const state of this.states.values()) if (state && [...state.history, ...state.segments].some(s => s.name === name)) return true;
+        return false;
     }
 }
 

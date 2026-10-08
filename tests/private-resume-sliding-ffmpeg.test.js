@@ -26,7 +26,8 @@ test('real FFmpeg sliding publication, cached A/V/subtitles and continuation dec
                 if (parsed) admission.served(parsed.segments.at(-1).name);
             }
         } };
-        admission = await createHlsOutputAdmission({ root: dir, io, onFailure: () => failures++ }); admissions.push(admission);
+        admission = await createHlsOutputAdmission({ root: dir, io, resumeRetentionBytes:64 * 1024 ** 2,
+            onFailure: () => failures++ }); admissions.push(admission);
         const child = spawn('ffmpeg', ['-v','error','-nostdin','-f','lavfi','-i',`testsrc2=size=128x128:rate=2:duration=${duration}`,
             '-f','lavfi','-i',`sine=frequency=440:sample_rate=48000:duration=${duration}`,
             '-c:v','libx264','-threads','1','-preset','ultrafast','-g','8','-keyint_min','8','-sc_threshold','0',
@@ -48,14 +49,16 @@ test('real FFmpeg sliding publication, cached A/V/subtitles and continuation dec
             sourceId:'fixture', sourceRevision:'1', fileSizeBytes:1000000, profile:'video=aac,subtitle=2' });
         const observed = { fileSizeBytes:1000000, validator:{kind:'etag',value:'"fixture"'}, effectiveUrlIdentitySha256:'b'.repeat(64) };
         await fs.writeFile(path.join(first.dir, 'subtitle_0.m3u8'), '#EXTM3U\n#EXTINF:600,\nsubtitle_0-00001.vtt\n#EXT-X-ENDLIST\n');
-        await fs.writeFile(path.join(first.dir, 'subtitle_0-00001.vtt'), 'WEBVTT\n\n00:07:58.000 --> 00:08:04.000\nCrossing caption\n');
+        await fs.writeFile(path.join(first.dir, 'subtitle_0-00001.vtt'), 'WEBVTT\n\n00:05:18.000 --> 00:05:24.000\nCrossing caption\n');
         const readAsset = async (name, limit) => { const b = await fs.readFile(path.join(first.dir,name)); return b.length <= limit ? b : null; };
-        assert.equal(await cache.capture({ binding, observed, position:480, actualStartOffset:0,
+        assert.equal(await cache.capture({ binding, observed, position:320, actualStartOffset:0,
             playlist:first.text.replace(/^#EXT-X-ENDLIST\s*$/gm,''), playlistName:'video.m3u8',
             playlistClock:first.admission.resumePlaylistClock, readAsset,
             subtitleRenditions:[{playlistName:'subtitle_0.m3u8',streamIndex:2}] }), true, cache.publicStatus().lastCaptureRejection);
-        const lease = cache.acquire(binding,480,observed);
-        assert.equal(lease.start,476); assert.equal(lease.end,528);
+        const lease = cache.acquire(binding,320,observed);
+        assert.equal(lease.start,316); assert.equal(lease.end,368);
+        assert.ok(first.admission.snapshot().resumeRetainedBytes > 0);
+        assert.ok(first.admission.snapshot().bytes <= first.admission.snapshot().maxBytes);
         assert.match(lease.asset('resume-subtitle_0-0.vtt').toString(), /Crossing caption/);
         const continuation = await encode('continuation',280);
         const combined = lease.playlist(continuation.snapshot);

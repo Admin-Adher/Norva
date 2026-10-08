@@ -91,13 +91,40 @@ test('a captured rolling window resumes at the original source position and reta
     assert.equal(cache.acquire(binding, 154, { ...observed, validator: { kind: 'etag', value: '"changed"' } }), null);
 });
 
-function put(url, body) {
+function put(url, body, method = 'PUT') {
     return new Promise((resolve, reject) => {
-        const req = http.request(url, { method: 'PUT', headers: { Expect: '100-continue', 'Content-Length': Buffer.byteLength(body) } },
+        const req = http.request(url, { method, headers: { Expect: '100-continue', 'Content-Length': Buffer.byteLength(body) } },
             res => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
         req.on('continue', () => req.end(body)); req.on('error', reject); req.flushHeaders();
     });
 }
+
+test('optional resume files stay within both their allowance and the unchanged writer reservation', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'norva-retain-test-'));
+    let admission;
+    try {
+        admission = await createHlsOutputAdmission({ root, maxBytes: 4096, resumeRetentionBytes: 1024,
+            onFailure: () => assert.fail('retention must not break the ordinary writer') });
+        for (let i=0;i<4;i++) {
+            assert.equal(await put(admission.urlFor(`segment-${String(i).padStart(5,'0')}.ts`), Buffer.alloc(400)),200);
+        }
+        assert.equal(await put(admission.urlFor('playlist.m3u8'), playlist(0,[2,2,2,2])),200);
+        assert.equal(await put(admission.urlFor('playlist.m3u8'), playlist(2,[2,2])),200);
+        for (let i=0;i<2;i++) assert.equal(await put(admission.urlFor(`segment-${String(i).padStart(5,'0')}.ts`),'','DELETE'),200);
+        assert.equal(admission.snapshot().resumeRetainedBytes,800);
+        assert.equal((await fs.readFile(path.join(root,'segment-00000.ts'))).length,400);
+        // This new current segment fits only if the optional old files are
+        // evicted before writing its body. There is never a second disk budget.
+        assert.equal(await put(admission.urlFor('segment-00004.ts'),Buffer.alloc(2800)),200);
+        assert.equal(admission.snapshot().resumeRetainedBytes,0);
+        assert.ok(admission.snapshot().bytes<=4096);
+        assert.equal(admission.snapshot().stopped,false);
+        await assert.rejects(fs.readFile(path.join(root,'segment-00000.ts')), {code:'ENOENT'});
+    } finally {
+        await admission?.stop(); assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));
+        await fs.rm(root,{recursive:true,force:true});
+    }
+});
 
 test('real admitted writer attests only atomic publication and retains the clock after ordinary stop', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'norva-clock-test-'));

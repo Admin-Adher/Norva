@@ -39,12 +39,14 @@ async function* completedRequestBody(req) {
 // room for the next segment. No timer/SIGSTOP or elapsed-time credit can let
 // a fast remuxer overwrite the unread HLS window while JS is delayed/paused.
 async function createHlsOutputAdmission({ root, targetSeconds = 4, aheadSeconds = 64,
-    maxBytes = 512 * 1024 ** 2, onFailure = () => {}, io = fsp }) {
+    maxBytes = 512 * 1024 ** 2, resumeRetentionBytes = 0, onFailure = () => {}, io = fsp }) {
     const capability = crypto.randomBytes(32).toString('hex');
     const rootPath = path.resolve(root);
     const ahead = Math.max(4, Math.ceil(aheadSeconds / targetSeconds));
     const queue = [], sockets = new Set(), sizes = new Map(), writers = new Set();
-    const resumePlaylistClock = new ResumePlaylistClock();
+    const retentionLimit = Math.min(64 * 1024 ** 2, maxBytes / 4, Math.max(0, Number(resumeRetentionBytes) || 0));
+    const resumePlaylistClock = new ResumePlaylistClock({ retentionSeconds: retentionLimit ? 300 : 0 });
+    const retained = new Map(); let retainedBytes = 0;
     let stopped = false, failed = false, finishing = false, active = false, consumed = -1, produced = -1, bytes = 0, peakBytes = 0;
     let logRemainder = '', discardLogRemainder = false;
     let admissionWaits = 0, admittedSegments = 0, closePromise = null, finishPromise = null;
@@ -71,6 +73,17 @@ async function createHlsOutputAdmission({ root, targetSeconds = 4, aheadSeconds 
         const name = req.url.slice(capability.length + 2);
         return SEGMENT.test(name) || PLAYLIST.test(name) ? name : null;
     }
+    async function remove(name) {
+        await io.unlink(path.join(rootPath, name)).catch(error => { if (error.code !== 'ENOENT') throw error; });
+        bytes -= sizes.get(name) || 0; sizes.delete(name);
+        retainedBytes -= retained.get(name) || 0; retained.delete(name);
+    }
+    async function evictRetained(requiredBytes = 0) {
+        for (const name of [...retained.keys()]) {
+            if (requiredBytes <= 0 && resumePlaylistClock.keepsAsset(name) && retainedBytes <= retentionLimit) continue;
+            const size = retained.get(name); await remove(name); requiredBytes -= size;
+        }
+    }
     async function write(entry) {
         const { req, res, name, number } = entry;
         const target = path.join(rootPath, name);
@@ -80,8 +93,11 @@ async function createHlsOutputAdmission({ root, targetSeconds = 4, aheadSeconds 
             res.writeContinue();
             if (req.method === 'DELETE') {
                 for await (const chunk of req) if (chunk.length) throw new Error('DELETE_BODY');
-                await io.unlink(target).catch(error => { if (error.code !== 'ENOENT') throw error; });
-                bytes -= sizes.get(name) || 0; sizes.delete(name);
+                const size = sizes.get(name) || 0;
+                if (retentionLimit && size && size <= retentionLimit && resumePlaylistClock.keepsAsset(name)) {
+                    if (!retained.has(name)) { retained.set(name, size); retainedBytes += size; }
+                    await evictRetained();
+                } else await remove(name);
             } else {
                 let received = 0;
                 const clockChunks = ['playlist.m3u8', 'video.m3u8'].includes(name) ? [] : null;
@@ -90,14 +106,22 @@ async function createHlsOutputAdmission({ root, targetSeconds = 4, aheadSeconds 
                     received += chunk.length;
                     // Includes the old destination until atomic rename removes
                     // it, so the reservation is never temporarily exceeded.
-                    if (stopped || received > limit || bytes + received > maxBytes) callback(new Error('OUTPUT_LIMIT'));
-                    else { clockChunks?.push(Buffer.from(chunk)); callback(null, chunk); }
+                    const complete = () => {
+                        if (stopped || received > limit || bytes + received > maxBytes) callback(new Error('OUTPUT_LIMIT'));
+                        else { clockChunks?.push(Buffer.from(chunk)); callback(null, chunk); }
+                    };
+                    // Optional resume files are the first evicted under disk
+                    // pressure. Never make ordinary playback wait for them or
+                    // exceed the pre-existing session reservation, even briefly.
+                    if (bytes + received > maxBytes && retained.size) evictRetained(bytes + received - maxBytes).then(complete, callback);
+                    else complete();
                 } });
                 await pipeline(completedRequestBody(req), bounded, fs.createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
                 if (stopped) return;
                 await io.rename(temporary, target);
                 if (clockChunks) resumePlaylistClock.observe(name, Buffer.concat(clockChunks).toString('utf8'));
                 bytes += received - (sizes.get(name) || 0); sizes.set(name, received);
+                if (clockChunks && retained.size) await evictRetained();
                 peakBytes = Math.max(peakBytes, bytes);
                 if (number !== null) { produced = Math.max(produced, number); admittedSegments++; }
             }
@@ -204,7 +228,8 @@ async function createHlsOutputAdmission({ root, targetSeconds = 4, aheadSeconds 
             return redact(text.slice(0, end));
         },
         snapshot() { return { protocol: HLS_OUTPUT_ADMISSION_PROTOCOL, consumed, produced, bytes, peakBytes, maxBytes,
-            aheadSegments: ahead, admissionWaits, admittedSegments, pending: queue.length, stopped }; },
+            aheadSegments: ahead, admissionWaits, admittedSegments, pending: queue.length, stopped,
+            resumeRetainedBytes: retainedBytes, resumeRetainedFiles: retained.size }; },
     };
 }
 

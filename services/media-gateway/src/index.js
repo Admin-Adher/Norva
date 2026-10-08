@@ -13769,6 +13769,9 @@ async function startSessionWithProviderRetry(session, abortSignal = null) {
             session.hlsOutputAdmission = await createHlsOutputAdmission({
                 root: session.outputDir, targetSeconds: session.hlsTargetSeconds || 4,
                 maxBytes: session.hlsOutputMaxBytes,
+                resumeRetentionBytes: canUseRecentResumeSamples(session.ownerKey)
+                    && privateResumeHlsBindingForSession(session) && !multiAudioHlsEnabled(session)
+                    ? privateResumeHlsCache.perFileBytes : 0,
                 onFailure: code => {
                     session.lastError = code;
                     session.inputFailure = { code, status: 503 };
