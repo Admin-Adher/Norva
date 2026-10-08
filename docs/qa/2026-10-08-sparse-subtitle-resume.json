@@ -513,6 +513,38 @@
       "dispatcherRunning": true,
       "proofContainerAbsent": true
     },
-    "localBrowserAndServerStopped": true
-  }
+    "localBrowserAndServerStopped": true,
+    "previousDocumentationCi": {
+      "commit": "96e9fb398c19e701acb4b3842f97c84f046be824",
+      "observedDuringThisFollowup": true,
+      "checks": [
+        {
+          "name": "Build Android Phone APK",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build Android TV APK",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build Windows Portable",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Vercel Preview Comments",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify cloud contracts",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    }
+  },
+  "rootEvidencePhase": "historical PR706; later prototype and browser evidence is nested under followupObservedCueLedger"
 }
