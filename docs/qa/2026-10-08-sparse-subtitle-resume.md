@@ -169,3 +169,56 @@ Ce contrôle ajoute `mpegts_flags=+initial_discontinuity` uniquement aux nouveau
 **Décision :** aucun déploiement. Les deux difficultés restantes sont la preuve de parcours complet des paquets de sous-titres et une règle de raccord audio/vidéo valable au-delà de la fixture. Le pilote reste borné au compte autorisé ; aucune réserve, garde, route, durée de vie ni concurrence modifiée. Preuves et scripts : `.codex-artifacts/subtitle-continuity-20261008/`, notamment `clock-options`, `aligned-clock`, les deux contrôles audio, les états navigateur et `aligned-future-browser.png`. Les cinq contrôles documentaires de PR708 ont maintenant réussi, paquets compris.
 
 Contrôle final read-only à **2026-10-08T12:56:47.488035+00:00** : deux Gateways sains, image PR706 et démarrages inchangés, portée `owner-allowlist`, dispatcher permanent actif. Conteneur de preuve absent, onglet synthétique fermé et serveur local arrêté. Le raccord de la fixture est amélioré, mais aucune accélération supplémentaire de Normal n’est validée.
+
+
+## Parcours des octets et généralisation audio — essais suivants, hors production
+
+### Une preuve de préfixe physique, sans inférer le silence
+
+Un nouveau helper expérimental suit les octets contigus depuis le début d'un MKV. Il n'avance son point de reprise qu'après un cluster complet et conserve tous les paquets de sous-titres rencontrés, y compris ceux dont l'affichage est prévu plus tard. Un trou, un changement d'identité déclarée, un CRC incorrect ou une structure non prise en charge invalide son reçu. Les paquets identiques à des positions distinctes restent distincts : le texte seul ne sert pas à compter les événements.
+
+Le domaine accepté est volontairement limité : clusters de taille connue, sous-titres `S_TEXT/UTF8`, durées explicites, aucune compression/chiffrement, aucun changement de codec ou d'échelle de piste. Le calcul des timestamps tient compte du timestamp du cluster, du décalage signé du bloc et de l'échelle du segment ; les autres transformations sont refusées. [Éléments Matroska](https://www.matroska.org/technical/elements.html), [calcul des timestamps](https://www.matroska.org/technical/notes.html).
+
+**27 tests réussissent**, notamment les trous et reprises de plages, les clusters incomplets, les CRC altérés, les formats non pris en charge, les limites de rétention, les reçus forgés par JSON et la révocation d'un parent. Les reçus restent locaux au processus. Le helper ne certifie ni l'identité réelle du fichier fournisseur, ni un intervalle temporel sans sous-titre, ni la complétude du film. Il exige encore les gardes actuelles du cache. Les métadonnées et structures ignorées ne font pas de lui un validateur général de fichiers Matroska.
+
+### Comparaison indépendante sur le MKV généré par FFmpeg
+
+La fixture de 240 s comporte deux pistes et cinq paquets de sous-titres. La référence est une lecture ffprobe complète, **sans saut et sur tous les flux**, avec empreintes SHA-256 des paquets. Le helper consomme les octets par morceaux de 64 Kio au maximum, dans le conteneur isolé du réseau.
+
+| Contrôle | Résultat |
+| --- | --- |
+| Taille de la fixture | 10 988 142 octets |
+| Dernier cluster entièrement prouvé avant la vidéo de 100 s | Fin à l'octet 4 577 010, timestamp de cluster 96 s |
+| Paquets conservés dans ce préfixe | 4, dont la réplique future à 150,021 s |
+| Continuation contiguë depuis cette borne | 5 paquets au total |
+| Comparaison au témoin complet | Mêmes positions, timestamps, durées et empreintes pour les cinq paquets |
+| Trou volontaire dans la continuation | Refus `noncontiguous-range` |
+| Maximum du tampon de parcours observé | 216 454 octets ; ce n'est pas la mémoire totale du processus |
+
+Les cinq paquets correspondent aux événements à **2,021 / 60,021 / 70,021 / 150,021 / 190,021 s**. Le saut FFmpeg ordinaire à 81 s omet toujours celui de 150 s ; le parcours contigu suivi du registre le conserve. Seuls 38 octets de texte sont retenus dans cette fixture, en plus des objets et empreintes. Les octets synthétiques complets sont utilisés ici pour la référence de comparaison ; cela n'autorise pas une lecture préventive complète des VOD.
+
+Cette preuve est un progrès sur la couverture **physique des paquets de cette fixture**. Elle ne raccorde pas encore le broker réel au démultiplexeur : il faut imposer une continuation depuis une borne prouvée, avec la prélecture vidéo nécessaire et sans trou. Les fenêtres actuelles d'entrée peuvent être dispersées ; elles ne deviennent pas un préfixe complet par simple maximum d'offset. La conversion en répliques avec leur mise en forme et les budgets cumulés entre producteurs restent à intégrer.
+
+### La règle audio fixe échoue à se généraliser
+
+Six continuations synthétiques comparent le réglage précédent « décalage de 1 024/48 000 s et retrait de deux paquets AAC » au même parent poursuivi. Les sources sont AAC 48 kHz / vidéo 24 images/s, AAC 44,1 kHz / 25 images/s et MP3 48 kHz / 29,97 images/s, à deux positions chacune ; les sorties sont AAC-LC 48 kHz stéréo.
+
+La première vidéo concorde dans les six essais. En revanche, **une seule des six continuations commence sur le même PTS audio que le parent témoin**. Les cinq autres écarts vont de −480 à −1 941 ticks à 90 kHz, soit environ −5,33 à −21,57 ms. Aucun diagnostic FFmpeg dans cette matrice, mais ce n'est pas une acceptation sonore. La mesure compare au premier paquet du segment parent suivant, afin de ne pas attribuer au candidat les petites quantifications déjà présentes dans le témoin. La règle fixe n'est donc pas intégrée.
+
+### Identifier un recouvrement réel de l'audio
+
+Une autre expérience emploie un bruit rose déterministe, pour éviter la répétition d'une sinusoïde. Elle cherche une correspondance unique de **48 paquets consécutifs**, 24 de chaque côté de la borne étudiée, entre parent et continuation avec huit secondes de prélecture demandée. Il s'agit d'environ une seconde au total ; la lecture témoin complète sert ici d'oracle.
+
+- **AAC conservé sans réencodage : quatre correspondances uniques sur quatre**, aux deux fréquences 48/44,1 kHz et aux deux positions. Les empreintes et durées sont identiques. Les écarts de timestamps vont de −15 à +1 ticks selon les paquets, soit au plus 0,167 ms en valeur absolue ; un seul essai a tous les timestamps strictement identiques.
+- **Nouvel encodage AAC : aucune correspondance exacte dans les six essais**, avec sources AAC 48 kHz, AAC 44,1 kHz et MP3. Cette absence ne démontre pas à elle seule une dégradation audible entre deux encodages ; elle empêche d'utiliser l'identité des paquets comme preuve de raccord dans ces cas.
+- Le muxeur TS audio seul écrit `frame size not set` dans les journaux de cette seconde expérience. Ce diagnostic est conservé ; les essais ne sont pas présentés comme exempts d'avertissements.
+
+La comparaison confirme une piste exploitable pour l'audio compatible conservé tel quel, mais n'autorise aucun décalage général ni changement de politique de codec. Il manque encore une horloge d'échantillons conservée et un raccord vérifié lorsque le réencodage est nécessaire. Aucune acceptation à l'écoute ni nouveau rejeu navigateur/Android dans cette phase.
+
+### État de production et décision
+
+**Aucun code de production, réglage ou déploiement modifié. Aucun appel fournisseur. Aucun gain supplémentaire sur Normal revendiqué.** Les essais sont terminés, le conteneur synthétique a été supprimé avec ses médias éphémères. Le pilote reste limité au compte autorisé.
+
+Contrôle read-only à **2026-10-08T13:21:43.009446+00:00**, soit **15:21 Paris** : deux Gateways sains, même image PR706 et mêmes démarrages ; portée `owner-allowlist`, dispatcher permanent actif, conteneur de preuve absent. Les cinq contrôles documentaires de PR709 ont réussi, paquets compris.
+
+Reçus et scripts : `.codex-artifacts/subtitle-coverage-20261008/`, notamment `byte-prefix-proof`, `real-prefix-proof`, `audio-clock-matrix`, `audio-overlap-proof`, `unit-tests.tap` et `runtime-check.safe.json`. Les 27 tests unitaires, les six essais de règle fixe et les dix essais de recouvrement sont trois groupes distincts ; ils ne constituent pas une certification de lecture sur toutes les VOD.
