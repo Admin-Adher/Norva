@@ -20,6 +20,7 @@ function build({ encode = false, audioCopy = true, backend = 'vaapi', hardwareDe
     let args = null, released = 0, outputStopped = 0;
     const config = { backend, hardwareDecode, device: '/dev/dri/renderD128' };
     const context = { path, boundedHlsArgs, loopbackOutputEnv, ...encoder, VIDEO_ENCODER_CONFIG: config,
+        ...require('../services/media-gateway/src/retained-subtitle-clock'),
         FFMPEG_PATH: 'ffmpeg', FFMPEG_USER_AGENT: 'test',
         multiAudioHlsEnabled: () => false, exactSubtitleHlsEnabled: () => false,
         inputProbeArgsForSession: () => ['-analyzeduration', '500000', '-probesize', '524288'],

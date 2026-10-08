@@ -62,7 +62,7 @@ function harness({ drain, validation, gate = true } = {}) {
         + section('function isSessionBlockingProviderSlot(', 'function stopChildProcess(')
         + section("app.delete('/sessions/:id',", "app.get('/sessions/:id/playlist.m3u8',");
     const api = vm.runInNewContext(`(()=>{${code};return { retainedSessionRequestBinding, tryParkRetainedSession,
-        tryResumeRetainedSession, revokeSessionPlaybackAccess, requirePlaybackToken, isSessionBlockingProviderSlot };})()`, ctx);
+        tryResumeRetainedSession, acknowledgeRetainedViewerSegment, revokeSessionPlaybackAccess, requirePlaybackToken, isSessionBlockingProviderSlot };})()`, ctx);
     const session = { id: 'old', ownerKey: owner, retainedRequestBinding: 'binding', retainedInputScope: {},
         boundedHlsOutput: true, hlsOutputReservation: {}, status: 'ready', sourceUrl: 'http://synthetic.invalid/movie',
         size: 8*N, route: 'pinned', actualStartOffset: 100, seekOffset: 100, playlist,
@@ -126,6 +126,42 @@ test('encoder reservation follows the adopted session and releases through the o
     const release=vm.runInNewContext(`(${section('function releaseVideoEncoderAdmission(', '// sourceUrl ->')})`,
         {activeVideoEncoderAdmissions:h.activeVideoEncoderAdmissions});
     release(result);assert.equal(h.activeVideoEncoderAdmissions.size,0);
+});
+
+test('a sliding retained playlist rebases the new viewer while preserving the decoder clock', async t => {
+    const h=harness();t.after(h.stop);
+    h.session.playlist=playlist.replace('MEDIA-SEQUENCE:0','MEDIA-SEQUENCE:7');
+    let origin=28;
+    h.session.hlsOutputAdmission={resumePlaylistClock:{originFor:()=>origin}};
+    assert.equal(await h.tryParkRetainedSession(h.session,133),true);
+    const result=await h.tryResumeRetainedSession(h.request({lookup:{...h.request().lookup,seekOffset:133}}));
+    assert.equal(result,h.session);
+    assert.equal(result.actualStartOffset,100,'encoder origin remains unchanged');
+    assert.equal(result.retainedViewerStartOffset,128);
+    assert.equal(result.localSeekTarget,5);
+    assert.equal(result.retainedViewerStartOffset+result.localSeekTarget,133);
+    assert.equal(result.retainedViewerFirstPlaylist.text,h.session.playlist);
+    h.acknowledgeRetainedViewerSegment(result, 'subtitle_0-00001.vtt', result.id);
+    assert.ok(result.retainedViewerFirstPlaylist, 'subtitle does not release video origin');
+    h.acknowledgeRetainedViewerSegment(result, 'not-in-snapshot.ts', result.id);
+    assert.ok(result.retainedViewerFirstPlaylist, 'unrelated output does not release video origin');
+    h.acknowledgeRetainedViewerSegment(result, result.retainedViewerFirstPlaylist.segments[0], 'old');
+    assert.ok(result.retainedViewerFirstPlaylist, 'late old response cannot release the new viewer origin');
+    h.acknowledgeRetainedViewerSegment(result, result.retainedViewerFirstPlaylist.segments[0], result.id);
+    assert.equal(result.retainedViewerFirstPlaylist, null);
+});
+
+test('the resume position is checked again after identity validation advances the window', async t => {
+    let h;
+    h=harness({validation:async()=>{
+        h.session.playlist=playlist.replace('MEDIA-SEQUENCE:0','MEDIA-SEQUENCE:9');
+        h.session.hlsOutputAdmission={resumePlaylistClock:{originFor:()=>36}};
+        return {samples,fileSizeBytes:8*N,effectiveUrlIdentitySha256:target,effectiveUrlSha256:target};
+    }});t.after(h.stop);
+    assert.equal(await h.tryParkRetainedSession(h.session,105),true);
+    assert.equal(await h.tryResumeRetainedSession(h.request()),null);
+    assert.equal(h.counts.commits,0);
+    assert.equal(h.counts.releases,1);
 });
 
 test('missing encoder reservation refuses adoption before exposing a new access', async t => {

@@ -9292,5 +9292,169 @@
         "sha256": "ca9cbe190808037691b77562e9d9906d5d392a509ac47883722bfebec2363dd9"
       }
     ]
+  },
+  "retainedWatchPageClock": {
+    "atUtc": "2026-10-08T19:54:05.657Z",
+    "productionChanged": false,
+    "retainedSessionsEnabledInProduction": false,
+    "externalProviderRequests": 0,
+    "changes": [
+      "source-pes-v1 retained subtitle clock; nested MPEGTS timestamp options",
+      "private HLS cache clock binding separation; no full-file cache promotion for source clock",
+      "retained viewer offset follows durable sliding playlist; encoder clock unchanged",
+      "first playlist snapshot retained until a GET video segment is delivered"
+    ],
+    "tests": {
+      "expanded": {
+        "total": 275,
+        "passed": 272,
+        "skipped": 3,
+        "failed": 0
+      },
+      "postReviewTransferAndClockSubset": {
+        "total": 28,
+        "passed": 28,
+        "failed": 0
+      }
+    },
+    "browser": {
+      "scope": "WatchPage.loadVideo/stop, real HLS and startup gate; synthetic SQL claims with fixture visibility, actual Edge expiry and coordinator; not full authenticated production Edge creation",
+      "firstFrameMs": 1098.3999998569489,
+      "playingMs": 3331.0999999046326,
+      "resumeSourcePosition": 144.333576,
+      "localSeekTarget": 74.333576,
+      "viewerSourceOffset": 70,
+      "firstPlaylistOrigin": 40,
+      "sourceTimeAdvancedSeconds": 201.999424,
+      "sameDecoder": true,
+      "oldAccessRevoked": true,
+      "newDataAfterResume": true,
+      "syntheticNewSourceBytes": 25165824,
+      "maxActive": 1,
+      "maxSockets": 1,
+      "parkedRequests": 0,
+      "parkedSockets": 0,
+      "allResourcesReleased": true,
+      "nonfatalBufferStall": true,
+      "postStartupLargestCallbackGapSeconds": 1.5818,
+      "fluidityCertified": false
+    },
+    "aac": {
+      "selected": [
+        "video-00027.ts",
+        "video-00028.ts",
+        "video-00029.ts"
+      ],
+      "bytes": 1304908,
+      "probeCode": 0,
+      "probeDiagnostics": "",
+      "decodeCode": 0,
+      "decodeDiagnostics": "",
+      "streams": {
+        "0": {
+          "codec": "h264",
+          "profile": "Constrained Baseline",
+          "packets": 288,
+          "firstPts": "108.023000",
+          "lastPts": "119.981000",
+          "minPtsGap": 0.04099999999999682,
+          "maxPtsGap": 0.04200000000000159
+        },
+        "1": {
+          "codec": "aac",
+          "profile": "LC",
+          "sampleRate": "48000",
+          "channels": 2,
+          "packets": 563,
+          "firstPts": "108.032000",
+          "lastPts": "120.021333",
+          "minPtsGap": 0.021332999999998492,
+          "maxPtsGap": 0.021334000000010178
+        }
+      }
+    },
+    "remaining": [
+      "last sparse subtitle segment not published before the next subtitle or EOF; flush alone insufficient",
+      "browser callback gaps and one nonfatal buffer stall",
+      "audible acceptance and complete authenticated production path",
+      "no Normal speed measurement or deployment"
+    ],
+    "artifacts": [
+      {
+        "file": ".codex-artifacts/retained-watch-clock-20261008/browser-proof.safe.json",
+        "sha256": "5fd82e5943bef04837a10faf4e81762ec68366023862e83a53046a9c922bf729"
+      },
+      {
+        "file": ".codex-artifacts/retained-watch-progressive-20261008/browser-proof.safe.json",
+        "sha256": "83243fa0974782af60872baf9ec6fc2b3bcfb17578fe0fea502fef617b1bacf4"
+      },
+      {
+        "file": ".codex-artifacts/retained-watch-progressive-flush-20261008/browser-proof.safe.json",
+        "sha256": "aa44155542852a43ce80b4ea8019a71f2e4e2551ad4cc9beab950550d092a4d6"
+      },
+      {
+        "file": ".codex-artifacts/retained-watch-sliding-clock-20261008/browser-proof.safe.json",
+        "sha256": "deab06b1c2d2519df167f6a774a4d798833e949072c147e0e0b31af2b5256691"
+      },
+      {
+        "file": ".codex-artifacts/retained-watch-sliding-clock-20261008/decode-sample.safe.json",
+        "sha256": "c6eab420a00da470952c173400d254bcafc458fb7751a77f14d0de4e2d50f387"
+      },
+      {
+        "file": ".codex-artifacts/retained-watch-sliding-clock-20261008/http-proof.safe.json",
+        "sha256": "6c4942b673fba99752d86effb89b5aa6473e2052fb779190c5c3bd95ece2c831"
+      },
+      {
+        "file": ".codex-artifacts/retained-watch-sliding-clock-20261008/http-run-summary.safe.json",
+        "sha256": "3fe0418583cd5a6db91a42135091a3177d2afe7b03c07e19e0e1b0936c25365f"
+      },
+      {
+        "file": ".codex-artifacts/retained-watch-sliding-clock-20261008/progressive-subtitle-files.safe.json",
+        "sha256": "e2b0792e1e669c457b69ee41d5a2ed4d9b05571fe3e57b9cd1931912b1c6bafe"
+      },
+      {
+        "file": ".codex-artifacts/retained-watch-sliding-clock-20261008/resume-aac.safe.json",
+        "sha256": "e7a3646badfde764de49e559c9e8065bc97b84e6e87ad38026c84b6b4715845c"
+      }
+    ],
+    "runtime": {
+      "atUtc": "2026-10-08T20:00:50.798135+00:00",
+      "productionChanged": false,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist",
+          "retainedEnabled": false
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist",
+          "retainedEnabled": false
+        }
+      ],
+      "dispatcherRunning": true,
+      "proofContainers": {
+        "norva-retained-watch-clock-20261008": true,
+        "norva-retained-watch-progressive-20261008": true,
+        "norva-retained-watch-progressive-flush-20261008": true,
+        "norva-retained-watch-sliding-clock-20261008": true,
+        "norva-retained-final-http-20261008": true
+      },
+      "proofContainerAbsent": true
+    },
+    "initialCloudFailure": {
+      "total": 6142,
+      "passed": 6106,
+      "failed": 5,
+      "skipped": 31,
+      "cause": "FFmpeg concurrency VM omitted new helper import",
+      "productChangedByHarnessRepair": false
+    }
   }
 }

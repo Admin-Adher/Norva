@@ -4077,6 +4077,7 @@ test('finite MKV resume spawns FFmpeg against only the loopback URL with pre-inp
     };
     const startFfmpeg = vm.runInNewContext(`(${startSource})`, {
         boundedHlsArgs,
+        ...require('../services/media-gateway/src/retained-subtitle-clock'),
         path,
         Number,
         multiAudioHlsEnabled: () => false,

@@ -621,3 +621,45 @@ Le lecteur est muet pendant ces mesures : **aucune acceptation sonore humaine**.
 Le contrôle HTTP utilise `network none`. Le navigateur accède par tunnel SSH à un conteneur sur un réseau Docker **interne**, sans sortie vers un fournisseur. Source et proxy HTTP sont synthétiques et locaux. UID 1000, racine en lecture seule, mémoire 1 Gio, deux CPU, tmpfs éphémère de 384 Mio, aucun volume ni secret de production. Le premier tunnel ciblait un port non publié sur ce réseau interne et échouait ; le harnais a ensuite ciblé l’adresse du conteneur via SSH. Aucun réglage réseau de production n’a été modifié.
 
 Reçus et scripts : `.codex-artifacts/retained-session-full-path-20261008/`, dont `summary.safe.json`, `http-proof.safe.json`, `browser-first.safe.json`, `browser-proof.safe.json`, `tests-final.tap` et `browser-result.png`. À **20:40:17 Paris**, les deux Gateways sont sains, image PR706 et démarrages de 16:25:21 inchangés, dispatcher actif, pilote `owner-allowlist`. Les options de conservation restent inactives. Le conteneur, son réseau isolé et le tunnel de preuve sont arrêtés/supprimés. **Aucun déploiement Gateway, gain supplémentaire sur Normal ou extension du pilote.**
+
+
+## Horloge des sous-titres et fenêtre glissante — 8 octobre, 21:54 Paris
+
+Le décalage de 1,4 seconde provient du muxer MPEG-TS imbriqué dans HLS, dont le délai par défaut ne s'applique pas à la sortie WebVTT. Le simple réglage du muxer extérieur à zéro laisse encore le décalage des DTS négatifs avec B-frames. Le candidat conserve la même horloge PES pour vidéo et sous-titres en réglant les deux muxers (`mpegts_copyts=1`, `avoid_negative_ts=disabled`, délais nuls), uniquement pour le producteur exact éligible à la conservation. Ce n'est pas l'ajout d'une constante aux répliques.
+
+Les horloges sont comparées avec B-frames et AAC 44,1 kHz, au départ et à 2,375 secondes. Le premier essai de fixture avait omis `fps_mode=passthrough` avec une horloge 90 kHz et dépassé son temps : il est conservé, puis la fixture corrigée. Le cache privé porte une clé de profil distincte `source-pes-v1`; son découpage WebVTT garde les timestamps source sans ajouter l'amorçage audio. Le cache complet historique n'accepte pas ce producteur. Les autres producteurs gardent leurs arguments et leurs clés. La nouvelle horloge reste conditionnée à l'option de conservation **désactivée en production**.
+
+### WatchPage et repositionnement
+
+Le harnais utilise maintenant le DOM, le CSS, **WatchPage.loadVideo/stop, HLS.js 1.7.3 et le gate réels**. Les premiers harnais omettaient l'initialisation de la télémétrie de première image : la couverture de chargement restait affichée. Cela a été corrigé dans le harnais; aucun changement de WatchPage n'en découle. Une première image produite pendant que le gate garde la vidéo en pause n'est pas comptée comme le démarrage effectif.
+
+Un défaut supplémentaire apparaît lors de la longue fixture : la playlist vidéo a glissé de 76 secondes, mais la réponse de reprise utilisait encore l'origine de la première session. Le navigateur reprenait donc trop loin. Le candidat relit maintenant l'origine durable après revalidation, refuse une position sortie de la fenêtre, conserve l'horloge du décodeur et expose une origine propre au nouveau lecteur. La première playlist est figée jusqu'à livraison d'un de ses segments vidéo; HEAD, les relectures de manifeste et les réponses interrompues ne consomment pas ce repère. Ce dernier durcissement est couvert par les tests de transfert et le replay HTTP complet après le replay navigateur.
+
+Replay final **21:54:05 Paris**, sur une source synthétique de 720 secondes, 67 429 636 octets :
+
+- Fermeture à la position source **144,333576 s**. Origine initiale 30 s; nouvelle origine de playlist 40 s; origine exposée au nouveau lecteur 70 s; cible locale **74,333576 s**. L'origine vidéo HLS passe de 0,023 à 40,023 s, ce qui concorde.
+- Première image en **1,098 s**, puis lecture effective en **3,331 s**, réserve normale comprise. PID conservé, ancien accès révoqué.
+- La lecture avance de **201,999424 s** après la cible de reprise. Trois nouvelles plages de 8 Mio sont réellement reçues après les quatre échantillons de revalidation : cette fois, la preuve dépasse les octets disponibles avant pause.
+- Zéro requête/socket source pendant la pause observée, maximum une requête et une socket simultanées, treize requêtes synthétiques sur le parcours, ressources d'encodeur et de sortie libérées à la fin.
+
+**La fluidité complète n'est pas validée.** Des intervalles de callbacks d'image persistent, dont 1,582 s après le démarrage, et un `bufferStalledError` non fatal. Le tableau `waiting` est vide; cela ne suffit pas à nier le diagnostic HLS ou les intervalles. Les abandons réseau non fatals sont conservés. Leur cause précise reste à départager entre alimentation du lecteur et ordonnancement du navigateur.
+
+### Sous-titres progressifs : un blocage précis demeure
+
+Le premier replay court, source entièrement reçue, remet les deux répliques forcées à **40–45 et 120–125 secondes dans le navigateur**, sans l'ancien décalage de 1,4 seconde. Il ne prouve pas leur disponibilité progressive sur un long fichier.
+
+Sur la fixture de 720 secondes, la première réplique est publiée dans le premier VTT; la seconde est dans le segment suivant, encore ouvert. Ce fichier reste vide tant que FFmpeg ne vide pas son buffer. Une expérience séparée avec `flush_packets=1` rend la seconde réplique visible dans le fichier, **mais la playlist n'annonce toujours que le premier segment fermé**. Le navigateur ne reçoit donc pas cette réplique à temps. Le flush expérimental n'est pas inclus dans le produit. Aucun ENDLIST artificiel, plage vide prétendument complète ou relâchement des gardes de couverture n'est ajouté. Le dernier replay du candidat utilise ses sources réelles sans cette injection.
+
+La collecte finale des cues natifs vides après passage de la réplique ne prouve pas à elle seule une perte; les fichiers et la playlist persistés établissent le défaut de publication du segment suivant. Il reste à raccorder un mécanisme de publication progressive qui préserve les répliques tardives et traversantes avant toute activation.
+
+### Audio, tests et limites
+
+Un extrait de douze secondes autour de la position de reprise (segments 27–29) contient **288 images H264 et 563 paquets AAC-LC stéréo 48 kHz**. Décodage sans erreur, pas vidéo de 41–42 ms et pas audio de 21,333–21,334 ms. Le même décodeur est conservé : aucun nouvel encodeur n'est lancé au transfert. Ces contrôles ne sont pas une acceptation à l'écoute; le navigateur de mesure était muet. Les anciennes égalités PCM restent propres à leurs fixtures.
+
+Suite élargie : **275 tests, 272 réussis, trois ignorés, zéro échec**. Les trois ignorés sont conditionnés à leur environnement natif. Après durcissement du premier manifeste : **28 tests de transfert/horloge réussis**, inclus dans la portée précédente et non additionnés. Le replay HTTP du Gateway final à **21:56:21 Paris** conserve les claims synthétiques, l'ancien accès révoqué, le PID, une connexion maximum et la libération finale. Le premier groupe de tests avait rencontré un helper absent d'une VM d'extraction; seuls les harnais ont été complétés avant réussite.
+
+Les claims SQL, la fermeture Edge et le coordinateur ont la portée synthétique décrite dans PR718. La création authentifiée complète de production, la contention distribuée, la restitution audible et les sources variées restent à valider. **Aucun déploiement Gateway, activation du décodeur conservé, nouvelle mesure sur Normal ou extension du pilote.** Reçus sous `.codex-artifacts/retained-watch-sliding-clock-20261008/` et les trois dossiers de replays intermédiaires référencés dans le JSON.
+
+À **22:00:50 Paris**, les deux Gateways sont sains, image PR706 et démarrages du relevé précédent inchangés, dispatcher actif, conservation désactivée. Les cinq conteneurs de preuve sont absents; le tunnel isolé est arrêté.
+
+Le contrôle Linux complet intercepte cinq échecs dans les cinq variantes du harnais de concurrence FFmpeg : il extrayait `startFfmpeg` sans importer le nouveau helper d’horloge. Les 6 142 tests de ce premier passage comportent 6 106 réussites, cinq échecs et 31 ignorés. Le harnais importe désormais le véritable helper; aucun seuil produit n’est modifié. Le groupe local de concurrence, transfert et horloge réussit ensuite. La revue finale protège aussi le premier manifeste contre un acquittement tardif provenant de l’ancien identifiant de session; le test prouve qu’il ne libère pas l’origine du nouveau lecteur.

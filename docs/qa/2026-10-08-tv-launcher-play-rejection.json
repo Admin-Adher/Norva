@@ -1,0 +1,209 @@
+{
+  "atUtc": "2026-10-08T19:50:15.334423+00:00",
+  "release": {
+    "platform": "Android TV",
+    "versionCode": 39,
+    "versionName": "3.8.26-hybrid",
+    "minSdk": 24,
+    "targetSdk": 36,
+    "aabSha256": "4202cdbbea536b01df371f5be379453eb188e0ef203aa205c6eb715a032f43c9",
+    "signingCertificateUnchanged": true,
+    "decoderLibrariesUnchanged": true
+  },
+  "play": {
+    "state": "in-review",
+    "submitted": true,
+    "rolloutPercent": 100,
+    "countries": "existing",
+    "compatibleDevices": 3065,
+    "previousCompatibleDevices": 3076,
+    "removedDevices": 11,
+    "activeInstallsTargeted": 2,
+    "automaticProtectionPreserved": true,
+    "notesLocales": 9,
+    "warnings": [
+      "11 devices excluded by API24 minimum",
+      "optional deobfuscation file missing",
+      "optional native symbols missing"
+    ],
+    "observedAtParis": "2026-10-08T22:03:00+02:00",
+    "available": false,
+    "managedPublishing": false
+  },
+  "code": {
+    "pullRequest": 719,
+    "head": "d0bf2709f",
+    "signedProductHead": "8903dc8b8",
+    "latestDifferenceOnlyInstrumentationScreenshotDelay": true,
+    "merge": "94b8ef64e175e89fb20849d735ec15231d7074c1"
+  },
+  "proofs": [
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/catalog-tags-movie-ar-360-130.png",
+      "sha256": "21ba77578e4661b2a3708c00d3e3bda1b593074a31a80bb6204a9e9e631a8be9"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/catalog-tags-movie-ar-844-130.png",
+      "sha256": "1431da77bc0303ea26b36a9ead86e11423ba0aeb1c22e1ff1e988a49aff3db61"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/catalog-tags-movie-fr-360-130.png",
+      "sha256": "914f76d82fc2c1caa915d78eb4933c487517aa1037a0cf6caea8fb327244f3cb"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/catalog-tags-movie-fr-844-130.png",
+      "sha256": "d398f6a6f3aafc786279711a93db4029a1a012ee2da32eadc3653d198f339330"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/catalog-tags-movie-hi-360-130.png",
+      "sha256": "944cfecc2b57af852ccce121aa99f1ebdbe2c21e251b94379c850c3cd558b5fb"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/catalog-tags-movie-hi-844-130.png",
+      "sha256": "a4103c20835044f2978da234920ff0062cdd2005ce4c6a3bfe8499e683c78ec6"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/catalog-tags-series-ar-360-130.png",
+      "sha256": "e8430f3b6e627ef2b1489ead84e29a3e232194268a78eae690f1f412db086a3e"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/catalog-tags-series-ar-844-130.png",
+      "sha256": "ca44f81b7f1afb5ef827c0f2a3a012cc9041704ec4b627aaedc4ab5c7688b220"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/catalog-tags-series-fr-360-130.png",
+      "sha256": "bb48eab0fa35693b825b4df019d6bb9ae7f6aff28f5cb4e757197e01e33d02f6"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/catalog-tags-series-fr-844-130.png",
+      "sha256": "232442d1a9e382cbd28da24bac2e949e815431e9400ed8dd73d255ee02382f81"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/catalog-tags-series-hi-360-130.png",
+      "sha256": "97420b6857af890522d32b945608189fcc511538b4b87def27ec0e013e8db512"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/catalog-tags-series-hi-844-130.png",
+      "sha256": "efd57e55da5fdd0781a0c34b56e1e845410acfe71cefd6be66164fe517b07639"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/tv-consent-decline.png",
+      "sha256": "a82f7cecfb1b706514deeaecfb6da4a1b701b25c8cfe2d96ccb1078d70f65964"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/tv-launcher-adaptive.png",
+      "sha256": "d235ac9a9f09470287e954419ed3536c259a36dff4e29f83a65e7a75c119bc04"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/tv-launcher-apps.png",
+      "sha256": "4f58192c778744cd1e8594ba7a7180ccd2bc068e338e30778106ea4767f6d5d0"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/tv-launcher-banner-320x180.png",
+      "sha256": "8f0ce6bd7afc9471f2e3a7b72ed941da5cde17be36615d57a6555eeb36363084"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/tv-launcher-circle.png",
+      "sha256": "e73f722af2d16bf1bbaebe386c04a6065498812e3ee23fcae0ff79e6d916c80c"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/tv-launcher-home.png",
+      "sha256": "c573a761d9056663426ac353632f50727be0576482d89e8bf1a2ef45559f2b43"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/emulator-current-font13/captures/tv-launcher-rounded-square.png",
+      "sha256": "bc9eebfebafd537284bc74e83dd382fe315725d1b8421090ae07bfedba28dad4"
+    },
+    {
+      "file": ".codex-artifacts/tv-icon-policy-20261008/tv39-in-review.png",
+      "sha256": "9bdc7fe630f51568986cfd7aa466375a9a3608935a6ba3358c10eb866c3d83bf"
+    }
+  ],
+  "initialRejection": {
+    "versionCode": 38,
+    "versionName": "3.8.25-hybrid",
+    "reason": "TV launcher icon rendering; cropped outline under circular mask",
+    "existingLiveVersion": 35
+  },
+  "verification": {
+    "path": "C:\\Users\\Adrien\\.codex\\worktrees\\commercial-closeout-20261002\\Norva repo\\.codex-artifacts\\tv-icon-policy-20261008\\release-tv-api24\\app-release.aab",
+    "sha256": "4202cdbbea536b01df371f5be379453eb188e0ef203aa205c6eb715a032f43c9",
+    "manifest": {
+      "package": "tv.norva.tv",
+      "versionCode": 39,
+      "versionName": "3.8.26-hybrid",
+      "debuggable": false,
+      "fixtureActivityAbsent": true,
+      "minSdk": 24
+    },
+    "priorManifest": {
+      "package": "tv.norva.tv",
+      "versionCode": 38,
+      "versionName": "3.8.25-hybrid",
+      "debuggable": false,
+      "fixtureActivityAbsent": true
+    },
+    "signature": {
+      "signatureVerified": true,
+      "signers": 1,
+      "certificateSha256": "0082f31a9f05d6e6ce07fc9d4d8b30e81ffdc1cceba6a985c2dafee021409621",
+      "digestAlgorithmOid": "2.16.840.1.101.3.4.2.1",
+      "validationScope": "Cryptographic signature only; Android upload certificates are not required to chain to a public CA.",
+      "signedPayloadEntries": 1003,
+      "allPayloadDigestsMatch": true,
+      "fullManifestDigestMatches": true,
+      "samePriorCertificate": true
+    },
+    "decoderAarSha256": "a011fdf3766da71d5077a4d8786ae1e73260a8a9ad05e97d5c0993b8ec8ea4c5",
+    "libraries": [
+      {
+        "abi": "arm64-v8a",
+        "sha256": "8c0b0323b7211fd2257c1f5e21f824e7160a99352ef38e8bba9aa0b0a617e620",
+        "exactAarMatch": true,
+        "exactPreviousReleaseMatch": true
+      },
+      {
+        "abi": "armeabi-v7a",
+        "sha256": "9b41ce2bebc82ec4939f6960492b8a0b59083bbe46782b743cf4c5f49e00590d",
+        "exactAarMatch": true,
+        "exactPreviousReleaseMatch": true
+      },
+      {
+        "abi": "x86",
+        "sha256": "036e9f35a9f406e702457edde7de5316ccf5843782f04373484a3c2f874d442f",
+        "exactAarMatch": true,
+        "exactPreviousReleaseMatch": true
+      },
+      {
+        "abi": "x86_64",
+        "sha256": "5b867e14efc6dc15016b3dea36ef8ff4324726b2745b7099bba7767e63ad2564",
+        "exactAarMatch": true,
+        "exactPreviousReleaseMatch": true
+      }
+    ],
+    "nativeRecoveryPolicyDefined": true,
+    "debugFixtureAbsentFromManifestAndDex": true,
+    "definedDexClasses": 9667,
+    "binaryScope": "Presence and signed contents; runtime behavior is verified separately by focused tests/emulators.",
+    "sameBrandingAssets": true,
+    "resourceTableSha256": "eed7c2418bd274e602efeea6440aaabc3b731c86191fceebf94761c45559b084"
+  },
+  "initialFailures": [
+    "Initial cloud assertion still expected TV38, corrected to39",
+    "Initial Apps screenshot targeted non-clickable parent; corrected to actual D-pad focus",
+    "Initial successful Apps test captured before asynchronous banner binding; added screenshot wait",
+    "First signed39 minSdk23 refused by Play automatic-protection SDK24 requirement; failed import removed and rebuilt39 with minSdk24, automatic protection unchanged",
+    "Latest full emulator attempt1: TV font1 consent Pairing Accept denied instead of granted; Phone gesture1 run interrupted after 11/77 tests with repeated renderer crashes; Phone three-button1.3 existing refusal latency assertion1784ms; one rerun of failed jobs requested"
+  ],
+  "matrix": {
+    "runId": 37833103630,
+    "attempt": 2,
+    "tvFont10": "success",
+    "tvFont13": "success",
+    "phoneGesture10": "success",
+    "phoneGesture13": "success",
+    "phoneThreeButton10": "success",
+    "phoneThreeButton13": "success",
+    "allSixPassedObservedAtParis": "2026-10-08T22:06:00+02:00"
+  }
+}

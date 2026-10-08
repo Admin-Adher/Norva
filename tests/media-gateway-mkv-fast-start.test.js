@@ -1854,6 +1854,7 @@ test('an admitted replay starts one FFmpeg graph with copied video and proof-sel
   const startFfmpegSource = between(GATEWAY, 'function startFfmpeg(', '\nfunction seekArgsForSession(').trim();
   const startFfmpeg = vm.runInNewContext(`(${startFfmpegSource})`, {
     boundedHlsArgs: require('../services/media-gateway/src/bounded-hls-output').boundedHlsArgs,
+            ...require('../services/media-gateway/src/retained-subtitle-clock'),
     path,
     multiAudioHlsEnabled: () => false,
     exactSubtitleHlsEnabled: () => false,

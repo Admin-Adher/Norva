@@ -250,6 +250,7 @@ test('one FFmpeg maps absolute input indexes to audio-only ordinals and keeps th
         `(${sourceBetween('function startFfmpeg(', '\nfunction seekArgsForSession(').trim()})`,
         {
             boundedHlsArgs: require('../services/media-gateway/src/bounded-hls-output').boundedHlsArgs,
+            ...require('../services/media-gateway/src/retained-subtitle-clock'),
             path,
             multiAudioHlsEnabled: (value) => value?.multiAudioHls?.enabled === true,
             exactSubtitleHlsEnabled: () => false,

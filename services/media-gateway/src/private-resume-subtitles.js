@@ -74,12 +74,15 @@ function parseWebVtt(bytes) {
 // All video-aligned subtitle fragments retain the original cue/PES clock.
 // The HLS discontinuity handles the next encoder's clock; cue text is never
 // translated, shifted, or dropped simply to make a cache window admissible.
-async function captureSubtitleWindow({ renditions, videoSegments, readAsset, maxBytes = 4 * 1024 * 1024, prefix = 'resume', startIndex = 0 }) {
+async function captureSubtitleWindow({ renditions, videoSegments, readAsset, maxBytes = 4 * 1024 * 1024, prefix = 'resume', startIndex = 0, sourcePesClock = false }) {
+    if (typeof sourcePesClock !== 'boolean') return null;
     if (!Array.isArray(renditions) || renditions.length > 32) return null;
     if (!['resume', 'continuation'].includes(prefix) || !videoSegments?.length
         || !Number.isSafeInteger(startIndex) || startIndex < 0) return null;
     const assets = new Map(), playlists = new Map(); let bytes = 0;
-    const origin = renditions.length ? videoTimestampOrigin(
+    // An explicitly clock-preserving producer already maps WebVTT zero to PES
+    // zero. Adding its first video PTS would shift cues by encoder priming.
+    const origin = renditions.length && !sourcePesClock ? videoTimestampOrigin(
         await readAsset(videoSegments[0].name, 32 * 1024 * 1024), videoSegments[0].start) : 0;
     if (origin === null) return null;
     for (const rendition of renditions) {
