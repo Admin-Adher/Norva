@@ -1899,5 +1899,171 @@
         }
       ]
     }
+  },
+  "relayRecoveryCheck20261008": {
+    "at": "2026-10-08T00:49:58.987633+00:00",
+    "purpose": "Check whether the unchanged current relay recovered after NodeMaven suggested recovery over time; no automatic repeated run",
+    "publicComparison": {
+      "at": "2026-10-08T00:49:58.987633+00:00",
+      "purpose": "bounded public Cloudflare speedtest payload, no VOD/provider account I/O",
+      "productionChanged": false,
+      "results": [
+        {
+          "path": "direct",
+          "at": "2026-10-08T00:50:02.059733+00:00",
+          "exit": 0,
+          "http": 200,
+          "bytes": 10000000,
+          "seconds": 0.334331,
+          "firstByteSeconds": 0.247287,
+          "connectSeconds": 0.203775,
+          "tlsSeconds": 0.216417,
+          "redirects": 0,
+          "Mbps": 239.283824
+        },
+        {
+          "path": "configured-http-connect",
+          "at": "2026-10-08T00:50:02.402786+00:00",
+          "exit": 0,
+          "http": 200,
+          "bytes": 10000000,
+          "seconds": 1.646248,
+          "firstByteSeconds": 0.507435,
+          "connectSeconds": 0.106061,
+          "tlsSeconds": 0.340348,
+          "redirects": 0,
+          "Mbps": 48.595351
+        }
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "viewerSessions": 0,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:43.148136674Z",
+          "cpuQuota": 0,
+          "cpuPeriod": 0,
+          "nanoCpus": 6000000000
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "viewerSessions": 0,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:45.72659218Z",
+          "cpuQuota": 0,
+          "cpuPeriod": 0,
+          "nanoCpus": 6000000000
+        }
+      ],
+      "baselineStart": {
+        "at": "2026-10-08T00:49:59.030943+00:00",
+        "networkRxBytes": 1057535312983,
+        "networkTxBytes": 1567497392581,
+        "cpuTotal": 2505824356,
+        "cpuIdle": 1401655236,
+        "proxyEstablished": 0,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 0
+      },
+      "baselineEnd": {
+        "at": "2026-10-08T00:50:02.044827+00:00",
+        "networkRxBytes": 1057539993249,
+        "networkTxBytes": 1567497433421,
+        "cpuTotal": 2505829176,
+        "cpuIdle": 1401658999,
+        "proxyEstablished": 0,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 0
+      },
+      "endedAt": "2026-10-08T00:50:04.056480+00:00"
+    },
+    "normalRange": {
+      "at": "2026-10-08T00:50:36.479133+00:00",
+      "question": "Did the unchanged current relay recover throughput on the exact Normal range after the public result improved?",
+      "copy": "Normal exact 4K FR HDR",
+      "rangeStart": 1251999744,
+      "rangeBytes": 16777216,
+      "reader": "system libcurl to a local temporary regular file",
+      "route": "configured production HTTP CONNECT relay and port; no diagnostic override",
+      "initialGets": 1,
+      "newProductionCode": false,
+      "routeCheck": {
+        "slot": 1,
+        "transport": "http",
+        "controlShadow": true,
+        "verifiedFromProductionModule": true,
+        "productionRouteUnchanged": true,
+        "diagnosticUsesProxy": true,
+        "diagnosticPort": 5432
+      },
+      "result": {
+        "httpStatus": 206,
+        "seconds": 5.490417,
+        "firstByteSeconds": 1.326023,
+        "connectSeconds": 0.214519,
+        "bytes": 16777216,
+        "sha256": "39d3ab6093b909bcb14510d17a7561a0ccef260ed13063648e8c66ef03301807",
+        "exit": 0,
+        "contentRanges": [
+          "bytes 1251999744-1268776959/13662582623"
+        ],
+        "redirects": 1,
+        "effectiveScheme": "http",
+        "proxyUsed": null,
+        "Mbps": 24.445817
+      },
+      "sameBytesAsPreviousProof": true,
+      "heartbeatFailures": [],
+      "expired": true,
+      "temporaryFilesRemoved": true,
+      "endedAt": "2026-10-08T00:50:42.947844+00:00"
+    },
+    "support": {
+      "newReply": "Anna said the team would check and respond; speed for a static IP may resolve with time or the IP can be replaced. No cause or completed intervention confirmed.",
+      "followUpSent": true,
+      "askedFor": [
+        "cause or intervention on current relay",
+        "configured throughput limit",
+        "whether any future replacement is free and reversible despite zero displayed swaps"
+      ],
+      "replacementAuthorized": false,
+      "newMeasurementsSent": true,
+      "lastFollowUpSeen": false,
+      "privateProviderDataShared": false
+    },
+    "requestAccounting": {
+      "publicGets": 2,
+      "publicBytes": 20000000,
+      "sourceRangeGets": 1,
+      "sourceRedirects": 1,
+      "sourceBytes": 16777216,
+      "providerClaims": 1,
+      "retries": 0
+    },
+    "closeout": {
+      "at": "2026-10-08T00:51:40.624601+00:00",
+      "activeAccountReaders": 0,
+      "newClaimExpired": true,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "activeGlobal": 0
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "activeGlobal": 0
+        }
+      ]
+    },
+    "productionChanged": false,
+    "newBrowserPlayback": false,
+    "fullFilmOrSustainedGuarantee": false,
+    "receipts": ".codex-artifacts/relay-capacity-audit-20261008/"
   }
 }
