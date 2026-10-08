@@ -2230,6 +2230,9 @@ async function createPlaybackSessionCore(
   const mediaCacheReadBypassOnce = mediaCacheReadPolicy === "bypass-once"
     || body.privateMediaCacheProtocol !== 1;
   let requestedPlaybackHint = recordOrEmpty(body.playbackHint ?? body.playback_hint);
+  // Capabilities belong to this caller, never to persisted catalogue hints.
+  requestedPlaybackHint = { ...requestedPlaybackHint,
+    committedSubtitleDelivery: requestedPlaybackHint.committedSubtitleDelivery === 1 ? 1 : 0 };
   const parentSeriesId = itemType === "series"
     ? stringOr(
       requestedPlaybackHint.audioSeriesId ??

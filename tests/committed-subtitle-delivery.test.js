@@ -51,4 +51,3 @@ test('tee preserves seek and map; path parser metacharacters are refused', () =>
     assert.match(args[8], /webvtt:flush_packets=1.*\|\[f=framecrc:flush_packets=1\]/);
     for (const root of ['/x|file', '/x:y', "/x'y", '/x[y]']) assert.throws(() => committedSubtitleOutputArgs([{ streamIndex: 2 }], root), /PATH/);
 });
-
