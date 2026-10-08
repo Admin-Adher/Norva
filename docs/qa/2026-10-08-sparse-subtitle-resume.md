@@ -49,3 +49,34 @@ Aucun candidat de muxage natif n'est activé. Aucun nouveau temps de reprise ré
 ## Preuves
 
 Reçus locaux sous `.codex-artifacts/sparse-subtitle-resume-20261008/` : `native-hls-proof.safe.json`, `tee-proof*.safe.json`, `admission-first.safe.json`, `admission-proof.safe.json`, `local-tee-proof.safe.json`, `startup-ab.safe.json`, `functional.safe.json`, erreurs synthétiques conservées, `absolute-clock-first.safe.json`, `absolute-clock-proof.safe.json`, `deployment-reference.safe.json`, `image.safe.json`, `canary.safe.json`, `functional-canary.safe.log`, `deployment.safe.json`, `post-deployment.safe.json` et `code-checks.safe.json`. Le code rejeté est conservé dans `rejected-candidate/`, exclu du runtime. L'attachement de PR706 au chat a été refusé à la limite de 100 pièces ; aucune pièce retirée.
+
+## Reprise de l'investigation — cause du sous-titre manquant établie
+
+Contrôles supplémentaires avec l'image PR706 et FFmpeg **5.1.9**, UID1000, réseau `none`, CPU borné à deux, mémoire 512 Mio, tmpfs 128 Mio, conteneur temporaire retiré après chaque expérience. Aucun appel fournisseur, aucune lecture navigateur et aucun changement de production. Les 53 tests précédents restent ceux du correctif PR706 ; ils ne sont pas présentés comme de nouveaux tests d'optimisation.
+
+### La perte précède la conversion
+
+Huit chemins comparés dans `seek-matrix.safe.json`. Depuis le début, la sortie WebVTT et la sortie HLS retrouvent les deux répliques 70,021–75,021 et 150,021–155,021 s. Après `-ss 117`, la copie directe SRT, la conversion WebVTT et HLS ne retrouvent aucune de ces deux répliques. `-noaccurate_seek` et `-seek_timestamp 1` ne réparent pas cette perte. Ce n'est donc pas un défaut propre au cache ou au muxeur HLS.
+
+### Correction du contrôle ffprobe précédent
+
+Le contrôle initial utilisait `-select_streams s`. Dans ffprobe, cette sélection désactive les autres flux **avant** le saut. Le flux choisi par défaut pour trouver une position devient alors un sous-titre. FFmpeg effectue son saut initial avant d'appliquer ses options de rejet des flux et choisit ici la vidéo. Les deux contrôles suivaient donc des index différents. Une première hypothèse de revue, selon laquelle FFmpeg désactiverait déjà les sous-titres avant le saut, est réfutée par l'ordre réel du code et n'est pas retenue. Sources primaires : [initialisation FFmpeg 5.1.9](https://github.com/FFmpeg/FFmpeg/blob/n5.1.9/fftools/ffmpeg_opt.c), [sélection ffprobe](https://github.com/FFmpeg/FFmpeg/blob/n5.1.9/fftools/ffprobe.c), [choix du flux par défaut](https://github.com/FFmpeg/FFmpeg/blob/n5.1.9/libavformat/avformat.c).
+
+Le nouveau contrôle sans `-select_streams` retrouve exactement l'omission :
+
+| Fait observé dans la fixture | Position |
+| --- | --- |
+| Réplique attendue à 150,021 s | octet **3 201 354** |
+| Première vidéo après saut à 117 s | **116,021 s**, octet **5 314 388** |
+| Réplique ordinaire à 190,021 s | octet **8 700 559**, conservée |
+
+Le saut vidéo dépasse physiquement les octets de la réplique future. Le démultiplexeur ne les rencontre plus. La sélection `s` dans ffprobe repart au contraire des paquets de sous-titres à 60/70 s, et retrouve celui de 150 s. Les options `-discard:v all`, `-discard:a all` et `-seek2any 1` testées ne changent pas le résultat FFmpeg. Le [seek Matroska de cette version](https://github.com/FFmpeg/FFmpeg/blob/n5.1.9/libavformat/matroskadec.c) suit l'index du flux choisi. Cette preuve porte sur la fixture ; elle n'établit pas que Normal présente le même placement physique.
+
+### Deux remèdes expérimentaux et leurs limites
+
+1. **Repartir plus tôt** : demander 70 s mène à la vidéo 68,021 s, octet 3 110 066, et conserve les deux répliques encore nécessaires après 132 s. Le point de départ est donc 48 s de vidéo et 2 204 322 octets plus tôt que dans le saut défaillant. C'est une récupération prouvée sur ce fichier synthétique, pas un gain de délai réseau. Un recul fixe ne suffit pas pour tous les fichiers ou les longues répliques traversantes.
+2. **Changer l'intercalage lors de la création de la fixture** : avec `-max_interleave_delta 0`, la même réplique à 150,021 s est écrite à l'octet 6 862 624. Le saut à 117 s la retrouve alors, ainsi que la réplique à 190 s. Cette comparaison établit la dépendance au placement des paquets dans le fichier de test. Le réglage appartient à sa création ; l'ajouter à la sortie Gateway ne déplace pas les octets d'un fichier fournisseur existant.
+
+La piste nommée « forced » dans cette fixture ne porte pas de disposition forcée : aucune anomalie propre à ce drapeau n'est démontrée. Pour rendre une recherche antérieure fiable sur des fichiers réels, il faudrait une preuve de complétude des index de chaque piste et conserver les répliques chevauchantes. Matroska recommande les entrées d'index pour chaque sous-titre mais autorise des index sélectifs : une entrée absente ne prouve pas le silence. [Recommandations Cues](https://www.matroska.org/technical/cues.html), [index sélectifs](https://www.matroska.org/technical/diagram.html).
+
+**Décision :** aucun nouveau correctif ni réglage déployé sur ces expériences. Le candidat reste rejeté, Normal n'est pas davantage accéléré. La cause de l'échec synthétique est désormais expliquée, et le contrôle d'acceptation devra comparer tous les flux après le même saut, avec un inventaire complet des répliques attendues. Reçus et scripts supplémentaires : `.codex-artifacts/subtitle-seek-cause-20261008/seek-matrix.*`, `seek-packet-path.*` et `backtrack-cost.*`.
