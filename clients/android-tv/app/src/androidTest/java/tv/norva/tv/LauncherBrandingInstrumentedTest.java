@@ -112,6 +112,9 @@ public class LauncherBrandingInstrumentedTest {
             if (root!=null && !root.findAccessibilityNodeInfosByText("Norva").isEmpty()) { found=true; break; }
             SystemClock.sleep(250);
         }
+        // Accessibility labels arrive before the launcher's asynchronous image
+        // loader. Let the real banner bind before retaining its visual proof.
+        SystemClock.sleep(6000);
         save(instrumentation.getUiAutomation().takeScreenshot(), "tv-launcher-apps.png");
         StringBuilder tree = new StringBuilder();
         dump(root, tree, 0);
