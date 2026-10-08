@@ -14,6 +14,10 @@ function parseResumeMediaPlaylist(text) {
     if (typeof text !== 'string' || text.length > 2 * 1024 * 1024 || !text.startsWith('#EXTM3U')
         || /#EXT-X-(?:STREAM-INF|MEDIA:|KEY:|MAP:|BYTERANGE:|GAP|DISCONTINUITY)/.test(text)
         || !text.includes('#EXT-X-INDEPENDENT-SEGMENTS')) return null;
+    const declarations = text.match(/^#EXT-X-MEDIA-SEQUENCE:[^\r\n]*$/gm) || [];
+    const token = declarations[0]?.split(':')[1].trim() ?? '0';
+    if (declarations.length > 1 || !/^(0|[1-9]\d*)$/.test(token)) return null;
+    const sequence = Number(token);
     const segments = []; let duration = null, elapsed = 0;
     for (const line of text.split(/\r?\n/).map(line => line.trim()).filter(Boolean)) {
         if (line.startsWith('#EXTINF:')) {
@@ -27,38 +31,44 @@ function parseResumeMediaPlaylist(text) {
         }
     }
     if (duration !== null || !segments.length || new Set(segments.map(s => s.name)).size !== segments.length) return null;
-    return { segments, ended: /#EXT-X-ENDLIST(?:\r?\n|$)/.test(text), duration: elapsed };
+    if (!Number.isSafeInteger(sequence) || !Number.isSafeInteger(sequence + segments.length)) return null;
+    return { sequence, segments, ended: /#EXT-X-ENDLIST(?:\r?\n|$)/.test(text), duration: elapsed };
 }
 
 function mergedResumePlaylist(window, continuationText = '') {
     const continuation = continuationText ? parseResumeMediaPlaylist(continuationText) : null;
     if (continuationText && !continuation) throw new Error('RESUME_CONTINUATION_GRAPH_INVALID');
-    // EVENT headers must remain identical when the encoder's first segment
-    // arrives (RFC 8216 6.2.1). Use the admission ceiling, not a moving maximum.
+    // The continuation eventually slides. Preserve each segment's sequence
+    // and discontinuity number when its cached predecessors leave the window.
+    // Do not promise EVENT semantics (which forbid removing segments).
     // Playback still starts at the explicit resume offset with a 6 s buffer;
     // this header only bounds legal segment durations and playlist reloads.
     const target = 30;
+    const slid = (continuation?.sequence || 0) > 0;
     const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-INDEPENDENT-SEGMENTS',
-        `#EXT-X-TARGETDURATION:${target}`, '#EXT-X-MEDIA-SEQUENCE:0', '#EXT-X-PLAYLIST-TYPE:EVENT'];
-    for (const s of window.segments) lines.push(`#EXTINF:${s.duration.toFixed(6)},`, s.name);
+        `#EXT-X-TARGETDURATION:${target}`, `#EXT-X-MEDIA-SEQUENCE:${slid ? window.segments.length + continuation.sequence : 0}`];
+    if (slid) lines.push('#EXT-X-DISCONTINUITY-SEQUENCE:1');
+    else for (const s of window.segments) lines.push(`#EXTINF:${s.duration.toFixed(6)},`, s.name);
     if (continuation?.segments.length) {
         // Each encoder starts a new timestamp sequence. Exactly one explicit
         // discontinuity belongs at the splice, never ahead of the cached prefix.
-        lines.push('#EXT-X-DISCONTINUITY');
+        if (!slid) lines.push('#EXT-X-DISCONTINUITY');
         for (const s of continuation.segments) lines.push(`#EXTINF:${s.duration.toFixed(6)},`, s.name);
     }
     if (window.ended || continuation?.ended) lines.push('#EXT-X-ENDLIST');
     return lines.join('\n') + '\n';
 }
 
-function mergedSubtitlePlaylist(prefix, continuation = [], ended = false) {
+function mergedSubtitlePlaylist(prefix, continuation = [], ended = false, sequence = 0) {
     if (!prefix?.length || [...prefix, ...continuation].some(s => !/^(resume|continuation)-subtitle_\d+-\d+\.vtt$/.test(s.name)
-        || !(s.duration > 0 && s.duration <= 30))) throw new Error('RESUME_SUBTITLE_GRAPH_INVALID');
+        || !(s.duration > 0 && s.duration <= 30)) || !Number.isSafeInteger(sequence) || sequence < 0
+        || (sequence > 0 && !continuation.length)) throw new Error('RESUME_SUBTITLE_GRAPH_INVALID');
     const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:30',
-        '#EXT-X-MEDIA-SEQUENCE:0', '#EXT-X-PLAYLIST-TYPE:EVENT'];
+        `#EXT-X-MEDIA-SEQUENCE:${sequence > 0 ? prefix.length + sequence : 0}`];
     const append = list => { for (const s of list) lines.push(`#EXTINF:${s.duration.toFixed(6)},`, s.name); };
-    append(prefix);
-    if (continuation.length) { lines.push('#EXT-X-DISCONTINUITY'); append(continuation); }
+    if (sequence > 0) lines.push('#EXT-X-DISCONTINUITY-SEQUENCE:1');
+    else append(prefix);
+    if (continuation.length) { if (!sequence) lines.push('#EXT-X-DISCONTINUITY'); append(continuation); }
     if (ended) lines.push('#EXT-X-ENDLIST');
     return lines.join('\n') + '\n';
 }
@@ -154,9 +164,9 @@ class PrivateResumeHlsCache {
                     windows: captureInputWindows(entry.inputWindows, binding.fileSizeBytes,
                         entry.inputOnly ? Math.min(this.perFileBytes, RECENT_MULTI_INPUT_MAX_BYTES) : RECENT_INPUT_MAX_BYTES) } : null;
             },
-            subtitlePlaylist: (name, continuation = [], ended = false) => {
+            subtitlePlaylist: (name, continuation = [], ended = false, sequence = 0) => {
                 ensure(); const prefix = entry.subtitlePlaylists.get(name);
-                return prefix ? mergedSubtitlePlaylist(prefix, continuation, entry.ended || ended) : null;
+                return prefix ? mergedSubtitlePlaylist(prefix, continuation, entry.ended || ended, sequence) : null;
             },
               bandwidth: entry.bandwidth,
               assertValid: ensure,
@@ -196,7 +206,8 @@ class PrivateResumeHlsCache {
             return true;
         } finally { this.reservedBytes -= reservation; }
     }
-    async capture({ binding, observed, position, actualStartOffset, playlist, readAsset, subtitleRenditions = [], inputWindows = [] } = {}) {
+    async capture({ binding, observed, position, actualStartOffset, playlist, playlistClock = null,
+        playlistName = 'playlist.m3u8', readAsset, subtitleRenditions = [], inputWindows = [] } = {}) {
         if (!binding || !Number.isFinite(position) || position <= 0 || !Number.isFinite(actualStartOffset)
             || actualStartOffset < 0 || typeof readAsset !== 'function') return this.rejectCapture('invalid-capture-input');
         const identity = strongResumeIdentity(observed, binding.fileSizeBytes);
@@ -205,11 +216,14 @@ class PrivateResumeHlsCache {
         if (!identity && !recentProof) return this.rejectCapture('unverified-identity');
         const parsed = parseResumeMediaPlaylist(playlist);
         if (!parsed) return this.rejectCapture('ineligible-playlist');
-        // The relative clock below starts at the session origin. A sliding
-        // playlist has discarded that origin; never label its first remaining
-        // segment as time zero. Retained source bytes need no HLS clock.
-        const sequence = /^#EXT-X-MEDIA-SEQUENCE:([^\r\n]*)/m.exec(playlist);
-        if (sequence && sequence[1].trim() !== '0') return this.rejectCapture('sliding-playlist-unbound-clock');
+        // A sliding playlist has discarded earlier durations. Only the exact
+        // producer's durable publication history can recover that origin;
+        // never multiply a sequence number by a nominal segment duration.
+        if (parsed.sequence > 0) {
+            const origin = playlistClock?.originFor(playlistName, playlist);
+            if (!Number.isFinite(origin) || origin < 0) return this.rejectCapture('sliding-playlist-unbound-clock');
+            for (const segment of parsed.segments) { segment.start += origin; segment.end += origin; }
+        }
         const localPosition = position - actualStartOffset;
         const index = parsed.segments.findIndex(s => s.start <= localPosition && s.end > localPosition);
         if (index < 0) return this.rejectCapture('position-outside-buffer');

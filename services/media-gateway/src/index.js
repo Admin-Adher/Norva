@@ -13310,7 +13310,8 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
             }
             if (isExactSubtitleSessionPlaylistName(session, requested)) {
                 const graph = await privateResumeSubtitleContinuation(session);
-                const playlist = session.privateResumeLease.subtitlePlaylist(requested, graph?.playlists.get(requested) || [], graph?.ended === true);
+                const playlist = session.privateResumeLease.subtitlePlaylist(requested, graph?.playlists.get(requested) || [],
+                    graph?.ended === true, graph?.sequence || 0);
                 if (!playlist) return res.status(404).send('Subtitle playlist not found');
                 res.setHeader('Cache-Control', 'no-store');
                 return res.send(rewritePlaylistSegments(playlist, req.playbackToken, session));
@@ -13321,11 +13322,12 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
                 const match = /^continuation-(subtitle_\d+)-(\d+)\.vtt$/.exec(requested);
                 const index = match ? Number(match[2]) : -1;
                 const rendition = match && graph?.renditions.find(track => track.playlistName === `${match[1]}.m3u8`);
-                if (!rendition || !graph.segments[index]) return res.status(404).send('Subtitle segment not found');
+                const segment = graph?.segments[index - graph.sequence];
+                if (!rendition || !segment) return res.status(404).send('Subtitle segment not found');
                 // Render only the requested fragment, not every subtitle in a
                 // growing movie. Long playback must not exhaust the cache budget.
                 const fragment = await captureSubtitleWindow({ renditions: [rendition],
-                    videoSegments: [graph.segments[index]], prefix: 'continuation', startIndex: index,
+                    videoSegments: [segment], prefix: 'continuation', startIndex: index,
                     readAsset: (name, limit) => readPrivateResumeAsset(session, name, limit) });
                 session.privateResumeLease.assertValid();
                 const bytes = fragment?.assets.get(requested);
@@ -15523,7 +15525,7 @@ async function trySeedRecentRetainedInput(session, signal) {
     } finally { lease.release(); }
 }
 
-async function capturePrivateResumeWindow(session) {
+async function capturePrivateResumeWindow(session, playlistClock = null) {
     const position = session.privateResumeStopPosition;
     if (!Number.isFinite(position) || position <= 0) return false;
     if (session.lastError || session.inputFailure) return privateResumeHlsCache.rejectCapture('session-error');
@@ -15541,7 +15543,9 @@ async function capturePrivateResumeWindow(session) {
         ? session.videoPlaylistPath : session.playlistPath, 'utf8').catch(() => '');
     return privateResumeHlsCache.captureWithInputFallback({ binding, inputBinding, observed: privateResumeObservedIdentity(session),
         inputWindows: session.privateResumeInputWindows,
-        position, actualStartOffset, subtitleRenditions: exactSubtitleRenditionsForSession(session),
+        position, actualStartOffset, playlistClock,
+        playlistName: exactSubtitleHlsEnabled(session) ? 'video.m3u8' : 'playlist.m3u8',
+        subtitleRenditions: exactSubtitleRenditionsForSession(session),
         // SIGTERM can write ENDLIST on an incomplete movie. A stopped encoder
         // must never turn that marker into evidence of the provider's EOF.
         playlist: playlist.replace(/^#EXT-X-ENDLIST\s*$/gm, ''),
@@ -15571,6 +15575,11 @@ async function buildPrivateResumeSubtitleContinuation(session) {
     if (text === session.privateResumeSubtitleVideoPlaylist) return session.privateResumeSubtitleGraph || null;
     const parsed = parseResumeMediaPlaylist(text);
     if (!parsed) return session.privateResumeSubtitleGraph || null;
+    if (parsed.sequence > 0) {
+        const origin = session.hlsOutputAdmission?.resumePlaylistClock.originFor('video.m3u8', text);
+        if (!Number.isFinite(origin) || origin < 0) return session.privateResumeSubtitleGraph || null;
+        for (const segment of parsed.segments) { segment.start += origin; segment.end += origin; }
+    }
     const renditions = exactSubtitleRenditionsForSession(session);
     let coverage = Infinity;
     for (const rendition of renditions) {
@@ -15585,8 +15594,8 @@ async function buildPrivateResumeSubtitleContinuation(session) {
     // finalized video window. Missing/late sidecars never become empty cues.
     // Retain the small index only; WebVTT bodies are generated on demand from
     // finalized local sidecars and remain subject to the active lease.
-    const graph = { segments: covered, renditions, playlists: new Map(renditions.map(track => [track.playlistName,
-        covered.map((segment, index) => ({ name: `continuation-${track.playlistName.slice(0, -5)}-${index}.vtt`,
+    const graph = { sequence: parsed.sequence || 0, segments: covered, renditions, playlists: new Map(renditions.map(track => [track.playlistName,
+        covered.map((segment, index) => ({ name: `continuation-${track.playlistName.slice(0, -5)}-${(parsed.sequence || 0) + index}.vtt`,
             duration: segment.duration }))])) };
     if (graph) {
         graph.ended = parsed.ended && covered.length === parsed.segments.length;
@@ -22494,6 +22503,7 @@ async function stopSession(session, options = {}) {
         anchorFiniteResumeRangeAtStop(session);
         await closeFiniteMkvSeekBroker(session);
         await stopChildProcess(child);
+        const resumePlaylistClock = session.hlsOutputAdmission?.resumePlaylistClock;
         await session.hlsOutputAdmission?.stop();
         session.hlsOutputAdmission = null;
         await session.privateResumeContinuationPromise?.catch(() => null);
@@ -22501,7 +22511,7 @@ async function stopSession(session, options = {}) {
         session.privateResumeLease = null;
         // Only explicit normal viewer exit supplies a resume position. No
         // download/prefetch is started; snapshot already-produced local files.
-        await capturePrivateResumeWindow(session).catch(() => false);
+        await capturePrivateResumeWindow(session, resumePlaylistClock).catch(() => false);
         session.privateResumeSamples = null;
         session.privateResumeInputWindows = null;
         session.privateResumeDeliveryTarget = null;

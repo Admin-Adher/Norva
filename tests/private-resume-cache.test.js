@@ -89,13 +89,28 @@ test('Gateway recognizes ffprobe container aliases, not just filename labels', (
     assert.equal(format({ codecProfile: { container: 'avi' } }), null);
 });
 
-test('an EVENT resume playlist never changes its headers when longer continuation segments arrive', () => {
+test('a resume playlist keeps a stable duration ceiling when continuation arrives', () => {
     const window = { segments: [{ name: 'resume-0.ts', duration: 3.84 }], ended: false };
     const initial = mergedResumePlaylist(window);
     const next = mergedResumePlaylist(window, playlist([6.24, 4]));
-    assert.ok(next.startsWith(initial), 'the continuation may append, never rewrite the cached EVENT prefix');
+    assert.ok(next.startsWith(initial), 'append until the continuation begins sliding');
+    assert.doesNotMatch(next, /PLAYLIST-TYPE:EVENT/);
     assert.match(next, /#EXT-X-TARGETDURATION:30/);
     assert.equal((next.match(/#EXT-X-DISCONTINUITY/g) || []).length, 1);
+});
+
+test('sliding continuation preserves segment sequence and discontinuity numbers after retiring the prefix', () => {
+    const window = { segments: [{ name: 'resume-0.ts', duration: 4 }, { name: 'resume-1.ts', duration: 4 }] };
+    const a = mergedResumePlaylist(window, playlist([4, 4, 4]));
+    const b = mergedResumePlaylist(window, playlist([4, 4, 4], true)
+        .replace('#EXTM3U', '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:1')
+        .replace(/segment-(\d)/g, (_, n) => `segment-${Number(n) + 1}`));
+    assert.match(a, /MEDIA-SEQUENCE:0/);
+    assert.match(b, /MEDIA-SEQUENCE:3/);
+    assert.match(b, /DISCONTINUITY-SEQUENCE:1/);
+    assert.doesNotMatch(b, /resume-0|resume-1|segment-0|#EXT-X-DISCONTINUITY\n|PLAYLIST-TYPE/);
+    assert.match(b, /segment-1.ts/);
+    assert.ok(b.endsWith('#EXT-X-ENDLIST\n'));
 });
 
 test('Gateway does not publish replaceable continuation artifacts before startup validation', async () => {

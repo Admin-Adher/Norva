@@ -7,6 +7,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const { Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
+const { ResumePlaylistClock } = require('./private-resume-playlist-clock');
 
 const SEGMENT = /^(segment|video|audio_\d+)-(\d{5,8})\.ts$/;
 const PLAYLIST = /^(?:playlist|video|audio_\d+)\.m3u8$/;
@@ -43,6 +44,7 @@ async function createHlsOutputAdmission({ root, targetSeconds = 4, aheadSeconds 
     const rootPath = path.resolve(root);
     const ahead = Math.max(4, Math.ceil(aheadSeconds / targetSeconds));
     const queue = [], sockets = new Set(), sizes = new Map(), writers = new Set();
+    const resumePlaylistClock = new ResumePlaylistClock();
     let stopped = false, failed = false, finishing = false, active = false, consumed = -1, produced = -1, bytes = 0, peakBytes = 0;
     let logRemainder = '', discardLogRemainder = false;
     let admissionWaits = 0, admittedSegments = 0, closePromise = null, finishPromise = null;
@@ -82,17 +84,19 @@ async function createHlsOutputAdmission({ root, targetSeconds = 4, aheadSeconds 
                 bytes -= sizes.get(name) || 0; sizes.delete(name);
             } else {
                 let received = 0;
+                const clockChunks = ['playlist.m3u8', 'video.m3u8'].includes(name) ? [] : null;
                 const limit = PLAYLIST.test(name) ? Math.min(maxBytes, 1024 * 1024) : maxBytes;
                 const bounded = new Transform({ transform(chunk, _encoding, callback) {
                     received += chunk.length;
                     // Includes the old destination until atomic rename removes
                     // it, so the reservation is never temporarily exceeded.
                     if (stopped || received > limit || bytes + received > maxBytes) callback(new Error('OUTPUT_LIMIT'));
-                    else callback(null, chunk);
+                    else { clockChunks?.push(Buffer.from(chunk)); callback(null, chunk); }
                 } });
                 await pipeline(completedRequestBody(req), bounded, fs.createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
                 if (stopped) return;
                 await io.rename(temporary, target);
+                if (clockChunks) resumePlaylistClock.observe(name, Buffer.concat(clockChunks).toString('utf8'));
                 bytes += received - (sizes.get(name) || 0); sizes.set(name, received);
                 peakBytes = Math.max(peakBytes, bytes);
                 if (number !== null) { produced = Math.max(produced, number); admittedSegments++; }
@@ -180,7 +184,7 @@ async function createHlsOutputAdmission({ root, targetSeconds = 4, aheadSeconds 
                 consumed = Math.max(consumed, Number(match[2])); drain();
             }
         },
-        stop, finish,
+        stop, finish, resumePlaylistClock,
         redact,
         redactLogChunk(chunk, flush = false) {
             let text = String(chunk);
