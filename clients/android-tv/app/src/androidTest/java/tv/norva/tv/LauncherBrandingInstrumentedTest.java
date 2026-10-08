@@ -98,9 +98,11 @@ public class LauncherBrandingInstrumentedTest {
         // actual accessibility node, then capture Norva in the installed grid.
         for (AccessibilityNodeInfo node : root.findAccessibilityNodeInfosByText("Apps")) {
             if ("Apps".contentEquals(node.getText() == null ? "" : node.getText())) {
-                AccessibilityNodeInfo target = node;
-                for (int i=0; i<4 && target != null && !target.isClickable(); i++) target=target.getParent();
-                if (target != null) target.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                // This launcher switches tabs on D-pad focus; the text node
+                // does not expose ACTION_CLICK and its parent is not a tab.
+                assertTrue("Apps tab accepts D-pad focus", node.performAction(AccessibilityNodeInfo.ACTION_FOCUS));
+                instrumentation.getUiAutomation().injectInputEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_CENTER), true);
+                instrumentation.getUiAutomation().injectInputEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_CENTER), true);
                 break;
             }
         }
