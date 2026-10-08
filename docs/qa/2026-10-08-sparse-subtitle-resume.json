@@ -1668,5 +1668,894 @@
       "scope": "synthetic sine only; no subjective listening claim"
     },
     "localBrowserAndServerStopped": true
+  },
+  "followupByteCoverage": {
+    "scope": "Isolated synthetic fixtures only; byte-prefix helper and audio experiments are not integrated or deployed.",
+    "unitTests": {
+      "passed": 27,
+      "failed": 0,
+      "log": ".codex-artifacts\\subtitle-coverage-20261008\\unit-tests.tap"
+    },
+    "bytePrefix": {
+      "sourceBytes": 10988142,
+      "prefixInputEnd": 4577235,
+      "prefixReceipt": {
+        "binding": "d44fb1695621b8a79b9f65592631a26735bb323abe60a0ba7facfcd67faf6c92",
+        "byteEnd": 4577010,
+        "clusterTimestamp": 96,
+        "packetCount": 4,
+        "trackCount": 2,
+        "fullFile": false,
+        "timeCoverage": false
+      },
+      "firstPacketCount": 4,
+      "finalPacketCount": 5,
+      "oraclePacketCount": 5,
+      "comparison": [
+        {
+          "track": 4,
+          "position": 6062,
+          "oraclePosition": 6062,
+          "startSeconds": 2.021,
+          "oracleStartSeconds": 2.021,
+          "durationSeconds": 12,
+          "oracleDurationSeconds": 12,
+          "hashEqual": true
+        },
+        {
+          "track": 4,
+          "position": 2751435,
+          "oraclePosition": 2751435,
+          "startSeconds": 60.021,
+          "oracleStartSeconds": 60.021,
+          "durationSeconds": 50,
+          "oracleDurationSeconds": 50,
+          "hashEqual": true
+        },
+        {
+          "track": 3,
+          "position": 2752830,
+          "oraclePosition": 2752830,
+          "startSeconds": 70.021,
+          "oracleStartSeconds": 70.021,
+          "durationSeconds": 5,
+          "oracleDurationSeconds": 5,
+          "hashEqual": true
+        },
+        {
+          "track": 3,
+          "position": 3201354,
+          "oraclePosition": 3201354,
+          "startSeconds": 150.021,
+          "oracleStartSeconds": 150.021,
+          "durationSeconds": 5,
+          "oracleDurationSeconds": 5,
+          "hashEqual": true
+        },
+        {
+          "track": 4,
+          "position": 8700559,
+          "oraclePosition": 8700559,
+          "startSeconds": 190.021,
+          "oracleStartSeconds": 190.021,
+          "durationSeconds": 5,
+          "oracleDurationSeconds": 5,
+          "hashEqual": true
+        }
+      ],
+      "originalSeekMissesFuture": true,
+      "physicalPrefixPlusExactContinuationConservesEveryOraclePacket": true,
+      "onePassEqualsResumed": true,
+      "rejectedGapReason": "noncontiguous-range",
+      "maxBufferedBytes": 216454,
+      "retainedSubtitlePayloadBytes": 38,
+      "providerRequests": 0,
+      "productionChanged": false,
+      "productionAdmissionProven": false,
+      "sourceAuthenticationByHelper": false,
+      "timeCoverageProven": false
+    },
+    "fixedAudioRuleMatrix": {
+      "results": [
+        {
+          "source": {
+            "name": "aac48-24",
+            "fps": "24",
+            "rate": 48000,
+            "codec": "aac"
+          },
+          "cut": 16,
+          "parentNextVideoPts": 1569810,
+          "candidateVideoPts": 1569810,
+          "videoDeltaTicks": 0,
+          "parentAudioEndPts": 1569825,
+          "parentNextAudioPts": 1569840,
+          "candidateAudioPts": 1569840,
+          "audioBoundaryDeltaTicks": 15,
+          "audioOracleDeltaTicks": 0,
+          "candidateFirstAudioPackets": [
+            {
+              "stream_index": 1,
+              "pts": 1569840,
+              "dts": 1569840,
+              "duration": 1920,
+              "side_data_list": [
+                {
+                  "side_data_type": "MPEGTS Stream ID",
+                  "id": 192
+                }
+              ]
+            },
+            {
+              "stream_index": 1,
+              "pts": 1571760,
+              "dts": 1571760,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1573680,
+              "dts": 1573680,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1575600,
+              "dts": 1575600,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1577520,
+              "dts": 1577520,
+              "duration": 1920
+            }
+          ],
+          "audioStreams": [
+            {
+              "index": 1,
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "time_base": "1/90000",
+              "disposition": {
+                "default": 0,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0
+              }
+            }
+          ],
+          "stderr": ""
+        },
+        {
+          "source": {
+            "name": "aac48-24",
+            "fps": "24",
+            "rate": 48000,
+            "codec": "aac"
+          },
+          "cut": 20,
+          "parentNextVideoPts": 1929810,
+          "candidateVideoPts": 1929810,
+          "videoDeltaTicks": 0,
+          "parentAudioEndPts": 1930800,
+          "parentNextAudioPts": 1930800,
+          "candidateAudioPts": 1929825,
+          "audioBoundaryDeltaTicks": -975,
+          "audioOracleDeltaTicks": -975,
+          "candidateFirstAudioPackets": [
+            {
+              "stream_index": 1,
+              "pts": 1929825,
+              "dts": 1929825,
+              "duration": 1920,
+              "side_data_list": [
+                {
+                  "side_data_type": "MPEGTS Stream ID",
+                  "id": 192
+                }
+              ]
+            },
+            {
+              "stream_index": 1,
+              "pts": 1931745,
+              "dts": 1931745,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1933665,
+              "dts": 1933665,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1935585,
+              "dts": 1935585,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1937505,
+              "dts": 1937505,
+              "duration": 1920
+            }
+          ],
+          "audioStreams": [
+            {
+              "index": 1,
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "time_base": "1/90000",
+              "disposition": {
+                "default": 0,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0
+              }
+            }
+          ],
+          "stderr": ""
+        },
+        {
+          "source": {
+            "name": "aac44-25",
+            "fps": "25",
+            "rate": 44100,
+            "codec": "aac"
+          },
+          "cut": 16,
+          "parentNextVideoPts": 1569990,
+          "candidateVideoPts": 1569990,
+          "videoDeltaTicks": 0,
+          "parentAudioEndPts": 1571769,
+          "parentNextAudioPts": 1571781,
+          "candidateAudioPts": 1569840,
+          "audioBoundaryDeltaTicks": -1929,
+          "audioOracleDeltaTicks": -1941,
+          "candidateFirstAudioPackets": [
+            {
+              "stream_index": 1,
+              "pts": 1569840,
+              "dts": 1569840,
+              "duration": 1920,
+              "side_data_list": [
+                {
+                  "side_data_type": "MPEGTS Stream ID",
+                  "id": 192
+                }
+              ]
+            },
+            {
+              "stream_index": 1,
+              "pts": 1571760,
+              "dts": 1571760,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1573680,
+              "dts": 1573680,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1575600,
+              "dts": 1575600,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1577520,
+              "dts": 1577520,
+              "duration": 1920
+            }
+          ],
+          "audioStreams": [
+            {
+              "index": 1,
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "time_base": "1/90000",
+              "disposition": {
+                "default": 0,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0
+              }
+            }
+          ],
+          "stderr": ""
+        },
+        {
+          "source": {
+            "name": "aac44-25",
+            "fps": "25",
+            "rate": 44100,
+            "codec": "aac"
+          },
+          "cut": 20,
+          "parentNextVideoPts": 1929990,
+          "candidateVideoPts": 1929990,
+          "videoDeltaTicks": 0,
+          "parentAudioEndPts": 1930824,
+          "parentNextAudioPts": 1930793,
+          "candidateAudioPts": 1929819,
+          "audioBoundaryDeltaTicks": -1005,
+          "audioOracleDeltaTicks": -974,
+          "candidateFirstAudioPackets": [
+            {
+              "stream_index": 1,
+              "pts": 1929819,
+              "dts": 1929819,
+              "duration": 1920,
+              "side_data_list": [
+                {
+                  "side_data_type": "MPEGTS Stream ID",
+                  "id": 192
+                }
+              ]
+            },
+            {
+              "stream_index": 1,
+              "pts": 1931739,
+              "dts": 1931739,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1933659,
+              "dts": 1933659,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1935579,
+              "dts": 1935579,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1937499,
+              "dts": 1937499,
+              "duration": 1920
+            }
+          ],
+          "audioStreams": [
+            {
+              "index": 1,
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "time_base": "1/90000",
+              "disposition": {
+                "default": 0,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0
+              }
+            }
+          ],
+          "stderr": ""
+        },
+        {
+          "source": {
+            "name": "mp3-2997",
+            "fps": "30000/1001",
+            "rate": 48000,
+            "codec": "libmp3lame"
+          },
+          "cut": 16.016,
+          "parentNextVideoPts": 1571430,
+          "candidateVideoPts": 1571430,
+          "videoDeltaTicks": 0,
+          "parentAudioEndPts": 1571760,
+          "parentNextAudioPts": 1571760,
+          "candidateAudioPts": 1571280,
+          "audioBoundaryDeltaTicks": -480,
+          "audioOracleDeltaTicks": -480,
+          "candidateFirstAudioPackets": [
+            {
+              "stream_index": 1,
+              "pts": 1571280,
+              "dts": 1571280,
+              "duration": 1920,
+              "side_data_list": [
+                {
+                  "side_data_type": "MPEGTS Stream ID",
+                  "id": 192
+                }
+              ]
+            },
+            {
+              "stream_index": 1,
+              "pts": 1573200,
+              "dts": 1573200,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1575120,
+              "dts": 1575120,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1577040,
+              "dts": 1577040,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1578960,
+              "dts": 1578960,
+              "duration": 1920
+            }
+          ],
+          "audioStreams": [
+            {
+              "index": 1,
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "time_base": "1/90000",
+              "disposition": {
+                "default": 0,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0
+              }
+            }
+          ],
+          "stderr": ""
+        },
+        {
+          "source": {
+            "name": "mp3-2997",
+            "fps": "30000/1001",
+            "rate": 48000,
+            "codec": "libmp3lame"
+          },
+          "cut": 20.019999999999996,
+          "parentNextVideoPts": 1931790,
+          "candidateVideoPts": 1931790,
+          "videoDeltaTicks": 0,
+          "parentAudioEndPts": 1932720,
+          "parentNextAudioPts": 1932720,
+          "candidateAudioPts": 1931640,
+          "audioBoundaryDeltaTicks": -1080,
+          "audioOracleDeltaTicks": -1080,
+          "candidateFirstAudioPackets": [
+            {
+              "stream_index": 1,
+              "pts": 1931640,
+              "dts": 1931640,
+              "duration": 1920,
+              "side_data_list": [
+                {
+                  "side_data_type": "MPEGTS Stream ID",
+                  "id": 192
+                }
+              ]
+            },
+            {
+              "stream_index": 1,
+              "pts": 1933560,
+              "dts": 1933560,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1935480,
+              "dts": 1935480,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1937400,
+              "dts": 1937400,
+              "duration": 1920
+            },
+            {
+              "stream_index": 1,
+              "pts": 1939320,
+              "dts": 1939320,
+              "duration": 1920
+            }
+          ],
+          "audioStreams": [
+            {
+              "index": 1,
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "time_base": "1/90000",
+              "disposition": {
+                "default": 0,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0
+              }
+            }
+          ],
+          "stderr": ""
+        }
+      ],
+      "clock": 90000,
+      "fixedRuleGeneralized": false,
+      "providerRequests": 0,
+      "productionChanged": false
+    },
+    "audioOverlap": {
+      "results": [
+        {
+          "source": {
+            "name": "aac48",
+            "rate": 48000,
+            "codec": "aac"
+          },
+          "mode": "copy",
+          "cut": 16,
+          "prerollSeconds": 8,
+          "parentPackets": 1501,
+          "childPackets": 1312,
+          "parentStderr": "[mpegts @ 0x6465e636cc80] frame size not set\n",
+          "stderr": "[mpegts @ 0x5a6717596e80] frame size not set\n",
+          "wantedPackets": 48,
+          "matches": 1,
+          "hits": [
+            {
+              "index": 538,
+              "boundaryIndex": 562,
+              "offsetMin": 0,
+              "offsetMax": 0,
+              "boundaryDeltaTicks": 0
+            }
+          ],
+          "exactSameClock": true,
+          "parentBoundaryPts": 1567905
+        },
+        {
+          "source": {
+            "name": "aac48",
+            "rate": 48000,
+            "codec": "aac"
+          },
+          "mode": "copy",
+          "cut": 20,
+          "prerollSeconds": 8,
+          "parentPackets": 1501,
+          "childPackets": 1125,
+          "parentStderr": "[mpegts @ 0x6465e636cc80] frame size not set\n",
+          "stderr": "[mpegts @ 0x55ca0f069e80] frame size not set\n",
+          "wantedPackets": 48,
+          "matches": 1,
+          "hits": [
+            {
+              "index": 538,
+              "boundaryIndex": 562,
+              "offsetMin": -15,
+              "offsetMax": -15,
+              "boundaryDeltaTicks": -15
+            }
+          ],
+          "exactSameClock": false,
+          "parentBoundaryPts": 1926945
+        },
+        {
+          "source": {
+            "name": "aac48",
+            "rate": 48000,
+            "codec": "aac"
+          },
+          "mode": "transcode",
+          "cut": 16,
+          "prerollSeconds": 8,
+          "parentPackets": 1502,
+          "childPackets": 1127,
+          "parentStderr": "[mpegts @ 0x5a4a182cb1c0] frame size not set\n",
+          "stderr": "[mpegts @ 0x5ded59419180] frame size not set\n",
+          "wantedPackets": 48,
+          "matches": 0,
+          "hits": [],
+          "exactSameClock": false,
+          "parentBoundaryPts": 1567905
+        },
+        {
+          "source": {
+            "name": "aac48",
+            "rate": 48000,
+            "codec": "aac"
+          },
+          "mode": "transcode",
+          "cut": 20,
+          "prerollSeconds": 8,
+          "parentPackets": 1502,
+          "childPackets": 940,
+          "parentStderr": "[mpegts @ 0x5a4a182cb1c0] frame size not set\n",
+          "stderr": "[mpegts @ 0x571521daa180] frame size not set\n",
+          "wantedPackets": 48,
+          "matches": 0,
+          "hits": [],
+          "exactSameClock": false,
+          "parentBoundaryPts": 1926945
+        },
+        {
+          "source": {
+            "name": "aac44",
+            "rate": 44100,
+            "codec": "aac"
+          },
+          "mode": "copy",
+          "cut": 16,
+          "prerollSeconds": 8,
+          "parentPackets": 1380,
+          "childPackets": 1206,
+          "parentStderr": "[mpegts @ 0x5f148e4d0800] frame size not set\n",
+          "stderr": "[mpegts @ 0x590a41cbce40] frame size not set\n",
+          "wantedPackets": 48,
+          "matches": 1,
+          "hits": [
+            {
+              "index": 492,
+              "boundaryIndex": 516,
+              "offsetMin": -2,
+              "offsetMax": -1,
+              "boundaryDeltaTicks": -1
+            }
+          ],
+          "exactSameClock": false,
+          "parentBoundaryPts": 1567940
+        },
+        {
+          "source": {
+            "name": "aac44",
+            "rate": 44100,
+            "codec": "aac"
+          },
+          "mode": "copy",
+          "cut": 20,
+          "prerollSeconds": 8,
+          "parentPackets": 1380,
+          "childPackets": 1034,
+          "parentStderr": "[mpegts @ 0x5f148e4d0800] frame size not set\n",
+          "stderr": "[mpegts @ 0x5b25ad3dde40] frame size not set\n",
+          "wantedPackets": 48,
+          "matches": 1,
+          "hits": [
+            {
+              "index": 492,
+              "boundaryIndex": 516,
+              "offsetMin": 0,
+              "offsetMax": 1,
+              "boundaryDeltaTicks": 0
+            }
+          ],
+          "exactSameClock": false,
+          "parentBoundaryPts": 1927386
+        },
+        {
+          "source": {
+            "name": "aac44",
+            "rate": 44100,
+            "codec": "aac"
+          },
+          "mode": "transcode",
+          "cut": 16,
+          "prerollSeconds": 8,
+          "parentPackets": 1504,
+          "childPackets": 1129,
+          "parentStderr": "[mpegts @ 0x60023e8b6d40] frame size not set\n",
+          "stderr": "[mpegts @ 0x63b2c9008ec0] frame size not set\n",
+          "wantedPackets": 48,
+          "matches": 0,
+          "hits": [],
+          "exactSameClock": false,
+          "parentBoundaryPts": 1566019
+        },
+        {
+          "source": {
+            "name": "aac44",
+            "rate": 44100,
+            "codec": "aac"
+          },
+          "mode": "transcode",
+          "cut": 20,
+          "prerollSeconds": 8,
+          "parentPackets": 1504,
+          "childPackets": 941,
+          "parentStderr": "[mpegts @ 0x60023e8b6d40] frame size not set\n",
+          "stderr": "[mpegts @ 0x5def2ae92ec0] frame size not set\n",
+          "wantedPackets": 48,
+          "matches": 0,
+          "hits": [],
+          "exactSameClock": false,
+          "parentBoundaryPts": 1926984
+        },
+        {
+          "source": {
+            "name": "mp3",
+            "rate": 48000,
+            "codec": "libmp3lame"
+          },
+          "mode": "transcode",
+          "cut": 16,
+          "prerollSeconds": 8,
+          "parentPackets": 1503,
+          "childPackets": 1128,
+          "parentStderr": "[mpegts @ 0x61531d976f80] frame size not set\n",
+          "stderr": "[mpegts @ 0x56adad666e80] frame size not set\n",
+          "wantedPackets": 48,
+          "matches": 0,
+          "hits": [],
+          "exactSameClock": false,
+          "parentBoundaryPts": 1566000
+        },
+        {
+          "source": {
+            "name": "mp3",
+            "rate": 48000,
+            "codec": "libmp3lame"
+          },
+          "mode": "transcode",
+          "cut": 20,
+          "prerollSeconds": 8,
+          "parentPackets": 1503,
+          "childPackets": 940,
+          "parentStderr": "[mpegts @ 0x61531d976f80] frame size not set\n",
+          "stderr": "[mpegts @ 0x645a0a3fae80] frame size not set\n",
+          "wantedPackets": 48,
+          "matches": 0,
+          "hits": [],
+          "exactSameClock": false,
+          "parentBoundaryPts": 1926960
+        }
+      ],
+      "clock": 90000,
+      "signal": "deterministic nonperiodic pink noise",
+      "comparison": "48 packet hashes, durations and timestamps across boundary; parent and child same synthetic source",
+      "providerRequests": 0,
+      "productionChanged": false,
+      "productionAdmissionProven": false,
+      "audibleAcceptance": false
+    },
+    "health": {
+      "atUtc": "2026-10-08T13:21:43.009446+00:00",
+      "productionChanged": false,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T08:44:27.201045016Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T08:44:29.77608402Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        }
+      ],
+      "dispatcherRunning": true,
+      "proofContainerAbsent": true
+    },
+    "evidenceDirectory": ".codex-artifacts/subtitle-coverage-20261008",
+    "scriptSha256": {
+      "audio-clock-matrix.cjs": "f122c5b4c03542bf352dcc88180e1c2f17c33ba9a401132667e808a1dd37cd5c",
+      "audio-overlap-proof.cjs": "5ba80c3b75f6062a4aa34c6b21d5716bff287132b9c039177c05f93031f2eec7",
+      "byte-prefix-proof.cjs": "a14725ca3ac382c0d8a616c8b600b0a148f759140e2400c7005b840a1a7f883d",
+      "byte-prefix-proof.test.cjs": "e865fc3449448cf006a831840e7431215a8814c3e028b12805eb31a267b3351b",
+      "real-prefix-proof.cjs": "9c073a783e5ee42642f82c1d12368bef4ed52a49a35b16bf0e899082c50761b2"
+    },
+    "productionChanged": false,
+    "providerRequests": 0,
+    "browserReplayed": false,
+    "normalPerformanceGainDemonstrated": false,
+    "priorDocumentationPr709": {
+      "merged": true,
+      "allFiveChecksSucceeded": true
+    },
+    "remaining": [
+      "Exact live demuxer continuation from proven byte boundary, including video preroll.",
+      "Existing source authentication, owner/profile/config/TTL binding and aggregate cache budget integration.",
+      "Subtitle packet-to-cue conversion and formatting; unsupported containers/codecs fall back.",
+      "General audio sample clock and encoder-state handoff; packet equality alone is not audible acceptance.",
+      "Real VOD, browser and Android validation before production admission."
+    ]
   }
 }
