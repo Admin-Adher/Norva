@@ -1,0 +1,157 @@
+{
+  "date": "2026-10-08",
+  "scope": "owner-only recent-resume pilot",
+  "pullRequest": 706,
+  "codeRevision": "170d99fc99524622c5a706a1afc858bc322643d3",
+  "outcome": "subtitle coverage guard deployed; native subtitle clock candidate rejected",
+  "normalPerformanceGainDemonstrated": false,
+  "newProviderRequests": 0,
+  "newBrowserPlaybackTests": 0,
+  "retainedFix": [
+    "Bound capture and continuation to finalized subtitle duration even after ENDLIST",
+    "Normalize trailing whitespace in WebVTT headers"
+  ],
+  "targetedTests": {
+    "passed": 53,
+    "failed": 0,
+    "skipped": 0
+  },
+  "nativeClockCandidate": {
+    "prereadSeconds": 117,
+    "exactInternalCauseEstablished": false,
+    "deployed": false,
+    "knownForcedCue": {
+      "endSeconds": 155.021,
+      "startSeconds": 150.021
+    },
+    "seekSeconds": 132,
+    "cueMissingAfterSeek": true,
+    "partialFunctionalReceiptIsAcceptance": false
+  },
+  "canary": {
+    "at": "2026-10-08T10:42:47.472923+02:00",
+    "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+    "revision": "170d99fc99524622c5a706a1afc858bc322643d3",
+    "healthy": true,
+    "user": "1000:1000",
+    "network": "none",
+    "productionVolumes": false,
+    "sourceHashesMatch": true,
+    "health": {
+      "ok": true,
+      "videoEncoder": {
+        "protocol": 1,
+        "backend": "vaapi",
+        "hardware": true,
+        "ready": true,
+        "preflight": "vaapi-ready",
+        "deviceConfigured": true,
+        "decode": "vaapi-exact-profile-with-software-fallback",
+        "outputCodec": "h264"
+      },
+      "activeSessions": 0,
+      "rawPumpCount": 0,
+      "recentOwnerScope": "owner-allowlist"
+    },
+    "providerRequests": 0,
+    "gpuEncodePassed": true,
+    "allSourceFiles0644": true,
+    "packagePermissionsPreserved": true,
+    "functional": {
+      "functionalPassed": true,
+      "syntheticFilesRemoved": true,
+      "tests": 1,
+      "fixture": "600 second sliding output, measured clock, cached video/audio/subtitles, 280 second continuation, decode across splice"
+    },
+    "functionalCanarySha256": "b3878d292754ec1e6ce1fb42c1dca9938b37c801ea20a21f5817cd707de23e3c"
+  },
+  "deployment": {
+    "revision": "170d99fc99524622c5a706a1afc858bc322643d3",
+    "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+    "startedAt": "2026-10-08T10:43:29.259+02:00",
+    "pausedAt": "2026-10-08T10:43:29.323867+02:00",
+    "gatewaysApplied": [
+      {
+        "name": "norva-media-gateway",
+        "at": "2026-10-08T10:44:28.555638+02:00"
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "at": "2026-10-08T10:44:31.124003+02:00"
+      }
+    ],
+    "edgesUnchanged": true,
+    "leasesForced": false,
+    "dispatcherRestarted": false,
+    "completedAt": "2026-10-08T10:44:31.19651+02:00",
+    "restoredAt": "2026-10-08T10:44:31.495559+02:00",
+    "admissionsRestored": true,
+    "workerStateRestored": true,
+    "dispatcherPreserved": true
+  },
+  "verification": {
+    "at": "2026-10-08T10:44:49.517867+02:00",
+    "revision": "170d99fc99524622c5a706a1afc858bc322643d3",
+    "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+    "sourceTreeSha256": "f08af9afe7057991aab7349b6edfc4e784358e8665a550f40b153891218f230c",
+    "replicas": [
+      {
+        "name": "norva-media-gateway",
+        "startedAt": "2026-10-08T08:44:27.201045016Z",
+        "healthy": true,
+        "all89SourceHashesMatch": true
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "startedAt": "2026-10-08T08:44:29.77608402Z",
+        "healthy": true,
+        "all89SourceHashesMatch": true
+      }
+    ],
+    "admissions": {
+      "cron": {
+        "id": 159,
+        "active": true
+      },
+      "paused": false
+    },
+    "stopAbsent": true,
+    "dispatcherRunning": true,
+    "workerRunning": true
+  },
+  "ciAtDocumentation": [
+    {
+      "name": "Build Windows Portable",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build Android Phone APK",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Build Android TV APK",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Vercel Preview Comments",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Verify cloud contracts",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "limitations": [
+    "Normal sparse forced subtitles remain unresolved",
+    "No new real-film latency measurements",
+    "Coverage guard may reject more incomplete caches",
+    "No global rollout"
+  ],
+  "evidenceDirectory": ".codex-artifacts/sparse-subtitle-resume-20261008/",
+  "automaticChatScheduleCreated": false
+}

@@ -51,7 +51,9 @@ function parseWebVtt(bytes) {
     if (!Buffer.isBuffer(bytes) || bytes.length > 4 * 1024 * 1024) return null;
     const blocks = bytes.toString('utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').split(/\n\s*\n/);
     if (!/^WEBVTT(?:\s|$)/.test(blocks[0])) return null;
-    const header = blocks.shift();
+    // FFmpeg's native empty fragment is just "WEBVTT\n"; a fragment with
+    // cues separates that same header with a blank line. They share a clock.
+    const header = blocks.shift().trimEnd();
     // The FFmpeg subtitle lane currently emits the default zero-to-zero PES
     // map. Never reinterpret a foreign nonzero clock without a measured map.
     if (/X-TIMESTAMP-MAP/.test(header) && !/X-TIMESTAMP-MAP=LOCAL:00:00:00\.000,MPEGTS:0(?:\n|$)/.test(header)) return null;
@@ -87,7 +89,9 @@ async function captureSubtitleWindow({ renditions, videoSegments, readAsset, max
         const parsed = raw && parseSubtitlePlaylist(raw.toString('utf8'));
         if (!parsed || parsed.bootstrap) return null; // empty bootstrap is not proof of coverage
         const from = videoSegments[0].start, to = videoSegments.at(-1).end;
-        if (!parsed.ended && parsed.segments.at(-1).end < to) return null;
+        // Stopping an encoder can write ENDLIST before the source's real EOF.
+        // It never proves subtitle coverage beyond the finalized intervals.
+        if (parsed.segments.at(-1).end < to) return null;
         const cues = new Map(), styles = new Set(); let header;
         for (const segment of parsed.segments.filter(s => s.end > from && s.start < to)) {
             const data = await readAsset(segment.name, 4 * 1024 * 1024);
