@@ -227,6 +227,28 @@ function makeTracker() {
     return { active: 0, maxActive: 0, calls: [], dispatchers: [] };
 }
 
+for (const scenario of ['success', 'upstream-refusal', 'drain-refusal']) {
+    test(`retained decoder preflight owns and drains its transport: ${scenario}`, async () => {
+        const tracker=makeTracker(), fixture=mkvFixture(96);let destroyed=0,fetches=0;
+        const privateDispatcher={async destroy(){destroyed++;if(scenario==='drain-refusal')throw Error('drain refused');}};
+        const h=pumpHarness({
+            providerHttpProxyUrls:['http://synthetic.invalid'],
+            providerHttpProxyAgents:[{}],
+            providerRouteForKey:()=>({slot:1,nodeTransport:'http'}),
+            createProviderProxyAgent:()=>privateDispatcher,
+            fetch:async(_url,options)=>{
+                fetches++;assert.equal(options.dispatcher,privateDispatcher);
+                return trackedResponse(tracker,scenario==='upstream-refusal'?{status:403,chunks:[]}:{
+                    chunks:[fixture.subarray(0,1)],headers:{'Content-Range':`bytes 0-0/${fixture.length}`,'Content-Length':'1',ETag:'"synthetic"'}});
+            },
+        });
+        const session=mkvSession(fixture.length);session.seekOffset=12;session.retainedRequestBinding='synthetic-binding';
+        if(scenario==='success')await h.ensureBoundedMkvInputPump(session);
+        else await assert.rejects(h.ensureBoundedMkvInputPump(session));
+        assert.equal(destroyed,1);assert.equal(fetches,1);assert.equal(tracker.active,0);
+    });
+}
+
 function trackedResponse(tracker, options = {}) {
     const status = options.status ?? 206;
     const chunks = (options.chunks || []).map((chunk) => Buffer.from(chunk));

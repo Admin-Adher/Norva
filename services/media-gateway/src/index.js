@@ -15129,6 +15129,10 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
     let dispatcher = providerProxyAgentForRoute(providerRoute);
     let transportFallbackAttempted = false;
     const drainExactRange = options.drainExactRange === true;
+    // Retaining the decoder must not leave the earlier identity/header GET's
+    // pooled socket alive after the finite broker has attested its own drain.
+    // Use a separate disposable transport for this pilot's bounded preflight.
+    const disposablePreflight = drainExactRange && Boolean(session.retainedRequestBinding);
     // A resumed session whose signed/request profile already describes every
     // stream does not gain any authority from downloading the same 4 MiB
     // metadata prefix again. Keep only the small identity prefix needed to
@@ -15154,12 +15158,19 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
     while (true) {
         let opened = null;
         let retained = false;
+        let preflightDispatcher = null;
         try {
+            if (disposablePreflight) {
+                preflightDispatcher = pinnedProxyAgentFactoryForRoute(providerRoute)?.();
+                if (!preflightDispatcher || typeof preflightDispatcher.destroy !== 'function') {
+                    throw vodInputPumpError('RETAINED_INPUT_UNSUPPORTED', 'Private preflight transport unavailable.', { status: 502 });
+                }
+            }
             opened = await openBoundedVodInputAttempt(
                 session,
                 0,
                 parentSignal,
-                dispatcher,
+                preflightDispatcher || dispatcher,
                 drainExactRange ? { requestEnd: identityRangeBytes - 1 } : { allowFullBodyAtZero: true },
             );
             const existingFileSizeBytes = fileSizeBytesForSession(session);
@@ -15341,6 +15352,7 @@ async function preopenBoundedMkvInputPump(session, parentSignal = null, options 
             if (!await waitForVodInputRetry(delayMs, parentSignal)) throw abortedVodInputPumpError();
         } finally {
             if (!retained && opened) await closeVodInputAttempt(opened.attempt).catch(() => {});
+            if (preflightDispatcher) await preflightDispatcher.destroy();
         }
     }
 }
@@ -15622,8 +15634,13 @@ async function tryResumeRetainedSession({ lookup, binding, playbackSessionId, ex
                 if (signal.aborted || session.expiresAt.getTime() <= Date.now()) return false;
                 const oldId = session.id, newId = crypto.randomUUID(), token = randomToken();
                 if (sessions.get(oldId) !== session || sessions.has(newId)) return false;
+                if (session.videoEncoderAdmissionHeld && !activeVideoEncoderAdmissions.has(oldId)) return false;
                 revokeSessionPlaybackAccess(session);
                 sessions.delete(oldId);
+                if (session.videoEncoderAdmissionHeld) {
+                    activeVideoEncoderAdmissions.delete(oldId);
+                    activeVideoEncoderAdmissions.add(newId);
+                }
                 session.id = newId; session.accessToken = token;
                 session.playbackSessionId = String(playbackSessionId || '').slice(0, 128);
                 session.expiresAt = new Date(Math.min(expiry, session.expiresAt.getTime()));

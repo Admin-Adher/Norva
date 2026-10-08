@@ -8761,5 +8761,536 @@
         "sha256": "ce832220846c2e55a6e79b936fa02ff359e41ba97135145d56602b1d55d01751"
       }
     ]
+  },
+  "retainedSessionFullGateway20261008": {
+    "atUtc": "2026-10-08T18:40:17.975644+00:00",
+    "productionChanged": false,
+    "featureEnabledInProduction": false,
+    "newNormalMeasurement": false,
+    "fixes": [
+      "Transfer the held video encoder reservation to the adopted session ID",
+      "Destroy the private drained identity preflight dispatcher before retaining the decoder"
+    ],
+    "tests": {
+      "tests": 356,
+      "pass": 350,
+      "fail": 0,
+      "skipped": 6
+    },
+    "newRegressionTests": 5,
+    "fullGatewayHttp": {
+      "atUtc": "2026-10-08T18:23:42.089Z",
+      "productionChanged": false,
+      "externalProviderRequests": 0,
+      "fullGatewayProcess": true,
+      "sameDecoder": true,
+      "oldAccessRevoked": true,
+      "parkedProviderRequests": 0,
+      "parkedSockets": 0,
+      "maxActive": 1,
+      "maxSockets": 1,
+      "requests": 7,
+      "requestLog": [
+        {
+          "phase": "initial",
+          "start": 0,
+          "end": 3999999
+        },
+        {
+          "phase": "initial",
+          "start": 12739401,
+          "end": 12740768
+        },
+        {
+          "phase": "initial",
+          "start": 4000000,
+          "end": 8388607
+        },
+        {
+          "phase": "resuming",
+          "start": 0,
+          "end": 65535
+        },
+        {
+          "phase": "resuming",
+          "start": 4000000,
+          "end": 4065535
+        },
+        {
+          "phase": "resuming",
+          "start": 6161536,
+          "end": 6227071
+        },
+        {
+          "phase": "resuming",
+          "start": 8323072,
+          "end": 8388607
+        }
+      ],
+      "transferMs": 54,
+      "firstStartup": {
+        "admissionWaitMs": 1,
+        "ownerProviderLockWaitMs": 0,
+        "adaptiveRouteLookupMs": 0,
+        "adaptiveRouteControlStatus": "fallback",
+        "adaptiveRouteSelectionReason": "adaptive-disabled",
+        "cleanupMs": 0,
+        "slotReleaseWaitMs": 0,
+        "stoppedConflictingSessions": 0,
+        "globalBackgroundExtractionPreemptions": 0,
+        "globalBackgroundWhisperPreemptions": 0,
+        "globalBackgroundCpuPreemptions": 0,
+        "codecProfileMs": 0,
+        "codecProfileProbeRan": false,
+        "codecProfileProbeReleaseWaitMs": 0,
+        "boundedMkvInputPump": false,
+        "fileSizeBytes": 12740769,
+        "fileSizeProbeRan": false,
+        "fileSizeProbeMs": 0,
+        "fileSizeProbeReleaseWaitMs": 0,
+        "ffmpegReadyMs": 529,
+        "playlistSegmentCount": 6,
+        "playlistBufferSeconds": 24,
+        "firstSegmentBytes": 253988,
+        "playlistSegmentBytes": 1512084,
+        "startOffsetProbeMs": 0,
+        "totalMs": 717,
+        "ffmpegSpawnCount": 1,
+        "analyzerSpawnCount": 0,
+        "providerValidatorEvidence": "strong-etag",
+        "providerFullBodyAtZero": false,
+        "providerFullBodyBoundary": null,
+        "providerGetPreopened": false,
+        "providerSeekIdentityPreflight": true,
+        "providerSeekIdentityPreflightBytes": 4000000,
+        "providerSeekHeaderPrefetch": true,
+        "providerSeekPrefixIdentityBytes": 512,
+        "providerNodeTransport": "http",
+        "providerProxySlot": 1,
+        "fileSizeDiscoveredFromPlaybackGet": false,
+        "fileSizePendingFullBodyEof": false,
+        "providerGetPreopenMs": 74,
+        "inbandCodecProfileMs": 103,
+        "inbandCodecProfileApplied": true,
+        "inbandCodecProfileComplete": true,
+        "mkvH264FastStartProofProduced": false,
+        "finiteMkvSeekBroker": true,
+        "finiteTsSeekBroker": false,
+        "finiteMkvSeekProviderFetches": 0,
+        "finiteMkvCurrentPrefixBytes": 4000000,
+        "finiteMkvSeekWindowBytes": 8388608,
+        "finiteTsSeekLookbehindBytes": 0,
+        "finiteTsSeekContinuationGraceMs": 0,
+        "finiteTsAbandonedDrainMs": 0,
+        "finiteMp4AbandonedDrainMs": 0,
+        "finiteMkvSeekWarmupCueGraceMs": 50,
+        "finiteMkvSeekWarmupWindowBytes": 262144,
+        "finiteMkvResumePrefixWeakValidationBytes": 1048576,
+        "finiteMkvSeekSequentialWindowBytes": 8388608,
+        "finiteMkvSeekMultiAudioWindow": false,
+        "finiteMkvSeekCacheLimitBytes": 67108864,
+        "finiteTsIndexUsed": false,
+        "finiteTsIndexPrerollSeconds": null,
+        "finiteMkvResumeMode": "continuous-window-indexed-seek",
+        "multiAudioHls": {
+          "protocol": 1,
+          "enabled": false,
+          "reason": "audio_track_count_below_minimum",
+          "maxAudioRenditions": 12,
+          "sourceTrackCount": 1,
+          "preparedTrackCount": 0,
+          "masterPlaylist": "playlist.m3u8",
+          "videoPlaylist": "playlist.m3u8",
+          "defaultHlsIndex": null,
+          "defaultStreamIndex": null
+        },
+        "exactSubtitleHls": {
+          "protocol": 1,
+          "enabled": true,
+          "cacheEligible": true,
+          "reason": "enabled",
+          "maxRenditions": 8,
+          "maxCacheableRenditions": 8,
+          "sourceTrackCount": 2,
+          "preparedTrackCount": 2
+        },
+        "beforeFfmpegMs": 188,
+        "retainedSharedCacheHlsOutput": false,
+        "hlsDiskReservationMs": 20,
+        "finiteTsFastInput": false,
+        "finiteTsDurationScanSkipped": false,
+        "finiteTsResumeAligned": false,
+        "finiteMp4ResumeAligned": false,
+        "exactSubtitleBootstrap": {
+          "protocol": 1,
+          "preparedTrackCount": 2,
+          "firstMediaSequence": 1
+        },
+        "ffmpegSpawnDelayMs": 24,
+        "videoEncoder": "software",
+        "videoDecode": "software",
+        "vaapiHardwareDecodeFallbacks": 0,
+        "finiteMkvSeekProviderIdentityBound": true,
+        "firstSegmentReadyMs": 222.30859375,
+        "playlistProductionSpanMs": 290.98876953125,
+        "playlistPostFirstBufferSeconds": 20,
+        "sustainedMediaProductionRateX": 20,
+        "mediaProductionRateX": 20,
+        "inputProbeMode": "known-fast",
+        "fastInputProbeFallbacks": 0
+      },
+      "retainedStartup": {
+        "recentDeliveryTargetUsed": false,
+        "retainedSessionValidationMs": 22,
+        "retainedSessionHit": true,
+        "ffmpegSpawnCount": 0,
+        "analyzerSpawnCount": 0,
+        "fileSizeBytes": 12740769,
+        "retainedSessionTransferMs": 23,
+        "totalMs": 23
+      },
+      "allResourcesReleased": true,
+      "sqlClaimProof": true,
+      "sqlScope": "actual claim SQL, synthetic schema and source-visibility assertion; no production or full Edge authentication",
+      "edgeExpiryExecuted": true,
+      "coordinatorExecuted": true,
+      "edgeTrace": [
+        {
+          "method": "POST",
+          "path": "/sessions/preempt-background-provider-affinities"
+        },
+        {
+          "method": "DELETE",
+          "path": "/raw-pumps"
+        },
+        {
+          "method": "DELETE",
+          "path": "/sessions/7750d8a8-238e-4b35-a2bf-b845d51774d5"
+        },
+        {
+          "method": "POST",
+          "path": "/sessions/preempt-background-provider-affinities"
+        },
+        {
+          "method": "DELETE",
+          "path": "/raw-pumps"
+        },
+        {
+          "method": "DELETE",
+          "path": "/sessions/73c14ca4-b350-44ad-9d11-fed5c726ff62"
+        }
+      ],
+      "browserProof": false
+    },
+    "browserSecondRun": {
+      "oldAccessRevoked": true,
+      "sameDecoder": true,
+      "providerSocketsDuringPark": 0,
+      "providerRequestsDuringPark": 0,
+      "sqlClaimProof": true,
+      "edgeExpiryExecuted": true,
+      "coordinatorExecuted": true,
+      "transferMs": 26,
+      "atUtc": "2026-10-08T18:38:53.239Z",
+      "productionChanged": false,
+      "externalProviderRequests": 0,
+      "maxActive": 1,
+      "maxSockets": 1,
+      "requests": 8,
+      "requestLog": [
+        {
+          "phase": "initial",
+          "start": 0,
+          "end": 3999999
+        },
+        {
+          "phase": "initial",
+          "start": 12739401,
+          "end": 12740768
+        },
+        {
+          "phase": "initial",
+          "start": 4000000,
+          "end": 8388607
+        },
+        {
+          "phase": "initial",
+          "start": 8388608,
+          "end": 12740768
+        },
+        {
+          "phase": "resuming",
+          "start": 0,
+          "end": 65535
+        },
+        {
+          "phase": "resuming",
+          "start": 8388608,
+          "end": 8454143
+        },
+        {
+          "phase": "resuming",
+          "start": 10531920,
+          "end": 10597455
+        },
+        {
+          "phase": "resuming",
+          "start": 12675233,
+          "end": 12740768
+        }
+      ],
+      "browser": {
+        "initial": {
+          "firstFrameMs": 812.3000000953671,
+          "lastMediaTime": 37.294333,
+          "frames": 886
+        },
+        "resumed": {
+          "firstFrameMs": 934.4000000000015,
+          "lastMediaTime": 210.002333,
+          "frames": 4146
+        },
+        "errors": [
+          {
+            "phase": "initial",
+            "type": "networkError",
+            "details": "aborted",
+            "fatal": false
+          },
+          {
+            "phase": "initial",
+            "type": "mediaError",
+            "details": "bufferSeekOverHole",
+            "fatal": false
+          }
+        ],
+        "waits": [
+          {
+            "phase": "initial",
+            "at": 0
+          },
+          {
+            "phase": "resumed",
+            "at": 37.312708
+          }
+        ],
+        "frameGaps": [
+          {
+            "phase": "initial",
+            "gap": 0.5455999999999985,
+            "at": 12.336333
+          },
+          {
+            "phase": "initial",
+            "gap": 0.6545,
+            "at": 12.377333
+          }
+        ],
+        "subtitleSelection": 0,
+        "subtitleFragments": [
+          {
+            "phase": "initial",
+            "success": true,
+            "sn": 1
+          },
+          {
+            "phase": "resumed",
+            "success": true,
+            "sn": 1
+          },
+          {
+            "phase": "resumed",
+            "success": true,
+            "sn": 2
+          }
+        ],
+        "resumePosition": 67.312708,
+        "retainedSessionHit": true,
+        "localSeekTarget": 37.312708,
+        "subtitleCues": [
+          {
+            "language": "und",
+            "mode": "showing",
+            "cues": [
+              {
+                "start": 38.623000000000005,
+                "end": 43.623000000000005,
+                "text": "Forced"
+              },
+              {
+                "start": 118.623,
+                "end": 123.623,
+                "text": "Forced second"
+              }
+            ]
+          },
+          {
+            "language": "und",
+            "mode": "disabled",
+            "cues": []
+          }
+        ]
+      },
+      "allResourcesReleased": true
+    },
+    "browserFirstRun": {
+      "atUtc": "2026-10-08T18:32:28.355Z",
+      "metrics": {
+        "initial": {
+          "firstFrameMs": 755.7000000953667,
+          "lastMediaTime": 31.419333,
+          "frames": 752
+        },
+        "resumed": {
+          "firstFrameMs": 1227.4000000953674,
+          "lastMediaTime": 135.377333,
+          "frames": 2496
+        },
+        "errors": [
+          {
+            "phase": "initial",
+            "type": "mediaError",
+            "details": "fragGap",
+            "fatal": false
+          },
+          {
+            "phase": "initial",
+            "type": "mediaError",
+            "details": "bufferSeekOverHole",
+            "fatal": false
+          }
+        ],
+        "waits": [
+          {
+            "phase": "initial",
+            "at": 0
+          },
+          {
+            "phase": "resumed",
+            "at": 31.439155
+          }
+        ],
+        "frameGaps": [],
+        "resumePosition": 61.439156,
+        "retainedSessionHit": true,
+        "localSeekTarget": 31.439155999999997
+      }
+    },
+    "runtime": {
+      "atUtc": "2026-10-08T18:40:17.975644+00:00",
+      "productionChanged": false,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        }
+      ],
+      "dispatcherRunning": true,
+      "proofContainerAbsent": true,
+      "proofNetworkAbsent": true
+    },
+    "scope": {
+      "gateway": "Complete candidate index.js child process, real HTTP handlers, FFmpeg, encoder and output reservations",
+      "sql": "Actual claim_cloud_playback_session in PGlite with synthetic schema and source ownership assertion",
+      "edge": "Actual transpiled expirePlaybackSession and background preemption helpers with synthetic DB/runtime adapters",
+      "coordinator": "Actual class with in-memory storage and simplified generation classification; no distributed contention proof",
+      "browser": "Dedicated muted HLS.js 1.7.3 fixture, not Norva WatchPage or its startup gate",
+      "network": "Only synthetic local source/proxy; HTTP proof network none, browser proof internal Docker network over SSH tunnel"
+    },
+    "limits": [
+      "The full authenticated Edge createPlaybackSessionCore pipeline and deployed SQL environment were not exercised",
+      "The browser run had fetched all source bytes before pause; no new post-transfer continuation body was needed",
+      "Two forced cues loaded after resume, but are 1.4 seconds earlier than raw VTT timestamps; no claim of correct subtitle synchronization",
+      "Subtitle processing-success events and no frame gaps do not establish complete subtitle coverage or audible acceptance",
+      "Two initial frame gaps of 0.5456 and 0.6545 seconds have no established cause; no such gap was measured after resume",
+      "No real-provider, WatchPage, Android or human listening acceptance; no Normal gain"
+    ],
+    "developmentFindings": [
+      "Initial full HTTP proof exposed an encoder reservation left active after final close",
+      "Source response count was zero while one idle pooled preflight socket remained; fixed and zero socket assertion passes",
+      "First new unit fixture overrode an extracted helper rather than its dependencies; corrected only in fixture",
+      "First browser tunnel targeted an unpublished port on an internal network; resolved by tunneling to the isolated container address",
+      "Read-only browser inspection returned empty cue arrays; native page-generated final metrics confirm two loaded cues, so no cue loss is asserted"
+    ],
+    "files": [
+      {
+        "file": "services/media-gateway/src/index.js",
+        "sha256": "500ac7a0f49c0cdc3d219d83595536204891e8613a5926582397b0c4f852114a"
+      },
+      {
+        "file": "tests/retained-session-transfer.test.js",
+        "sha256": "2e4e16f01d78677f2c0af25908ced9d1f63ff917240694bde3290ed16ac05ba1"
+      },
+      {
+        "file": "tests/media-gateway-mkv-bounded-reconnect.test.js",
+        "sha256": "b8d7071b7a057a5c15f1f900021dc03f948fede5db21a6e03a03666dfb906638"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-full-path-20261008/browser-body.cjs",
+        "sha256": "7b982be96cdece394ad8b20cbf1d34865969eee8270f5da5e385050cc93916df"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-full-path-20261008/browser-first.safe.json",
+        "sha256": "6dac16209406d9a6d49573d3b6748e011aca830f1d19714498a81aa4db017545"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-full-path-20261008/browser-page.html",
+        "sha256": "87dc550fe7d5b488d1fdb3c014fca47ab829b21ab22e27cc43f69fb6bb1f20da"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-full-path-20261008/browser-proof.safe.json",
+        "sha256": "7d1255cd164871cdc8e400988636b335e6e354c1ff86ae31b3c5fc42ebc854c6"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-full-path-20261008/browser-result.png",
+        "sha256": "492cd4be4279f04c9047689892243ff1ae1575cf8e7900806ecd95614d51b7a3"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-full-path-20261008/build-edge.cjs",
+        "sha256": "c1755cb8ffb2e5d695c933bf806b1923b3f1b093ba9365a9ae478f8ef71e5d02"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-full-path-20261008/build-proof.py",
+        "sha256": "168fe75133708ca911b502d37ae60be6c1761e2a5831421c517935c5ff6fd769"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-full-path-20261008/edge-body.cjs",
+        "sha256": "f364cfb9cdddcd173cfa09bb50969fd762924c038bebbf5f07cc7c0f02877edb"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-full-path-20261008/http-body.cjs",
+        "sha256": "731f6a136ef6d8282ba96888cd020d4f44e00183c84038180246a9c88217d8e0"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-full-path-20261008/http-proof.safe.json",
+        "sha256": "bc09c49015bd7ceec9cc0c8e051acb2c4ddab28a1cb0ac311338dc225b978b8a"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-full-path-20261008/run-browser.py",
+        "sha256": "b9c6a2ca156df83ad5cdc7873b5f055fa76f9f5825d8c45ecac5faa0c6b37b28"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-full-path-20261008/run-proof.py",
+        "sha256": "6370c133d9a39dc515a084777052738eda07e8e85ed9578134fe05aba420df4d"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-full-path-20261008/runtime-check.safe.json",
+        "sha256": "13e127f5e913bb571e7bf9786aca386fb5e443d7320098e801f61700d652a92c"
+      },
+      {
+        "file": ".codex-artifacts/retained-session-full-path-20261008/tests-final.tap",
+        "sha256": "ca9cbe190808037691b77562e9d9906d5d392a509ac47883722bfebec2363dd9"
+      }
+    ]
   }
 }
