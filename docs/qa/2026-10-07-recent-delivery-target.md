@@ -232,3 +232,23 @@ Anna stated that she would check with the team and requested a Fast.com measurem
 Accounted successful/partial public responses in this follow-up: **seven download GETs / 93,544,832 payload bytes**, plus **two completed trace GETs / 422 body bytes**. The malformed preliminary trace operator is retained separately, with no interpretable response. Source traffic: **one range GET plus one redirect / 16 MiB**, one normally expired provider claim. No whole-film download, production setting change, new deployment, general pilot rollout or hourly automation.
 
 Read-only closeout at **20:17:46 UTC (22:17 Paris)**: zero active readers on the target account; the diagnostic claim is expired. Both Gateways remain healthy on image `c8a56fa6…`, with zero global sessions at that snapshot. The source of the throughput limitation and a reliable remedy remain unresolved; the technical support investigation is pending.
+
+
+## Current relay recovery check, 8 October at 00:50 UTC (02:50 Paris)
+
+The NodeMaven conversation was reopened after the preceding report. Anna's new reply says their team will check and respond, and that a static IP's speed issue may resolve over time or the IP may be replaced. It does **not** identify a cause or confirm a completed intervention. A follow-up asks about the current IP, any configured throughput limit and the cost/reversibility of a possible future replacement, given zero displayed swaps. No replacement, settings change or purchase was authorized.
+
+This new observation justified one distinct, bounded check of the **unchanged production port 5432**. The old consumed operators were not replayed. Both Gateways were healthy and unoccupied at the preflight; the two baseline socket snapshots had zero established connections to the configured relay. Two sequential public Cloudflare GETs (no VOD credentials, verified TLS, no compression, no redirects or retries) produced:
+
+| 10,000,000-byte public payload | 7 October baseline | 8 October 00:50 UTC |
+|---|---:|---:|
+| Direct | 0.334464 s / 239.189 Mbit/s | **0.334331 s / 239.284 Mbit/s** |
+| Configured HTTP CONNECT relay | 6.894430 s / 11.604 Mbit/s | **1.646248 s / 48.595 Mbit/s** |
+
+The substantial public improvement justified **one** ordinary guarded source read of the same Normal range as the preceding comparisons. At 00:50:36–42 UTC, system libcurl on the production relay/port received **16 MiB in 5.490417 s (24.446 Mbit/s)**, HTTP 206, one redirect, first byte 1.326023 s. Content-Range, full file size and SHA-256 `39d3ab6093b909bcb14510d17a7561a0ccef260ed13063648e8c66ef03301807` match exactly. This is better than the earlier 47.680-second current-port read and the later 13.368-second alternate-port read. These measurements were made at different times; they do not prove a permanent recovery, a fixed port advantage or NodeMaven's intervention.
+
+The observed short-range rate now exceeds the file's 19.822 Mbit/s average, but the margin is modest and the file has variable bitrate. No new browser playback, seek, cache-boundary replay or AAC/video decoding occurred. **Improved receive throughput is established at this instant; durable playback fluidity and the internal cause remain unverified.** The two new results were transmitted to the existing authorized support conversation without source URLs, credentials or catalogue identifiers. A response confirming the cause/intervention remains pending.
+
+The source read used the same ordinary direct claim, independent 0.5-second heartbeats with a one-second timeout, native takeover grace and account-occupancy checks. Zero heartbeat failures. The claim expired normally and all temporary body/header/private-output files were removed. No route, image, codec, reserve, cache TTL, concurrency or pilot-scope change; no IP rotation and no new automation.
+
+At **00:51:40 UTC (02:51 Paris)**, read-only closeout confirms zero active readers on the target account, the new claim expired and both Gateways healthy on the same `c8a56fa6…` image, with zero global sessions at that snapshot. This check used two public GETs / 20,000,000 bytes and one source range GET plus one redirect / 16 MiB, without retry. Safe receipts and distinct consumed markers are under `.codex-artifacts/relay-capacity-audit-20261008/`.
