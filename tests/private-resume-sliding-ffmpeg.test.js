@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
-const { spawn, execFileSync } = require('node:child_process');
+const { spawn, spawnSync, execFileSync } = require('node:child_process');
 const { createHlsOutputAdmission, loopbackOutputEnv } = require('../services/media-gateway/src/hls-output-admission');
 const { boundedHlsArgs } = require('../services/media-gateway/src/bounded-hls-output');
 const { PrivateResumeHlsCache, parseResumeMediaPlaylist } = require('../services/media-gateway/src/private-resume-hls-cache');
@@ -67,9 +67,27 @@ test('real FFmpeg sliding publication, cached A/V/subtitles and continuation dec
         for (const name of combined.split('\n').filter(x => x.endsWith('.ts'))) {
             await fs.writeFile(path.join(merged,name), name.startsWith('resume-') ? lease.asset(name) : retained.get(name));
         }
-        const decode = execFileSync('ffmpeg',['-v','error','-xerror','-protocol_whitelist','file,crypto,data',
-            '-i',path.join(merged,'playlist.m3u8'),'-map','0:v:0','-map','0:a:0','-f','null','-'],{timeout:30000,encoding:'utf8'});
-        assert.equal(decode,'');
+        const cachedText = lease.playlist('') + '#EXT-X-ENDLIST\n';
+        await fs.writeFile(path.join(merged,'cached.m3u8'),cachedText);
+        await fs.writeFile(path.join(merged,'continuation.m3u8'),continuation.snapshot+'#EXT-X-ENDLIST\n');
+        const decode = (name, strict) => spawnSync('ffmpeg',['-v','warning', ...(strict ? ['-xerror'] : []),
+            '-err_detect','explode','-protocol_whitelist','file,crypto,data', '-i',path.join(merged,name),
+            '-map','0:v:0','-map','0:a:0','-f','framehash','-'],{timeout:30000,encoding:'utf8'});
+        // Each encoder's transport sequence must decode strictly on its own.
+        // FFmpeg 5's HLS demuxer flags the TS continuity-counter reset at an
+        // explicit HLS splice as a corrupt INPUT packet. Keep that diagnostic;
+        // it is distinct from decoder failures or missing decoded video frames.
+        for (const name of ['cached.m3u8','continuation.m3u8']) {
+            const result = decode(name,true); assert.equal(result.status,0,result.stderr);
+            assert.doesNotMatch(result.stderr,/corrupt|error|invalid/i);
+        }
+        const joined = decode('playlist.m3u8',false); assert.equal(joined.status,0,joined.stderr);
+        const frames = joined.stdout.split('\n').filter(line => /^0,/.test(line));
+        assert.equal(frames.length,232,'all 116 seconds of video survive the explicit splice');
+        assert.doesNotMatch(joined.stderr,/Error while decoding|Invalid data|non monotonically/i);
+        const audio = JSON.parse(execFileSync('ffprobe',['-v','error','-select_streams','a:0',
+            '-show_entries','stream=codec_name,profile','-of','json',path.join(merged,'resume-0.ts')],{encoding:'utf8'}));
+        assert.equal(audio.streams[0].codec_name,'aac'); assert.equal(audio.streams[0].profile,'LC');
         const final = lease.playlist(continuation.text);
         assert.match(final, /MEDIA-SEQUENCE:19\n/); // 13 cached + 6 expired continuation segments
         assert.match(final, /DISCONTINUITY-SEQUENCE:1/); assert.doesNotMatch(final, /resume-\d+\.ts/);
