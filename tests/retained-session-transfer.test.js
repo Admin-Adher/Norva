@@ -141,11 +141,13 @@ test('a sliding retained playlist rebases the new viewer while preserving the de
     assert.equal(result.localSeekTarget,5);
     assert.equal(result.retainedViewerStartOffset+result.localSeekTarget,133);
     assert.equal(result.retainedViewerFirstPlaylist.text,h.session.playlist);
-    h.acknowledgeRetainedViewerSegment(result, 'subtitle_0-00001.vtt');
+    h.acknowledgeRetainedViewerSegment(result, 'subtitle_0-00001.vtt', result.id);
     assert.ok(result.retainedViewerFirstPlaylist, 'subtitle does not release video origin');
-    h.acknowledgeRetainedViewerSegment(result, 'not-in-snapshot.ts');
+    h.acknowledgeRetainedViewerSegment(result, 'not-in-snapshot.ts', result.id);
     assert.ok(result.retainedViewerFirstPlaylist, 'unrelated output does not release video origin');
-    h.acknowledgeRetainedViewerSegment(result, result.retainedViewerFirstPlaylist.segments[0]);
+    h.acknowledgeRetainedViewerSegment(result, result.retainedViewerFirstPlaylist.segments[0], 'old');
+    assert.ok(result.retainedViewerFirstPlaylist, 'late old response cannot release the new viewer origin');
+    h.acknowledgeRetainedViewerSegment(result, result.retainedViewerFirstPlaylist.segments[0], result.id);
     assert.equal(result.retainedViewerFirstPlaylist, null);
 });
 

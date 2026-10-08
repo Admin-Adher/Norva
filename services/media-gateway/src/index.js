@@ -13507,7 +13507,7 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
         res.setHeader('Cache-Control', isGrowingSubtitle ? 'no-store' : 'private, max-age=30');
         res.once('finish', () => {
             if (res.statusCode >= 200 && res.statusCode < 300 && req.method === 'GET') {
-                acknowledgeRetainedViewerSegment(session, requested);
+                acknowledgeRetainedViewerSegment(session, requested, req.params.id);
                 session.hlsOutputControl?.served(requested);
             }
         });
@@ -15592,10 +15592,10 @@ async function retainedSessionPositionAvailable(session, position) {
     return true;
 }
 
-function acknowledgeRetainedViewerSegment(session, name) {
+function acknowledgeRetainedViewerSegment(session, name, requestSessionId) {
     // HEAD and repeated/aborted manifest requests must keep the same first
     // origin. Release the snapshot only after a segment from it was delivered.
-    if (session.retainedViewerFirstPlaylist?.segments?.includes(name)) {
+    if (requestSessionId === session.id && session.retainedViewerFirstPlaylist?.segments?.includes(name)) {
         session.retainedViewerFirstPlaylist = null;
     }
 }
