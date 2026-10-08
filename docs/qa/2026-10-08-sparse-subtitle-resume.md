@@ -663,3 +663,38 @@ Les claims SQL, la fermeture Edge et le coordinateur ont la portée synthétique
 À **22:00:50 Paris**, les deux Gateways sont sains, image PR706 et démarrages du relevé précédent inchangés, dispatcher actif, conservation désactivée. Les cinq conteneurs de preuve sont absents; le tunnel isolé est arrêté.
 
 Le contrôle Linux complet intercepte cinq échecs dans les cinq variantes du harnais de concurrence FFmpeg : il extrayait `startFfmpeg` sans importer le nouveau helper d’horloge. Les 6 142 tests de ce premier passage comportent 6 106 réussites, cinq échecs et 31 ignorés. Le harnais importe désormais le véritable helper; aucun seuil produit n’est modifié. Le groupe local de concurrence, transfert et horloge réussit ensuite. La revue finale protège aussi le premier manifeste contre un acquittement tardif provenant de l’ancien identifiant de session; le test prouve qu’il ne libère pas l’origine du nouveau lecteur.
+
+
+## Publication progressive de paquets confirmés — 8 octobre, 22:33 Paris
+
+Le contrôle final de PR720 a réussi : **6 142 tests, 6 111 réussis, 31 ignorés, zéro échec**. PR720 est intégrée par `9ef6323ee781b5d34849ec7d61994ae7e6ebe67c`; ses paquets Windows, téléphone et TV sont également réussis au contrôle de ce passage. Cela ne change pas les limites de la preuve précédente.
+
+### Publication avant la fin du fichier
+
+Un nouveau helper pur, `committed-subtitle-snapshot.js`, rapproche chaque réplique WebVTT de son journal FFmpeg `framecrc` : horodatage, durée, nombre d’octets UTF-8 et somme de contrôle. Les deux sorties viennent du même encodeur de sous-titres, par le muxer `tee`; la sortie VTT est vidée avant la sortie du journal. Il n’y a ni second accès fournisseur ni second décodage vidéo. Le journal confirme des **paquets observés**, pas l’absence d’autres paquets : `timeCoverage:false` et `complete:false` restent explicites. Aucun faux ENDLIST, certificat de silence ou assouplissement de l’admission HLS privée.
+
+La lecture du journal précède celle du VTT : un ajout concurrent peut fournir des données supplémentaires, mais seules les lignes de journal terminées et leurs répliques concordantes sont publiées. Une réponse tronquée, un texte modifié, un horodatage, une durée, une taille ou une somme incorrecte sont refusés. Limites du helper : deux Mio par entrée, vingt mille répliques; les formes de side-data non prises en charge sont refusées. La somme de contrôle détecte une divergence de paquets locaux; ce n’est pas une authentification de fichier ou de propriétaire.
+
+FFmpeg réel, réseau absent : à **deux secondes de collecte**, la réplique prévue à 9–12 s est déjà disponible, alors que le producteur n’a pas terminé. Le texte multiligne et les timestamps concordent. À dix secondes, trois paquets sont présents. Les **18 tests nouveaux** comprennent toutes les coupures octet par octet du VTT et du dernier enregistrement, UTF-8, simultanéité, réplique traversante, identifiants et réglages. Groupe publication/transfert/horloge : **46 réussites**, dont ces 18, sans additionner les groupes.
+
+### Parcours expérimental avec WatchPage
+
+Le générateur de preuve injecte les sorties tee et un lecteur de snapshots derrière le middleware de jeton du Gateway de test. Il branche le moteur WebVTT existant de WatchPage sur l’horloge réellement annoncée par HLS. **Ce branchement appartient uniquement au harnais** : le helper n’est appelé par aucun parcours produit, le contrat Edge/catalogue ne change pas, aucun code de WatchPage n’est modifié. Le premier essai avait laissé le moteur HLS natif et le moteur géré actifs en même temps; ses deux pistes affichées et ses diagnostics non fatals sont conservés. Le second configure un seul propriétaire de sous-titres.
+
+Contrôle final terminé à **22:32:58 Paris**, source synthétique de 720 s / 67 429 636 octets :
+
+- Départ effectif **9,324 s**; après fermeture et claim ordinaire, première image **1,186 s**, lecture effective **3,528 s**. Position source de reprise 123,225504 s, cible locale 73,225504 s après glissement de vingt secondes.
+- La réplique future initialement à 120–125 s se trouve désormais à **100–105 s**, disponible avant son échéance et observée active après reprise. Une seule piste affiche les deux répliques, sans doublon. Le collecteur serveur conserve aussi la réplique traversante de l’autre piste, mais son affichage et le changement de piste ne sont pas testés dans ce second replay.
+- Lecture avancée de **135,524496 s** après reprise. Deux nouvelles plages de huit Mio, soit **16 Mio**, reçues après revalidation, sans parcourir le fichier entier.
+- Zéro erreur HLS et zéro événement `waiting` dans ce replay. Aucun intervalle de callback supérieur à 250 ms après la première seconde de lecture reprise. Les écarts entre première image et mise en lecture appartiennent au gate, qui garde alors la vidéo en pause; ils ne sont pas comptés comme gels après démarrage.
+- Même PID de décodeur, ancien accès révoqué, zéro requête/socket source durant la pause observée, maximum une connexion. Réservations de sortie et d’encodeur libérées à la fermeture finale.
+
+La télémétrie conserve séparément la réserve vidéo, les callbacks d’image, les événements HLS et les tâches longues du navigateur. L’affichage diagnostique a été allégé. L’absence de saccade dans ce nouveau replay **n’établit pas la cause des intervalles de 1,582 s du précédent** : plusieurs aspects du harnais ont changé; aucun A/B à variable unique ne permet de les attribuer au DOM, au réseau ou à l’ordonnancement.
+
+Un extrait de sortie de douze secondes contient **288 images H264 et 563 paquets AAC-LC, stéréo 48 kHz**, décodés sans erreur. Il est distinct d’une validation à l’écoute et ne couvre pas le film entier. Le navigateur de mesure reste muet.
+
+### Limites et état final
+
+Le raccordement public doit encore définir et tester la sélection d’un seul moteur, les changements de piste, les métadonnées Edge, les lectures bornées des fichiers de publication, les clients natifs et la révocation pendant une réponse en vol. Les gardes de création ont la portée synthétique de PR718, avec véritable SQL de claim mais assertion de visibilité de fixture. Les sources variées et l’acceptation audible restent ouvertes. **Cette preuve ne permet pas d’activer la conservation en production. Aucun gain supplémentaire sur Normal.**
+
+Les replays et scripts sont conservés sous `.codex-artifacts/retained-progressive-publish-20261008/` et `retained-progressive-publish-final-20261008/`. Les sources embarquées du prototype sont explicitement modifiées par le générateur de test; elles ne sont pas présentées comme un Gateway produit inchangé. Aucun appel média fournisseur, déploiement ou changement de concurrence. À **22:33:12 Paris**, les deux Gateways sont sains, image PR706 et démarrages inchangés; pilote `owner-allowlist`, conservation inactive, dispatcher actif. Les conteneurs de preuve, le réseau interne, le tunnel et l’onglet temporaire sont arrêtés. Aucun nouvel envoi Google Play : TV39 reste au dernier état observé « en cours d’examen », sans nouvelle vérification pendant ces tests.
