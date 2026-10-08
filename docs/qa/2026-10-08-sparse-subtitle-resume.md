@@ -385,3 +385,73 @@ Il faut relier le collecteur aux gardes et au cycle de vie du broker réel, éta
 Reçus, scripts et résultats intermédiaires : `.codex-artifacts/subtitle-progressive-ledger-20261008/`. `summary.safe.json` vérifie les comptes et sépare collecte, couverture, horloges, signal et admission. Les six premières matrices audio servent au diagnostic ; elles ne sont pas additionnées aux 39 tests unitaires.
 
 Le contrôle read-only du **8 octobre à 17:42:15 Paris** trouve les deux Gateways sains, même image PR706 et mêmes démarrages de 16:25:21. Dispatcher actif, pilote `owner-allowlist`, conteneur de preuve supprimé. Les médias synthétiques étaient éphémères. L'incident historique de redémarrage de l'hôte reste de cause inconnue.
+
+
+## Broker réel, cache d’entrée et historique audio — 8 octobre, 17:59–18:31 Paris
+
+Cette phase relie le collecteur au **code inchangé du broker de l’image PR706**, à la vraie classe `PrivateResumeHlsCache` et à FFmpeg, dans un conteneur isolé `network none`. Le harnais du dépôt extrait le broker dans une VM ; un serveur HTTP loopback joue le fournisseur à partir d’une fixture synthétique. Ce n’est pas encore une session Edge/API authentifiée, un claim fournisseur réel ni une admission HLS de production. Aucun appel externe, changement d’image, d’encodeur de production ou de garde. Les cinq contrôles de PR713 passent désormais, paquets compris.
+
+### Les sous-titres suivent les octets validés du broker
+
+L’adaptateur expérimental écoute le callback existant `onFiniteWindow`. Celui-ci reçoit la plage complète après validation et fermeture de la réponse amont. L’adaptateur vérifie liaison, taille, cible, validateur, limites et égalité des octets avant de réunir des plages. Il conserve les plages futures en attente d’un préfixe contigu, avec un budget borné. Il ne transforme jamais une absence d’octets en silence de sous-titres.
+
+Le premier essai découvre un chevauchement entre les 64 Kio déjà lus à la fin du fichier pour les métadonnées et la dernière plage de lecture. Le collecteur le refusait, tandis que FFmpeg terminait sans erreur. Le prototype compare maintenant **tous les octets de l’intersection encore conservée** avant fusion. Une divergence ou un chevauchement avec des octets déjà jetés refuse toujours la preuve. Ce correctif concerne le nouveau collecteur isolé, pas un défaut de lecture de production.
+
+**20 tests unitaires** vérifient contiguïté, trous, chevauchements, rejeux, divergence, budgets, changements de source/validateur, révocation et proposition bornée de lecture complémentaire. Ils sont distincts des 39 tests de PR713, qui ne sont pas rejoués ou ajoutés au total de cette phase.
+
+La fixture de 240 s contient cinq paquets sur deux pistes UTF-8. Le parcours réel réalise :
+
+1. Lecture d’un préfixe de 4 Mio et de 64 Kio de fin de fichier, puis capture par la classe de cache.
+2. Fermeture de l’ancien broker et révocation de son reçu.
+3. **Quatre échantillons frais** sur un nouveau broker, puis acquisition ordinaire du cache.
+4. Réinjection de **4 259 840 octets**, reconstitution du collecteur et lecture FFmpeg.
+5. Comparaison des cinq paquets avec un `ffprobe` indépendant : position, date, durée et empreinte identiques.
+
+Le cas sans saut emploie 17 requêtes HTTP **locales**, dont le contrôle négatif de plage. Le reparsing du cache prend 36,27 ms dans ce seul environnement ; ce n’est pas un délai utilisateur ni une promesse de performance. Le collecteur stocke 38 octets de texte ; le maximum de son tampon de parseur atteint 250 715 octets. Les autres buffers du broker, du serveur de fixture, de FFmpeg et du cache sont exclus de ce chiffre.
+
+### Un vrai saut révèle un trou physique de 200 522 octets
+
+Avec un saut FFmpeg à 100 s, la nouvelle plage commence à l’octet 4 394 826, après un préfixe conservé de 4 194 304 octets. La vidéo est traitée sans erreur, mais le collecteur ne peut franchir les **200 522 octets manquants** : quatre paquets sont conservés, le cinquième n’est pas certifié.
+
+Un second essai autorise **une seule lecture complémentaire**, plafonnée à 256 Kio dans le prototype, par le même broker et la même file sérialisée. Elle récupère exactement ce trou, sans modifier les gardes de taille/cible/plage. Les cinq paquets concordent alors avec le témoin. Le total passe à 18 requêtes locales, avec au maximum **une réponse fournisseur active** ; chaque callback de plage survient après son drainage. Aucun remplissage général de trous ni ce plafond expérimental n’est activé en production. L’effet d’une requête supplémentaire sur une source lente et sa politique de délai restent à valider.
+
+Le premier harnais de ce test avait traité le retour vide de `lease.assertValid()` comme un booléen faux. L’assertion est corrigée pour utiliser le contrat réel : succès sans valeur, exception si invalide. Aucun changement du cache réel.
+
+Le contrôle `Content-Range` incohérent termine en `RANGE_UNSUPPORTED` avec **zéro callback de collecte**. Un autre test interrompt une réponse après 16 Kio sur 1 Mio attendu : zéro callback complet, requête interrompue, bail de cache `RESUME_CACHE_REVOKED`, reçu invalidé et zéro connexion restante. Le cache est vide après nettoyage. Cela valide ce cycle de vie isolé ; les gardes d’authentification, de takeover et les interruptions de session Edge restent à intégrer.
+
+### Raccord audio sur le même parcours de cache
+
+Le test combiné produit un raccord HLS à 100 s après réutilisation du cache d’entrée. L’historique des trames audio vient maintenant des observations de **l’encodeur de la première lecture**, sans second décodage complet du fichier. Une courte lecture du point de reprise, via le broker réel, retrouve la position et le nombre d’échantillons d’une trame déjà observée. L’identité du fichier reste vérifiée séparément par le cache ; ni cette position ni une somme de contrôle PCM ne suffisent seules.
+
+Les horloges audio/vidéo concordent avec le témoin, sans timestamp manquant, doublon ni diagnostic de décodage. Sur cette sinusoïde mono 48 kHz convertie en stéréo, la différence PCM est nulle sur 400 ms autour du raccord et vaut environ **2,25e-9 RMS** sur la fenêtre +0,3 à +1 s. Ce cas simple ne prouve aucune équivalence perceptuelle générale. La préparation audio lit naturellement le petit trou précédent ; aucune requête spécifique de comblement n’est nécessaire dans cet essai. Total : 17 requêtes locales, dont une pour l’ancre audio et une pour le contrôle négatif.
+
+Une première version du harnais avait masqué la variable du collecteur initial par celle d’une trame audio ; erreur de portée corrigée dans le harnais uniquement. La preuve intermédiaire qui construisait l’historique par décodage séparé est conservée, distincte de la preuve finale sans ce décodage.
+
+### Historique borné et huit raccords audio plus variés
+
+Le nouveau helper expérimental conserve au maximum **2 048 descriptions de trames**, tout en continuant le compteur d’échantillons. Il conserve l’origine temporelle réelle, accepte seulement l’arrondi compatible avec l’échelle temporelle de la fixture et refuse les ruptures, changements de fréquence/canaux/format, positions ambiguës et liaisons divergentes. Une révocation invalide les ancres précédentes. Il n’authentifie pas la source et n’est pas encore persisté dans les entrées de cache de production.
+
+**20 autres tests unitaires passent** : origine non nulle, arrondis 44,1/48 kHz, éviction des anciennes trames, trous/chevauchements audio, changements de profil et d’identité, bornes et reçus forgés. Les deux nouvelles suites totalisent **40 tests unitaires distincts** ; les expériences FFmpeg suivantes ne sont pas ajoutées à ce nombre.
+
+La matrice utilise l’historique issu du premier encodeur et le raccord HLS réel. La sortie reste AAC-LC stéréo 48 kHz. Elle étend les quatre cas de bruit rose de PR713 à des sons de fréquence variable avec silence et à une source décalée de cinq secondes. Les huit cas sont rejoués avec le nouveau helper ; ce ne sont pas huit nouveaux films réels.
+
+| Fixture | Frontières de reprise | Écart horloge audio / vidéo | Décalage de signal estimé |
+| --- | --- | --- | --- |
+| Bruits roses stéréo indépendants, 48 kHz | 16 / 20 s | 0 / 0 tick | 0 ms |
+| Bruits roses stéréo indépendants, 44,1 kHz | 16 / 20 s | 0 / 0 tick | 0 ms |
+| Sons stéréo variables avec silence, 48 kHz | 16 / 20 s | 0 / 0 tick | 0 ms |
+| Origine de fichier décalée de 5 s, 48 kHz | 21 / 25 s | 0 / 0 tick | 0 ms |
+
+Aucun timestamp manquant ou doublon dans les fenêtres PCM contrôlées, aucune saturation ou erreur d’encodage/décodage. Pour l’origine non nulle, le seek du prototype utilise explicitement les timestamps absolus ; aucun réglage global de seek n’est modifié. Le décalage effectif observé de la première trame tient compte des timestamps du fichier AAC ; il n’est pas remplacé arbitrairement par cinq secondes pile.
+
+Après réencodage, des différences de signal subsistent : RMS maximale **0,01655** après raccord sur le bruit rose décalé. La différence de variation de niveau avant/après, par rapport au témoin, atteint **0,14715 dB**. Zéro décalage par corrélation ne signifie ni identité du signal ni qualité à l’écoute certifiée. Le cas avec silence ne permet pas de généraliser l’absence de silences aux autres bandes temporelles. Aucun test de parole, 5.1, changement réel de fréquence, navigateur ou Android supplémentaire dans cette phase.
+
+Deux contrôles négatifs injectent un trou audio de **200 ms**. L’historique mesure 9 600 échantillons d’écart, rejette les deux ancres et ne lance pas l’encodeur de raccord. La quantification tolérée dans ces fichiers à timestamps milliseconde vaut au plus 48 échantillons à 48 kHz ; cette borne dérive du format testé et ne modifie aucun seuil de lecture ou de buffer. Une source à discontinuité demande une reconstruction de l’état du rééchantillonneur avant toute optimisation.
+
+### Limite qui maintient le prototype hors production
+
+Les cinq paquets de la fixture concordent **à la fin de l’essai**. Cela ne constitue toujours pas une preuve de couverture temporelle complète avant EOF. L’index peut être sélectif ; un préfixe seul ne prouve pas l’absence de répliques dans les octets non lus. Les timestamps des blocs sont relatifs au cluster et signés : ni la date du dernier cluster observé ni celle de la dernière image ne sont une borne sûre à elles seules. [Structure des blocs, RFC 9559](https://datatracker.ietf.org/doc/html/rfc9559#section-10), [index Matroska](https://www.matroska.org/technical/cues.html).
+
+L’admission HLS reste fermée. Il faut encore une preuve de couverture exploitable sans scan complet coûteux, l’intégration et la persistance de l’historique dans la session réelle, puis une validation perceptuelle sur des sources plus variées. **Aucun nouveau gain sur Normal, aucun déploiement et aucune généralisation du pilote.**
+
+Reçus et scripts : `.codex-artifacts/subtitle-broker-integration-20261008/` et `.codex-artifacts/subtitle-audio-history-20261008/`. Les deux `summary.safe.json` vérifient les métriques, conservent les échecs intermédiaires et distinguent les expériences locales des appels externes. À **18:31:24 Paris**, contrôle read-only : les deux Gateways sont sains, même image PR706, mêmes démarrages de 16:25:21, pilote `owner-allowlist` et dispatcher actif. Conteneur de preuve absent ; médias synthétiques éphémères supprimés avec celui-ci. L’incident historique de redémarrage d’hôte reste de cause inconnue.
