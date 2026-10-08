@@ -2065,5 +2065,708 @@
     "newBrowserPlayback": false,
     "fullFilmOrSustainedGuarantee": false,
     "receipts": ".codex-artifacts/relay-capacity-audit-20261008/"
+  },
+  "browserRecoveryReplay20261008": {
+    "windowUtc": [
+      "2026-10-08T00:57:06Z",
+      "2026-10-08T01:17:55.316016+00:00"
+    ],
+    "scope": "Two exact copies / one owner-scoped pilot; six sequential browser sessions, no general rollout",
+    "productionChanged": false,
+    "cases": [
+      {
+        "case": "normal-cold",
+        "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+        "clickUtc": "2026-10-08T00:57:06.943Z",
+        "createdAtUtc": "2026-10-08T00:57:08.391482+00:00",
+        "playStartedUtc": "2026-10-08T00:57:46.00391+00:00",
+        "requestedServerOffsetSec": 472,
+        "playPositionSec": 472,
+        "clickToPlaySec": 39.061,
+        "sessionCreationToPlaySec": 37.612,
+        "reportedFirstFrameMs": 20321,
+        "gatewayReadyMs": 18093,
+        "finalState": "expired",
+        "intentionalStopPositionSec": 633,
+        "timelineProgressBeforeIntentionalStopSec": 161,
+        "startupPolicy": {
+          "protocol": 2,
+          "eligible": false,
+          "pipeline": "video-transcode",
+          "targetBufferSeconds": null,
+          "minimumEncodeRateX": 2,
+          "observedEncodeRateX": 0.765,
+          "reason": "encode-rate-below-minimum"
+        },
+        "recentInputHit": false,
+        "recentSeededBytes": 0,
+        "recentDeliveryTargetUsed": false,
+        "prefixCacheHit": false,
+        "boundedEightMiBWindows": {
+          "count": 36,
+          "minMs": 792,
+          "maxMs": 3912,
+          "medianMs": 1217.5
+        },
+        "receipt": ".codex-artifacts\\relay-playback-20261008\\normal-playing.safe.json"
+      },
+      {
+        "case": "normal-seek",
+        "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+        "clickUtc": "2026-10-08T01:00:40.998Z",
+        "createdAtUtc": "2026-10-08T01:00:44.262428+00:00",
+        "playStartedUtc": "2026-10-08T01:03:13.546497+00:00",
+        "requestedServerOffsetSec": 1087,
+        "playPositionSec": 1102,
+        "clickToPlaySec": 152.548,
+        "sessionCreationToPlaySec": 149.284,
+        "reportedFirstFrameMs": 19083,
+        "gatewayReadyMs": 16327,
+        "finalState": "expired",
+        "intentionalStopPositionSec": 1273,
+        "timelineProgressBeforeIntentionalStopSec": 171,
+        "startupPolicy": {
+          "protocol": 2,
+          "eligible": false,
+          "pipeline": "video-transcode",
+          "targetBufferSeconds": null,
+          "minimumEncodeRateX": 2,
+          "observedEncodeRateX": 0.95,
+          "reason": "encode-rate-below-minimum"
+        },
+        "recentInputHit": false,
+        "recentSeededBytes": 0,
+        "recentDeliveryTargetUsed": false,
+        "prefixCacheHit": true,
+        "boundedEightMiBWindows": {
+          "count": 63,
+          "minMs": 1613,
+          "maxMs": 18335,
+          "medianMs": 3042
+        },
+        "receipt": ".codex-artifacts\\relay-playback-20261008\\normal-seek-playing.safe.json"
+      },
+      {
+        "case": "normal-reopen",
+        "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+        "clickUtc": "2026-10-08T01:06:20.103Z",
+        "createdAtUtc": "2026-10-08T01:06:21.280255+00:00",
+        "playStartedUtc": "2026-10-08T01:07:52.023134+00:00",
+        "requestedServerOffsetSec": 1273,
+        "playPositionSec": 1273,
+        "clickToPlaySec": 91.92,
+        "sessionCreationToPlaySec": 90.743,
+        "reportedFirstFrameMs": 17239,
+        "gatewayReadyMs": 15820,
+        "finalState": "expired",
+        "intentionalStopPositionSec": 1336,
+        "timelineProgressBeforeIntentionalStopSec": 63,
+        "startupPolicy": {
+          "protocol": 2,
+          "eligible": false,
+          "pipeline": "video-transcode",
+          "targetBufferSeconds": null,
+          "minimumEncodeRateX": 2,
+          "observedEncodeRateX": 1.807,
+          "reason": "encode-rate-below-minimum"
+        },
+        "recentInputHit": true,
+        "recentSeededBytes": 67108864,
+        "recentDeliveryTargetUsed": true,
+        "prefixCacheHit": false,
+        "boundedEightMiBWindows": {
+          "count": 51,
+          "minMs": 904,
+          "maxMs": 6156,
+          "medianMs": 1975
+        },
+        "receipt": ".codex-artifacts\\relay-playback-20261008\\normal-reopen-playing.safe.json"
+      },
+      {
+        "case": "severance-cold",
+        "exactFileHash": "099a792376312073a2c3036af36c577e",
+        "clickUtc": "2026-10-08T01:09:18.119Z",
+        "createdAtUtc": "2026-10-08T01:09:19.569815+00:00",
+        "playStartedUtc": "2026-10-08T01:09:37.384681+00:00",
+        "requestedServerOffsetSec": 1268,
+        "playPositionSec": 1268,
+        "clickToPlaySec": 19.266,
+        "sessionCreationToPlaySec": 17.815,
+        "reportedFirstFrameMs": 14883,
+        "gatewayReadyMs": 13148,
+        "finalState": "expired",
+        "intentionalStopPositionSec": 1400,
+        "timelineProgressBeforeIntentionalStopSec": 132,
+        "startupPolicy": {
+          "protocol": 2,
+          "eligible": true,
+          "pipeline": "video-transcode",
+          "targetBufferSeconds": 6,
+          "minimumEncodeRateX": 2,
+          "observedEncodeRateX": 2.442,
+          "reason": "vaapi-transcode-ready"
+        },
+        "recentInputHit": false,
+        "recentSeededBytes": 0,
+        "recentDeliveryTargetUsed": false,
+        "prefixCacheHit": false,
+        "boundedEightMiBWindows": {
+          "count": 19,
+          "minMs": 898,
+          "maxMs": 2406,
+          "medianMs": 1313
+        },
+        "receipt": ".codex-artifacts\\relay-playback-20261008\\severance-cold-playing.safe.json"
+      },
+      {
+        "case": "severance-seek",
+        "exactFileHash": "099a792376312073a2c3036af36c577e",
+        "clickUtc": "2026-10-08T01:12:00.512Z",
+        "createdAtUtc": "2026-10-08T01:12:06.199006+00:00",
+        "playStartedUtc": "2026-10-08T01:12:22.465107+00:00",
+        "requestedServerOffsetSec": 2045,
+        "playPositionSec": 2060,
+        "clickToPlaySec": 21.953,
+        "sessionCreationToPlaySec": 16.266,
+        "reportedFirstFrameMs": 16239,
+        "gatewayReadyMs": 10311,
+        "finalState": "expired",
+        "intentionalStopPositionSec": 2187,
+        "timelineProgressBeforeIntentionalStopSec": 127,
+        "startupPolicy": {
+          "protocol": 2,
+          "eligible": true,
+          "pipeline": "video-transcode",
+          "targetBufferSeconds": 6,
+          "minimumEncodeRateX": 2,
+          "observedEncodeRateX": 5.546,
+          "reason": "vaapi-transcode-ready"
+        },
+        "recentInputHit": false,
+        "recentSeededBytes": 0,
+        "recentDeliveryTargetUsed": false,
+        "prefixCacheHit": true,
+        "boundedEightMiBWindows": {
+          "count": 21,
+          "minMs": 722,
+          "maxMs": 1431,
+          "medianMs": 830
+        },
+        "receipt": ".codex-artifacts\\relay-playback-20261008\\severance-seek-playing.safe.json"
+      },
+      {
+        "case": "severance-reopen",
+        "exactFileHash": "099a792376312073a2c3036af36c577e",
+        "clickUtc": "2026-10-08T01:14:48.880Z",
+        "createdAtUtc": "2026-10-08T01:14:50.215085+00:00",
+        "playStartedUtc": "2026-10-08T01:15:09.418114+00:00",
+        "requestedServerOffsetSec": 2187,
+        "playPositionSec": 2187,
+        "clickToPlaySec": 20.538,
+        "sessionCreationToPlaySec": 19.203,
+        "reportedFirstFrameMs": 13997,
+        "gatewayReadyMs": 12465,
+        "finalState": "expired",
+        "intentionalStopPositionSec": 2325,
+        "timelineProgressBeforeIntentionalStopSec": 138,
+        "startupPolicy": {
+          "protocol": 2,
+          "eligible": false,
+          "pipeline": "video-transcode",
+          "targetBufferSeconds": null,
+          "minimumEncodeRateX": 2,
+          "observedEncodeRateX": 0.983,
+          "reason": "encode-rate-below-minimum"
+        },
+        "recentInputHit": true,
+        "recentSeededBytes": 67108864,
+        "recentDeliveryTargetUsed": true,
+        "prefixCacheHit": false,
+        "boundedEightMiBWindows": {
+          "count": 10,
+          "minMs": 1446,
+          "maxMs": 4540,
+          "medianMs": 2567.0
+        },
+        "receipt": ".codex-artifacts\\relay-playback-20261008\\severance-reopen-playing.safe.json"
+      }
+    ],
+    "method": {
+      "startClock": "UI action to server play_started telemetry; session creation metric retained separately",
+      "continuity": "Read-only currentTime/paused/readyState/error/buffered samples, usually two seconds apart within bounded observation blocks; no claim to frame-by-frame browser analysis",
+      "stops": "Space was used to reveal controls and pauses were intentional; UI Back normally expired each session",
+      "cold": "No recent input seed at initial launch of each title; metadata/profile caches were retained",
+      "cacheBoundary": "Recent input seeded at both reopenings, subsequent source windows completed, continued playback observed; exact final cached-media timestamp not inferred from byte size"
+    },
+    "audioAndVideoSamples": [
+      {
+        "at": "2026-10-08T00:59:30.640994+00:00",
+        "localOnly": true,
+        "outputs": [
+          {
+            "audioDecodeExit": 0,
+            "audioDecoderDiagnosticLines": 0,
+            "createdAt": "2026-10-08T00:57:08.867Z",
+            "probeExit": 0,
+            "streams": [
+              {
+                "codec_name": "h264",
+                "profile": "High",
+                "codec_type": "video",
+                "start_time": "283.426333"
+              },
+              {
+                "codec_name": "aac",
+                "profile": "LC",
+                "codec_type": "audio",
+                "sample_rate": "48000",
+                "channels": 2,
+                "start_time": "283.426667"
+              }
+            ],
+            "localVideoFrames": 48,
+            "videoIntervalMaxSeconds": 0.04199999999997317,
+            "videoIntervalsAbove100ms": 0,
+            "decoderErrorLines": 0,
+            "frameProbeExit": 0,
+            "errorKind": null
+          }
+        ]
+      },
+      {
+        "at": "2026-10-08T01:06:01.062068+00:00",
+        "localOnly": true,
+        "outputs": [
+          {
+            "audioDecodeExit": 0,
+            "audioDecoderDiagnosticLines": 0,
+            "createdAt": "2026-10-08T01:00:44.469Z",
+            "probeExit": 0,
+            "streams": [
+              {
+                "codec_name": "h264",
+                "profile": "High",
+                "codec_type": "video",
+                "start_time": "255.426333"
+              },
+              {
+                "codec_name": "aac",
+                "profile": "LC",
+                "codec_type": "audio",
+                "sample_rate": "48000",
+                "channels": 2,
+                "start_time": "255.437333"
+              }
+            ],
+            "localVideoFrames": 48,
+            "videoIntervalMaxSeconds": 0.04200000000000159,
+            "videoIntervalsAbove100ms": 0,
+            "decoderErrorLines": 0,
+            "frameProbeExit": 0,
+            "errorKind": null
+          }
+        ]
+      },
+      {
+        "at": "2026-10-08T01:10:37.506169+00:00",
+        "localOnly": true,
+        "outputs": [
+          {
+            "audioDecodeExit": 0,
+            "audioDecoderDiagnosticLines": 0,
+            "createdAt": "2026-10-08T01:09:19.803Z",
+            "probeExit": 0,
+            "streams": [
+              {
+                "codec_name": "aac",
+                "profile": "LC",
+                "codec_type": "audio",
+                "sample_rate": "48000",
+                "channels": 2,
+                "start_time": "239.416000"
+              }
+            ],
+            "localVideoFrames": 48,
+            "videoIntervalMaxSeconds": 0.04200000000000159,
+            "videoIntervalsAbove100ms": 0,
+            "decoderErrorLines": 0,
+            "frameProbeExit": 0,
+            "errorKind": null
+          }
+        ]
+      },
+      {
+        "at": "2026-10-08T01:15:35.711849+00:00",
+        "localOnly": true,
+        "outputs": [
+          {
+            "audioDecodeExit": 0,
+            "audioDecoderDiagnosticLines": 0,
+            "createdAt": "2026-10-08T01:14:50.407Z",
+            "probeExit": 0,
+            "streams": [
+              {
+                "codec_name": "aac",
+                "profile": "LC",
+                "codec_type": "audio",
+                "sample_rate": "48000",
+                "channels": 2,
+                "start_time": "85.410667"
+              }
+            ],
+            "localVideoFrames": 48,
+            "videoIntervalMaxSeconds": 0.04200000000000159,
+            "videoIntervalsAbove100ms": 0,
+            "decoderErrorLines": 0,
+            "frameProbeExit": 0,
+            "errorKind": null
+          }
+        ]
+      },
+      {
+        "at": "2026-10-08T01:13:33.283128+00:00",
+        "localOnly": true,
+        "outputs": [
+          {
+            "audioDecodeExit": 0,
+            "audioDecoderDiagnosticLines": 0,
+            "createdAt": "2026-10-08T01:12:07.325Z",
+            "probeExit": 0,
+            "streams": [
+              {
+                "codec_name": "aac",
+                "profile": "LC",
+                "codec_type": "audio",
+                "sample_rate": "48000",
+                "channels": 2,
+                "start_time": "265.400000"
+              }
+            ],
+            "localVideoFrames": 48,
+            "videoIntervalMaxSeconds": 0.04200000000003001,
+            "videoIntervalsAbove100ms": 0,
+            "decoderErrorLines": 0,
+            "frameProbeExit": 0,
+            "errorKind": null
+          }
+        ]
+      }
+    ],
+    "closeout": {
+      "at": "2026-10-08T01:17:55.316016+00:00",
+      "readOnly": true,
+      "guard": {
+        "activeAccountReaders": 0
+      },
+      "sessions": [
+        {
+          "type": "movie",
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-08T00:57:08.391482+00:00",
+          "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+          "events": [
+            {
+              "at": "2026-10-08T00:57:28.215769+00:00",
+              "code": null,
+              "event": "first_frame",
+              "ttffMs": 20321,
+              "position": 472
+            },
+            {
+              "at": "2026-10-08T00:57:46.00391+00:00",
+              "code": null,
+              "event": "play_started",
+              "ttffMs": null,
+              "position": 472
+            },
+            {
+              "at": "2026-10-08T01:00:27.580811+00:00",
+              "code": null,
+              "event": "pause",
+              "ttffMs": null,
+              "position": 633
+            },
+            {
+              "at": "2026-10-08T01:00:35.734047+00:00",
+              "code": null,
+              "event": "resume",
+              "ttffMs": null,
+              "position": 633
+            }
+          ]
+        },
+        {
+          "type": "movie",
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-08T01:00:44.262428+00:00",
+          "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+          "events": [
+            {
+              "at": "2026-10-08T01:01:01.865414+00:00",
+              "code": null,
+              "event": "first_frame",
+              "ttffMs": 19083,
+              "position": 1087
+            },
+            {
+              "at": "2026-10-08T01:03:13.546497+00:00",
+              "code": null,
+              "event": "play_started",
+              "ttffMs": null,
+              "position": 1102
+            },
+            {
+              "at": "2026-10-08T01:06:05.946534+00:00",
+              "code": null,
+              "event": "pause",
+              "ttffMs": null,
+              "position": 1273
+            }
+          ]
+        },
+        {
+          "type": "movie",
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-08T01:06:21.280255+00:00",
+          "exactFileHash": "65394d68af67cbb10cb4e9f81f29aa50",
+          "events": [
+            {
+              "at": "2026-10-08T01:06:38.279474+00:00",
+              "code": null,
+              "event": "first_frame",
+              "ttffMs": 17239,
+              "position": 1273
+            },
+            {
+              "at": "2026-10-08T01:07:52.023134+00:00",
+              "code": null,
+              "event": "play_started",
+              "ttffMs": null,
+              "position": 1273
+            },
+            {
+              "at": "2026-10-08T01:08:55.999654+00:00",
+              "code": null,
+              "event": "pause",
+              "ttffMs": null,
+              "position": 1336
+            }
+          ]
+        },
+        {
+          "type": "series",
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-08T01:09:19.569815+00:00",
+          "exactFileHash": "099a792376312073a2c3036af36c577e",
+          "events": [
+            {
+              "at": "2026-10-08T01:09:33.936582+00:00",
+              "code": null,
+              "event": "first_frame",
+              "ttffMs": 14883,
+              "position": 1268
+            },
+            {
+              "at": "2026-10-08T01:09:37.384681+00:00",
+              "code": null,
+              "event": "play_started",
+              "ttffMs": null,
+              "position": 1268
+            },
+            {
+              "at": "2026-10-08T01:11:49.630993+00:00",
+              "code": null,
+              "event": "pause",
+              "ttffMs": null,
+              "position": 1400
+            },
+            {
+              "at": "2026-10-08T01:11:56.065428+00:00",
+              "code": null,
+              "event": "resume",
+              "ttffMs": null,
+              "position": 1400
+            }
+          ]
+        },
+        {
+          "type": "series",
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-08T01:12:06.199006+00:00",
+          "exactFileHash": "099a792376312073a2c3036af36c577e",
+          "events": [
+            {
+              "at": "2026-10-08T01:12:18.558111+00:00",
+              "code": null,
+              "event": "first_frame",
+              "ttffMs": 16239,
+              "position": 2045
+            },
+            {
+              "at": "2026-10-08T01:12:22.465107+00:00",
+              "code": null,
+              "event": "play_started",
+              "ttffMs": null,
+              "position": 2060
+            },
+            {
+              "at": "2026-10-08T01:14:30.237673+00:00",
+              "code": null,
+              "event": "pause",
+              "ttffMs": null,
+              "position": 2187
+            }
+          ]
+        },
+        {
+          "type": "series",
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-08T01:14:50.215085+00:00",
+          "exactFileHash": "099a792376312073a2c3036af36c577e",
+          "events": [
+            {
+              "at": "2026-10-08T01:15:03.806736+00:00",
+              "code": null,
+              "event": "first_frame",
+              "ttffMs": 13997,
+              "position": 2187
+            },
+            {
+              "at": "2026-10-08T01:15:09.418114+00:00",
+              "code": null,
+              "event": "play_started",
+              "ttffMs": null,
+              "position": 2187
+            },
+            {
+              "at": "2026-10-08T01:17:27.740715+00:00",
+              "code": null,
+              "event": "pause",
+              "ttffMs": null,
+              "position": 2325
+            }
+          ]
+        }
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "activeGlobal": 0,
+          "boundedOutput": {
+            "enabled": true,
+            "admissionProtocol": 1,
+            "admittedProducers": 0,
+            "waitingOutputRequests": 0,
+            "sessionMaxBytes": 536870912,
+            "playlistSegments": 64,
+            "retainedExtraSegments": 16,
+            "retainedSharedCacheMaxBytes": 4294967296,
+            "retainedSharedCacheSourceMaxBytes": 805306368,
+            "retainedSharedCacheDurationMaxSeconds": 3600,
+            "retainedSharedCacheSessions": 0,
+            "sessions": 0,
+            "bytes": 0,
+            "peakSessionBytes": 0,
+            "peakSessionFiles": 0,
+            "paused": 0
+          },
+          "sessions": []
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "activeGlobal": 0,
+          "boundedOutput": {
+            "enabled": true,
+            "admissionProtocol": 1,
+            "admittedProducers": 0,
+            "waitingOutputRequests": 0,
+            "sessionMaxBytes": 536870912,
+            "playlistSegments": 64,
+            "retainedExtraSegments": 16,
+            "retainedSharedCacheMaxBytes": 4294967296,
+            "retainedSharedCacheSourceMaxBytes": 805306368,
+            "retainedSharedCacheDurationMaxSeconds": 3600,
+            "retainedSharedCacheSessions": 0,
+            "sessions": 0,
+            "bytes": 0,
+            "peakSessionBytes": 0,
+            "peakSessionFiles": 0,
+            "paused": 0
+          },
+          "sessions": []
+        }
+      ]
+    },
+    "readiness": {
+      "at": "2026-10-08T01:17:56.963666+00:00",
+      "productionChanged": false,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:43.148136674Z",
+          "healthy": true,
+          "activeSessions": 0,
+          "memoryLimitBytes": 10737418240,
+          "recentEnabled": true,
+          "allAuthenticatedOwners": false,
+          "allowlistConfigured": true,
+          "cache": {
+            "recentOwnerScope": "owner-allowlist",
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "bytes": 0,
+            "reservedBytes": 0,
+            "entries": 0,
+            "evictions": 0,
+            "hits": 0,
+            "misses": 0
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:c8a56fa6dca348a4727c1eee8ccb6145b9c8185b867e54e134b0ffac95ea2c43",
+          "startedAt": "2026-10-07T17:52:45.72659218Z",
+          "healthy": true,
+          "activeSessions": 0,
+          "memoryLimitBytes": 10737418240,
+          "recentEnabled": true,
+          "allAuthenticatedOwners": false,
+          "allowlistConfigured": true,
+          "cache": {
+            "recentOwnerScope": "owner-allowlist",
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "bytes": 134217728,
+            "reservedBytes": 0,
+            "entries": 2,
+            "evictions": 0,
+            "hits": 4,
+            "misses": 0
+          }
+        }
+      ],
+      "hostMemoryBytes": {
+        "MemTotal": 66415353856,
+        "MemAvailable": 26761994240
+      }
+    },
+    "limits": [
+      "Normal startup remains slow, especially after seek; short public/range recovery did not guarantee uniform file throughput",
+      "Bounded in-pipeline window timings may include broker/consumer pacing and are not an independent curl bandwidth measurement",
+      "No new provider/relay root cause or NodeMaven intervention established",
+      "Short sampled checks, not whole-file or Android playback certification",
+      "No new independent range test, operator POST, deployment, route, reserve, codec, model, TTL, concurrency or guard change"
+    ]
   }
 }

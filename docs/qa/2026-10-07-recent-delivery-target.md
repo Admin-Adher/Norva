@@ -252,3 +252,53 @@ The observed short-range rate now exceeds the file's 19.822 Mbit/s average, but 
 The source read used the same ordinary direct claim, independent 0.5-second heartbeats with a one-second timeout, native takeover grace and account-occupancy checks. Zero heartbeat failures. The claim expired normally and all temporary body/header/private-output files were removed. No route, image, codec, reserve, cache TTL, concurrency or pilot-scope change; no IP rotation and no new automation.
 
 At **00:51:40 UTC (02:51 Paris)**, read-only closeout confirms zero active readers on the target account, the new claim expired and both Gateways healthy on the same `c8a56fa6…` image, with zero global sessions at that snapshot. This check used two public GETs / 20,000,000 bytes and one source range GET plus one redirect / 16 MiB, without retry. Safe receipts and distinct consumed markers are under `.codex-artifacts/relay-capacity-audit-20261008/`.
+
+
+## Real browser replay after the throughput improvement, 8 October 00:57–01:18 UTC (02:57–03:18 Paris)
+
+The improved 16 MiB transfer justified checking actual playback on the **same exact Normal and Severance S1E1 copies**. Six browser sessions were serialized through the existing owner-scoped pilot: initial resume, seek outside the loaded interval, and immediate reopening for each copy. The existing single-connection policy, claims, heartbeats, automatic playback gates and ordinary UI close remained active. No independent curl/media operator ran alongside playback.
+
+### Startup and continuity results
+
+The primary clock below is **UI action to the recorded `play_started` event**. The separate session-creation clock avoids confusing a server admission or first image with actual playback. Initial launches had no recent input seed; other profile/metadata caches were not erased.
+
+| Exact copy / action | Playback position | UI action → actual play | Session creation → actual play | Progress before intentional stop |
+|---|---:|---:|---:|---:|
+| Normal, initial resume | 472 s | **39.061 s** | 37.612 s | 161 s |
+| Normal, timeline seek | 1,102 s | **152.548 s** | 149.284 s | 171 s |
+| Normal, recent reopening | 1,273 s | **91.920 s** | 90.743 s | 63 s |
+| Severance S1E1, initial resume | 1,268 s | **19.266 s** | 17.815 s | 132 s |
+| Severance S1E1, timeline seek | 2,060 s | **21.953 s** | 16.266 s | 127 s |
+| Severance S1E1, recent reopening | 2,187 s | **20.538 s** | 19.203 s | 138 s |
+
+These are different playback positions, not paired benchmarks of one identical range. No unrequested copy, language or route substitution occurred. A stale accessibility target failed before the Severance launch; the refreshed UI control then produced one session. It is not a media failure or additional launch.
+
+Read-only browser observations sampled `currentTime`, `paused`, `readyState`, `error`, rate and buffered intervals, normally every two seconds within observation blocks. After startup, the samples advanced at approximately real time with `paused=false`, `readyState=4`, `rate=1` and no media error. Server event records contain no unexpected pause, buffering or error event in these six sessions. The pauses used to reveal controls, prepare seeks and stop tests are recorded explicitly. Sample gaps and short checks do not certify every frame, the complete film or Android decoding. Normal's recent reopening was only observed for about one minute; the other sessions exceeded two minutes of playback before the intentional stop.
+
+### Normal remains slow despite confirmed cache use
+
+Normal's seek produced the first-frame event with **19.083 s** reported TTFF, but actual playback only began at 01:03:13.546 UTC. The new stream's server offset was 1,087 s, with the required local seek to 15 s correctly applied. At 01:02:23–45, the browser remained at that position while its contiguous buffer end progressed from 82 to 90 seconds, including a roughly ten-second plateau. It was waiting for enough forward reserve; it was not stuck at zero or missing the automatic resume intent.
+
+The existing policy was `video-transcode`, initially ineligible for the faster gate because observed startup production was **0.950×**. Normal's reopening similarly reported **1.807×**. The unchanged 96-second fallback reserve was reached on reopening: the sampled buffer end moved from 94 to 98 seconds, then the player started normally. Fresh browser growth could still qualify the adaptive gate, but its sustained conditions were not established in those slow starts. No reserve, minimum rate, timeout, or fresh-position condition was weakened.
+
+Both reopenings **found and seeded 64 MiB**, and reused their recent delivery target: Normal used `subtitle-window-fallback`, Severance used `multi-audio`. Their independent validation phases took 3.215 and 3.374 seconds. The cache was therefore genuinely reused on Normal even though actual startup still took 92 seconds. Both subsequently completed new provider windows and continued playback; a precise timestamp for the last byte represented by the seed is not inferred from its byte size.
+
+For context, the bounded trace retained 63 completed 8 MiB windows during Normal's seek: **1.613–18.335 s**, median **3.042 s**. Normal's reopening retained 51 such windows: **0.904–6.156 s**, median **1.975 s**. These in-pipeline durations may include broker/consumer pacing; they are not another independent system-libcurl bandwidth test. Together with the measured browser reserve, they show that this playback did not receive uniformly fast usable output. They do not by themselves isolate the supplier, relay or an internal processing stage. No new network cause is claimed.
+
+The six Edge startup traces show zero catalogue, takeover and coordinator wait; Gateway admission was 0–1 ms. Their Gateway-ready durations were 18.093 / 16.327 / 15.820 seconds for Normal and 13.148 / 10.311 / 12.465 seconds for Severance. The remaining Normal delay is principally after that readiness milestone while the reserve fills, rather than a multi-minute admission wait. This does not establish that every future slow start has the same cause.
+
+### Severance and AAC/video checks
+
+Severance's cold resume and seek qualified the existing fast server policy at **2.442×** and **5.546×** respectively. The reopened stream initially reported only 0.983×, yet started at approximately 12–16 seconds of buffered media. The unchanged gate and sampled growth support the inference that its fresh browser adaptive path admitted it; the adaptive event itself was not separately retained. All three sessions progressed for more than two minutes before intentional stop, including the seek and the reopening that previously suffered repeated starvation in the evening checks. This is a positive replay, not a permanent throughput guarantee.
+
+Five short, already-generated output checks covered Normal before/after seek and all three Severance sessions. They performed **no new upstream read**. The sampled audio output is **AAC-LC, 48 kHz, stereo**; two-second software decodes exit successfully with zero diagnostic lines. Each sampled video segment has 48 decoded frames, maximum adjacent timestamp gap approximately **42 ms**, zero intervals above 100 ms and zero decoder diagnostics. Severance checks concern the existing `audio_0` output and one video segment; they do not certify every selectable track, audible quality throughout the episode or all content. No AAC regression is detected in these samples.
+
+### Closeout and conclusion
+
+At **01:17:55–56 UTC (03:17 Paris)**, all six test sessions are expired through ordinary UI closure, the audited target account has zero active readers, and both Gateways are healthy with zero global viewer sessions at that snapshot. Images and starts remain `c8a56fa6…`, 7 October 17:52:43/45. The private recent cache remains owner-allowlisted, with two ordinary 64 MiB entries and no reserved bytes at this snapshot; its normal expiration is not changed or bypassed. The browser is back on Movies. No temporary diagnostic media was created by the local segment checks.
+
+NodeMaven had no new diagnosis or confirmed intervention in the support conversation reread during this replay. No IP change, production setting, reserve/codec/cache TTL change, deployment, general rollout or automation was made. The five checks on the preceding documentary PR 702 now all pass, packages included.
+
+**Conclusion:** the improved path now supports these Severance replays and makes Normal playable again in the sampled intervals. **Normal's seek and reopening delays remain unacceptable for claiming universally fast resumes.** Keep the pilot restricted and the unresolved path investigation open; these observations do not justify another speculative product or network patch.
+
+Safe browser, server, phase and codec receipts: `.codex-artifacts/relay-playback-20261008/`; consolidated `replay-summary.safe.json`. `severance-control.png` shows the final control view after an intentional pause, before normal closure.
