@@ -102,7 +102,7 @@ test('missing coverage, bootstrap, unsupported clocks, escaping names and budget
 test('an early subtitle ENDLIST cannot certify the rest of a video window', async () => {
     const result = await captureSubtitleWindow({ renditions, videoSegments,
         readAsset: async name => name.endsWith('.m3u8')
-            ? Buffer.from('#EXTM3U\n#EXTINF:4,\nsubtitle_0-00001.vtt\n#EXT-X-ENDLIST\n') : await readAsset(name) });
+            ? Buffer.from('#EXTM3U\n#EXTINF:12,\nsubtitle_0-00001.vtt\n#EXT-X-ENDLIST\n') : await readAsset(name) });
     assert.equal(result, null);
 });
 
