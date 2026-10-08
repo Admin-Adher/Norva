@@ -455,3 +455,58 @@ Les cinq paquets de la fixture concordent **à la fin de l’essai**. Cela ne co
 L’admission HLS reste fermée. Il faut encore une preuve de couverture exploitable sans scan complet coûteux, l’intégration et la persistance de l’historique dans la session réelle, puis une validation perceptuelle sur des sources plus variées. **Aucun nouveau gain sur Normal, aucun déploiement et aucune généralisation du pilote.**
 
 Reçus et scripts : `.codex-artifacts/subtitle-broker-integration-20261008/` et `.codex-artifacts/subtitle-audio-history-20261008/`. Les deux `summary.safe.json` vérifient les métriques, conservent les échecs intermédiaires et distinguent les expériences locales des appels externes. À **18:31:24 Paris**, contrôle read-only : les deux Gateways sont sains, même image PR706, mêmes démarrages de 16:25:21, pilote `owner-allowlist` et dispatcher actif. Conteneur de preuve absent ; médias synthétiques éphémères supprimés avec celui-ci. L’incident historique de redémarrage d’hôte reste de cause inconnue.
+
+## Conservation brève du même décodeur — 8 octobre, contrôle final à 18:56 Paris
+
+Les cinq contrôles de PR714 passent désormais, paquets compris. Le chemin qui reconstruit un raccord depuis le cache reste soumis à la preuve de couverture des sous-titres décrite plus haut. Cette phase explore une autre possibilité pour une **reprise très récente sur la même timeline** : conserver brièvement le processus FFmpeg et son état de démultiplexage, de décodage, de rééchantillonnage et d’encodage. Cela pourrait éviter leur reconstruction, notamment l’état AAC et les sous-titres déjà lus mais destinés à plus tard.
+
+Il s’agit d’un **prototype isolé**, utilisant le broker inchangé de l’image PR706, la vraie classe de cache et une source HTTP synthétique locale. Le conteneur emploie `network none`, l’utilisateur 1000, une racine en lecture seule, 512 Mio de mémoire et un tmpfs éphémère de 128 Mio. Aucun média fournisseur, session utilisateur ou déploiement. Le prototype ne publie aucune nouvelle entrée HLS de production et n’assouplit pas la garde des sous-titres.
+
+### Fermeture amont, contrôle du fichier, puis poursuite du même processus
+
+La fixture de 240 s utilise une vidéo H264 128 × 128 à 24 images/s, deux bruits roses stéréo indépendants à 44,1 kHz encodés en AAC et cinq paquets de sous-titres sur deux pistes. La sortie HLS est H264/AAC stéréo 48 kHz avec des segments de quatre secondes. Le témoin exécute les mêmes paramètres depuis le fichier local, sans pause.
+
+Le prototype ferme la réponse amont après les quatre premiers Mio et bloque la requête suivante. L’override **`Connection: close` du harnais** ferme également la connexion TCP source ; il ne modifie pas le transport de production. Le processus FFmpeg et son accès HTTP loopback au broker restent conservés. Après 500 ms de stabilisation, une observation de **1 500 ms** constate zéro nouvelle requête et zéro connexion source. FFmpeg peut encore traiter les octets déjà en mémoire : sa playlist progresse durant cette pause. Il n’est donc pas suspendu et son coût local doit être borné séparément.
+
+Avant de libérer la requête suivante, le parcours ordinaire de cache relit **quatre échantillons frais**, vérifie taille, cible et empreintes, puis acquiert le cache. Il s’agit du contrôle échantillonné existant, pas d’une comparaison exhaustive du fichier distant. Le même processus reprend ensuite sa lecture séquentielle. Sur tout l’essai, le maximum est une réponse source et une connexion source actives ; les 17 requêtes sont toutes locales.
+
+Résultats comparés au témoin continu :
+
+- **60 segments TS strictement identiques**, par SHA-256 individuel.
+- Les deux fichiers WebVTT sont identiques octet par octet : deux répliques forcées à 70,023–75,023 et 150,023–155,023 s ; trois autres à 2,023–14,023, 60,023–110,023 et 190,023–195,023 s.
+- L’audio PCM décodé sur la sortie complète de 240 s possède la même empreinte SHA-256. Aucun diagnostic d’encodage/décodage sur ce cas positif.
+- Le premier changement de playlist après libération arrive en **33 ms**. C’est une mesure locale après validation ; elle n’inclut ni le clic, ni la validation, ni l’affichage navigateur et ne constitue pas un gain sur Normal.
+
+Conserver le même encodeur supprime ici les différences de signal introduites par sa reconstruction. Cette égalité concerne uniquement la fixture testée. Elle ne constitue ni une acceptation à l’écoute sur des œuvres réelles, ni une preuve de couverture temporelle complète avant EOF pour le chemin de raccord du cache. Aucun nouveau replay navigateur ou Android dans cette phase.
+
+### Expiration, modification du fichier et révocation
+
+**12 tests unitaires** du nouveau verrou expérimental passent : fermeture seulement après drainage, reprise liée au même périmètre, validation obligatoire, absence de réponse amont concurrente, annulation, expiration, révocation et refus de prolonger la durée en répétant la pause. Les 40 tests de PR714 ne sont pas rejoués ou additionnés à ce total.
+
+Trois contrôles supplémentaires utilisent le vrai broker et un processus FFmpeg dans le conteneur isolé :
+
+| Situation | Résultat |
+| --- | --- |
+| Conservation expirée, borne expérimentale de 800 ms | Reprise refusée ; aucun nouvel appel source |
+| Taille et cible identiques, mais octets modifiés | Quatre échantillons relus ; cache refusé avec `sample-changed`, zéro échantillon concordant ; aucune poursuite avec les données anciennes |
+| Révocation du propriétaire simulée | Cache vidé, requête en attente rejetée et reprise impossible |
+
+Le **superviseur du harnais** ferme explicitement le broker et arrête FFmpeg dans ces trois cas. Les diagnostics d’entrée interrompue sont attendus et conservés. Après nettoyage : zéro réponse active, zéro attente du verrou, cache vide et aucune nouvelle requête pendant le contrôle final. Les 454–456 ms consignées incluent 450 ms d’attente volontaire d’observation ; ce ne sont pas des temps d’arrêt produit. Le test ne prouve pas encore la révocation d’une session Edge authentifiée, ni une libération/reprise de claim fournisseur réel.
+
+Le premier essai positif avait intercepté le `fetch` global de la VM, alors que le broker utilise son `fetchImpl` et Undici. Des requêtes continuaient donc à passer : l’assertion du harnais a échoué. Le test corrigé injecte son verrou dans l’option réelle `fetchImpl`. La première erreur est conservée ; aucun défaut du broker de production n’en est déduit. L’assertion de playlist immobile a également été remplacée par le contrôle du réseau : la préparation locale à partir des octets déjà reçus est attendue.
+
+### Coût et limites d’intégration
+
+Le processus FFmpeg observé consomme **80 652–80 692 Kio de RSS**, soit environ 79 Mio, pour cette petite fixture. Il effectue encore 31 ticks CPU pendant l’observation. Ces chiffres excluent le broker, le cache et leurs buffers ; ce n’est pas une borne pour des vidéos 1080p ou 4K. La conservation de cinq secondes du test positif est une limite de prototype, pas un nouveau TTL de production.
+
+Avant tout pilote réel, il faut intégrer :
+
+1. La fermeture explicite du transport et la libération ordinaire du claim fournisseur, puis sa réacquisition avant validation et poursuite, en gardant la route épinglée et la mono-connexion.
+2. La liaison propriétaire/session/génération/fichier/pistes et l’arrêt immédiat en cas de changement, révocation, nouvelle lecture ou expiration.
+3. Les quotas de processus, budgets mémoire et stockage local ainsi que leur nettoyage. Les sorties peuvent encore croître à partir des données déjà reçues.
+4. La pause **hors** d’une tentative fournisseur déjà chronométrée : le verrou du harnais est actuellement à l’intérieur du cycle d’appel du broker. Il ne faut ni le déployer tel quel ni prolonger les timeouts pour le masquer.
+5. Le raccordement au lecteur réel et aux sous-titres progressivement disponibles, puis des mesures sur des VOD réelles.
+
+Cette piste couvre la poursuite du **même processus et de sa timeline existante**. Elle ne couvre pas les sauts arbitraires hors des segments conservés, la perte du processus ou la reprise ancienne à partir du seul disque. Le chemin de cache durable conserve donc ses blocages de couverture et d’intégration déjà décrits.
+
+Reçus et scripts : `.codex-artifacts/warm-decoder-resume-20261008/`, dont `summary.safe.json`. À **18:56:09 Paris**, les deux Gateways restent sains, même image PR706 et mêmes démarrages de 16:25:21 ; dispatcher actif, pilote `owner-allowlist`, conteneur de preuve supprimé. **Aucun déploiement, gain supplémentaire sur Normal ou extension du pilote.**
