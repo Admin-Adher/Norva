@@ -9678,5 +9678,148 @@
         "sha256": "3e8026fad1b6dece217dedcdaae126ff3f3e9a0dabf640ed4b86381b78cb92af"
       }
     ]
+  },
+  "committedSubtitlePublicPath20261009": {
+    "atUtc": "2026-10-08T22:37:15.509Z",
+    "scope": "isolated synthetic Gateway + claim SQL + Edge normalizer + WatchPage; no provider media",
+    "codeHead": "3776bfc70cb34b86e9334fbdde8f0dc3a5955e9d",
+    "pr": 722,
+    "firstFrameMs": 1320.4999998569547,
+    "playingMs": 3657.399999856949,
+    "initialPlayingMs": 9221.5,
+    "resumeSourcePosition": 99.252181,
+    "localSeekTarget": 69.252181,
+    "resumedMediaSeconds": 144.747819,
+    "manualPauseForMenu": 101.367554,
+    "continuousMediaAfterMenuSeconds": 112.585774,
+    "newSourceBytesReceived": true,
+    "maxSourceConnections": 1,
+    "sameDecoder": true,
+    "oldAccessRevoked": true,
+    "waitingEvents": [],
+    "hlsErrors": [],
+    "frameGaps": [
+      {
+        "phase": "initial",
+        "gap": 7.766299999999999,
+        "at": 0.042
+      },
+      {
+        "phase": "resumed",
+        "gap": 2.3671999999999973,
+        "at": 69.292
+      }
+    ],
+    "frameGapInterpretation": "both gaps at initial/retained startup gate; none after the first resumed media second; manual pause tested separately",
+    "showingTrackMax": 1,
+    "futureCueActiveAfterResume": true,
+    "fullTrackObserved": true,
+    "offObserved": true,
+    "publicInternalArtifactRequests": "committed_2.commit, committed_2.vtt, sub_128.vtt all 404 (asserted by fixture)",
+    "audio": {
+      "atUtc": "2026-10-08T22:36:25.210Z",
+      "segments": [
+        "video-00053.ts",
+        "video-00054.ts",
+        "video-00055.ts"
+      ],
+      "sourceBytes": 67429636,
+      "subtitlePackets": [
+        {
+          "stream": 2,
+          "cues": [
+            {
+              "start": 40.023,
+              "end": 45.023,
+              "text": "Forced"
+            },
+            {
+              "start": 120.023,
+              "end": 125.023,
+              "text": "Forced second"
+            }
+          ],
+          "timeCoverage": false,
+          "complete": false
+        },
+        {
+          "stream": 3,
+          "cues": [
+            {
+              "start": 30.023,
+              "end": 80.023,
+              "text": "Crossing"
+            },
+            {
+              "start": 160.023,
+              "end": 165.023,
+              "text": "Ending"
+            }
+          ],
+          "timeCoverage": false,
+          "complete": false
+        }
+      ],
+      "audio": [
+        {
+          "codec": "aac",
+          "profile": "LC",
+          "rate": "48000",
+          "channels": 2
+        }
+      ],
+      "audioPackets": 563,
+      "videoPackets": 288,
+      "decodeExit": 0,
+      "decodeErrors": "",
+      "probeErrors": ""
+    },
+    "production": {
+      "atUtc": "2026-10-08T22:38:12.947864+00:00",
+      "productionChanged": false,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist",
+          "retainedEnabled": false
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist",
+          "retainedEnabled": false
+        }
+      ],
+      "dispatcherRunning": true,
+      "proofContainers": {
+        "norva-retained-publish-unit-20261008": true,
+        "norva-retained-progressive-publish-20261008": true,
+        "norva-retained-public-subtitles-20261009": true,
+        "norva-retained-watch-clock-20261008": true,
+        "norva-retained-watch-progressive-20261008": true,
+        "norva-retained-watch-progressive-flush-20261008": true,
+        "norva-retained-watch-sliding-clock-20261008": true,
+        "norva-retained-final-http-20261008": true
+      },
+      "proofContainerAbsent": true
+    },
+    "tests": {
+      "targetedPassed": 137,
+      "includesEarlier99": true,
+      "androidPending": true,
+      "ciPending": true
+    },
+    "limitations": [
+      "synthetic visibility assertion; not full deployed auth entry",
+      "audible acceptance missing; muted browser",
+      "no claim for native retained playback",
+      "no varied-provider retained validation",
+      "no activation or gain on Normal"
+    ]
   }
 }
