@@ -1,0 +1,368 @@
+{
+  "observedAt": "2026-10-08T07:03:29.405231+00:00",
+  "scope": "Existing owner-only recent resume pilot; exact chosen copies; sequential sessions",
+  "status": "Sliding HLS retention and continuation validated on MP4; Normal remains on input-window fallback",
+  "code": "3ee559aa40ceba9330fc094286a60694a9e65317",
+  "testFixtureCode": "d854543a1947883dac807a049a89f4c1e7eebccb",
+  "pullRequest": 705,
+  "image": "sha256:6359a11315e1a778bdcc1ef6a6cfed8d63b7f75d15a408765995b47418ee63f8",
+  "deployment": {
+    "revision": "3ee559aa40ceba9330fc094286a60694a9e65317",
+    "image": "sha256:6359a11315e1a778bdcc1ef6a6cfed8d63b7f75d15a408765995b47418ee63f8",
+    "startedAt": "2026-10-08T06:40:13.729800+00:00",
+    "pausedAt": "2026-10-08T06:40:13.820650+00:00",
+    "gatewaysApplied": [
+      {
+        "name": "norva-media-gateway",
+        "at": "2026-10-08T06:40:31.902828+00:00"
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "at": "2026-10-08T06:40:34.570361+00:00"
+      }
+    ],
+    "edgesUnchanged": true,
+    "leasesForced": false,
+    "dispatcherRestarted": false,
+    "completedAt": "2026-10-08T06:40:34.642331+00:00",
+    "restoredAt": "2026-10-08T06:40:34.941848+00:00",
+    "admissionsRestored": true,
+    "workerStateRestored": true,
+    "dispatcherPreserved": true
+  },
+  "runtimeVerification": {
+    "at": "2026-10-08T07:03:30.730939+00:00",
+    "revision": "3ee559aa40ceba9330fc094286a60694a9e65317",
+    "image": "sha256:6359a11315e1a778bdcc1ef6a6cfed8d63b7f75d15a408765995b47418ee63f8",
+    "sourceTreeSha256": "406b30546a657d410b3e3741cd08bc79e07ef0c620c599eeff7e99ddfb1cf07b",
+    "replicas": [
+      {
+        "name": "norva-media-gateway",
+        "startedAt": "2026-10-08T06:40:30.568552783Z",
+        "healthy": true,
+        "all89SourceHashesMatch": true
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "startedAt": "2026-10-08T06:40:33.20363193Z",
+        "healthy": true,
+        "all89SourceHashesMatch": true
+      }
+    ],
+    "admissions": {
+      "cron": {
+        "id": 159,
+        "active": true
+      },
+      "paused": false
+    },
+    "stopAbsent": true,
+    "dispatcherRunning": true,
+    "workerRunning": true
+  },
+  "tests": {
+    "targetedPassed": 139,
+    "targetedSkipped": 2,
+    "groupsOverlap": true,
+    "canary": {
+      "at": "2026-10-08T06:38:02.543354+00:00",
+      "image": "sha256:6359a11315e1a778bdcc1ef6a6cfed8d63b7f75d15a408765995b47418ee63f8",
+      "revision": "3ee559aa40ceba9330fc094286a60694a9e65317",
+      "healthy": true,
+      "user": "1000:1000",
+      "network": "none",
+      "productionVolumes": false,
+      "sourceHashesMatch": true,
+      "health": {
+        "ok": true,
+        "videoEncoder": {
+          "protocol": 1,
+          "backend": "vaapi",
+          "hardware": true,
+          "ready": true,
+          "preflight": "vaapi-ready",
+          "deviceConfigured": true,
+          "decode": "vaapi-exact-profile-with-software-fallback",
+          "outputCodec": "h264"
+        },
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "recentOwnerScope": "owner-allowlist"
+      },
+      "providerRequests": 0,
+      "gpuEncodePassed": true,
+      "allSourceFiles0644": true,
+      "packagePermissionsPreserved": true,
+      "functional": {
+        "functionalPassed": true,
+        "syntheticFilesRemoved": true,
+        "tests": 1,
+        "fixture": "600 second sliding output, measured clock, cached video/audio/subtitles, 280 second continuation, decode across splice"
+      },
+      "functionalCanarySha256": "d5c2215bbc094eb0be1e67641c81acf2b9e0a7cf2aa8d56cf31647eb5db81738"
+    },
+    "initialCanaryFailure": "FFmpeg 5 -xerror demux corrupt-input-packet at independent TS encoder splice; preserved separately; each lane strict decode and merged expected frame count subsequently passed",
+    "nativeUiOrPlayerCertification": false
+  },
+  "trials": [
+    {
+      "phase": "baseline-reopen",
+      "clickedAt": "2026-10-08T06:27:40.920Z",
+      "sessionCreatedAt": "2026-10-08T06:27:42.427602+00:00",
+      "sourcePositionSeconds": 1336,
+      "playStartedAt": "2026-10-08T06:28:14.205696+00:00",
+      "clickToPlaybackSeconds": 33.285696,
+      "stateAtCloseout": "expired",
+      "errorAtCloseout": null
+    },
+    {
+      "phase": "candidate-fill",
+      "clickedAt": "2026-10-08T06:42:17.907Z",
+      "sessionCreatedAt": "2026-10-08T06:42:19.327529+00:00",
+      "sourcePositionSeconds": 1506,
+      "playStartedAt": "2026-10-08T06:42:51.782378+00:00",
+      "clickToPlaybackSeconds": 33.875378,
+      "stateAtCloseout": "expired",
+      "errorAtCloseout": null
+    },
+    {
+      "phase": "subtitle-diagnostic",
+      "clickedAt": "2026-10-08T06:45:53.027Z",
+      "sessionCreatedAt": "2026-10-08T06:45:54.437111+00:00",
+      "sourcePositionSeconds": 1634,
+      "playStartedAt": "2026-10-08T06:46:22.887452+00:00",
+      "clickToPlaybackSeconds": 29.860452,
+      "stateAtCloseout": "expired",
+      "errorAtCloseout": null
+    },
+    {
+      "phase": "control-viceversa-fill",
+      "clickedAt": "2026-10-08T06:57:05.740Z",
+      "sessionCreatedAt": "2026-10-08T06:57:07.150128+00:00",
+      "sourcePositionSeconds": 470,
+      "playStartedAt": "2026-10-08T06:57:36.976304+00:00",
+      "clickToPlaybackSeconds": 31.236304,
+      "stateAtCloseout": "expired",
+      "errorAtCloseout": null
+    },
+    {
+      "phase": "control-viceversa-warm",
+      "clickedAt": "2026-10-08T07:00:02.466Z",
+      "sessionCreatedAt": "2026-10-08T07:00:03.866262+00:00",
+      "sourcePositionSeconds": 598,
+      "playStartedAt": "2026-10-08T07:00:07.831057+00:00",
+      "clickToPlaybackSeconds": 5.365057,
+      "stateAtCloseout": "expired",
+      "errorAtCloseout": null
+    }
+  ],
+  "notRandomizedSamePositionAB": true,
+  "normal": {
+    "hlsWindowStored": false,
+    "sourceWindowReused": true,
+    "captureRejection": "subtitle-coverage-or-revoked",
+    "forcedSubtitleBootstrapIsNotCoverage": true,
+    "sparseSubtitleElapsedInfDiffersFromCueClock": true,
+    "noMeasuredCausalStartupGain": true,
+    "lastSample": {
+      "at": "2026-10-08T06:54:44.338Z",
+      "stage": "subtitle-diagnostic-end",
+      "buffered": [
+        [
+          470.026333,
+          622.025333
+        ]
+      ],
+      "currentTime": 502.043164,
+      "error": null,
+      "paused": false,
+      "readyState": 4
+    },
+    "localDecode": {
+      "at": "2026-10-08T06:44:48.873480+00:00",
+      "localOnly": true,
+      "outputs": [
+        {
+          "audioDecodeExit": 0,
+          "audioDecoderDiagnosticLines": 0,
+          "createdAt": "2026-10-08T06:42:19.628Z",
+          "probeExit": 0,
+          "streams": [
+            {
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "start_time": "295.426333"
+            },
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "start_time": "295.437333"
+            }
+          ],
+          "localVideoFrames": 48,
+          "videoIntervalMaxSeconds": 0.04199999999997317,
+          "videoIntervalsAbove100ms": 0,
+          "decoderErrorLines": 0,
+          "frameProbeExit": 0,
+          "errorKind": null
+        }
+      ]
+    }
+  },
+  "control": {
+    "name": "Vice-versa 2",
+    "preparedHlsWindowHit": true,
+    "cacheAheadSeconds": 50,
+    "sourceSeededBytes": 8388608,
+    "continuationReadyMs": 4966,
+    "slidingContinuationSequenceObserved": 13,
+    "browserSamples": [
+      {
+        "phase": "control-viceversa-fill",
+        "at": "2026-10-08T06:58:27.406Z",
+        "buffered": [
+          [
+            20.062344,
+            124.062343
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 51.374843
+      },
+      {
+        "phase": "control-viceversa-fill-stop",
+        "at": "2026-10-08T06:59:43.971Z",
+        "buffered": [
+          [
+            96.062344,
+            248.062343
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 127.940396
+      },
+      {
+        "phase": "control-viceversa-warm",
+        "at": "2026-10-08T07:01:14.431Z",
+        "buffered": [
+          [
+            38.015989,
+            172.053332
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 69.217956
+      },
+      {
+        "phase": "control-viceversa-warm-end",
+        "at": "2026-10-08T07:03:08.613Z",
+        "buffered": [
+          [
+            152.062345,
+            304.062344
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 183.399738
+      }
+    ],
+    "localDecode": {
+      "at": "2026-10-08T07:01:45.549384+00:00",
+      "localOnly": true,
+      "outputs": [
+        {
+          "audioDecodeExit": 0,
+          "audioDecoderDiagnosticLines": 0,
+          "createdAt": "2026-10-08T07:00:04.102Z",
+          "probeExit": 0,
+          "streams": [
+            {
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "start_time": "201.462344"
+            },
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 2,
+              "start_time": "201.464000"
+            }
+          ],
+          "localVideoFrames": 48,
+          "videoIntervalMaxSeconds": 0.041667000000018106,
+          "videoIntervalsAbove100ms": 0,
+          "decoderErrorLines": 0,
+          "frameProbeExit": 0,
+          "errorKind": null
+        }
+      ]
+    }
+  },
+  "closeout": {
+    "gatewayActiveSessions": [
+      0,
+      0
+    ],
+    "gatewayHealthy": [
+      true,
+      true
+    ],
+    "pilotStillOwnerAllowlist": true,
+    "noOperatorMediaFilesCreated": true,
+    "canaryRemoved": true,
+    "noForcedLeaseOrLoweredReserve": true
+  },
+  "evidence": [
+    {
+      "path": ".codex-artifacts/resume-sliding-playlist-20261008/baseline-before-stop.safe.json",
+      "sha256": "cd069eef7830d63c24aff1ce6c9f505d536f8e216db67fda8ed305e1ad21670a"
+    },
+    {
+      "path": ".codex-artifacts/resume-sliding-playlist-20261008/candidate-fill-rolling.safe.json",
+      "sha256": "f20aa4432294f630828e0ecbb00bc3773cdd49af38e3d01bff2a1334ebc2d1a5"
+    },
+    {
+      "path": ".codex-artifacts/resume-sliding-playlist-20261008/subtitle-open-fragments.safe.json",
+      "sha256": "5fa57a704d2793440fe1eb8f662f399699a86d081011e5faec15ae5e5e283006"
+    },
+    {
+      "path": ".codex-artifacts/resume-sliding-playlist-20261008/diagnostic-stopped.safe.json",
+      "sha256": "2d8e06f8c5595b4d2fe915651cf978b6cef19571a7cc5b4f954f396eb1aa1e62"
+    },
+    {
+      "path": ".codex-artifacts/resume-sliding-playlist-20261008/control-fill-captured.safe.json",
+      "sha256": "3bc10befcfb8502b43b2d810977982c23fc10dc6bd11db648fcaf419661f4dad"
+    },
+    {
+      "path": ".codex-artifacts/resume-sliding-playlist-20261008/control-warm-continuation.safe.json",
+      "sha256": "f02ee6705b045440fcd3de7eaeeb158a19f8ecccc5cd7adf416c14ff5ca3aa8d"
+    },
+    {
+      "path": ".codex-artifacts/resume-sliding-playlist-20261008/browser-observations.safe.json",
+      "sha256": "3a78e94acdc60f50ffdff1c7effb4ca9fbeda413207b3b8e97e1ae26c4716cfb"
+    },
+    {
+      "path": ".codex-artifacts/resume-sliding-playlist-20261008/final-state.safe.json",
+      "sha256": "74174e49c48c59d2d30cf9572fd0ac65a954dc63f467bda0c6ed76adaf031434"
+    },
+    {
+      "path": ".codex-artifacts/resume-sliding-playlist-20261008/final-runtime.safe.json",
+      "sha256": "60342c133467622c9953b407861efc0e61cbb79312200cd0a6f404004be5fd13"
+    }
+  ]
+}
