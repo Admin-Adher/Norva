@@ -89,3 +89,13 @@ test('unbounded retention and missing ownership rejected', () => {
         assert.throws(()=>new RetainedInputBarrier({...args,onClose:()=>{}}));
     }
 });
+test('a queued expiry from an earlier pause cannot close the resumed or newly parked input', async () => {
+    const scope = {}, timers = [];
+    const gate = new RetainedInputBarrier({ scope, onClose: () => {}, setTimer: fn => { timers.push(fn); return timers.length; }, clearTimer: () => {} });
+    const first = await gate.park(scope, async () => {});
+    assert.equal(await gate.resume(first, scope, async () => true, () => true), true);
+    timers[0](); assert.equal(gate.status().state, 'active');
+    const second = await gate.park(scope, async () => {});
+    timers[0](); assert.equal(gate.status().state, 'parked');
+    assert.ok(second); timers[1](); assert.equal(gate.status().state, 'closed');
+});

@@ -129,9 +129,10 @@ const { FinitePlaybackRangeReuse } = require('./finitePlaybackRangeReuse');
 const { privateResumeBinding, createPrivateResumeOwnerGate, createRecentResumeOwnerGate } = require('./private-resume-binding');
 const { createFreshResumeHandoff, consumeFreshResumeHandoff } = require('./fresh-resume-handoff');
 const { RetainedInputBarrier } = require('./retained-input-barrier');
+const { RetainedSessionTransfer } = require('./retained-session-transfer');
 const { retainRecentDeliveryTarget, consumeRecentDeliveryTarget } = require('./recent-delivery-target');
 const { privateResumeProfile, canonicalResumeProfile } = require('./private-resume-profile');
-const { captureSamples, SAMPLE_BYTES, captureInputWindows, RECENT_INPUT_MAX_BYTES,
+const { captureSamples, sampleProof, samplesMatch, SAMPLE_BYTES, captureInputWindows, RECENT_INPUT_MAX_BYTES,
     RECENT_HEADER_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES } = require('./recent-resume-samples');
 const { validateRecentResume, recentResumeTargetParts, compareRecentResumeTargetParts } = require('./recent-resume-validation');
 const { PrivateResumeHlsCache, parseResumeMediaPlaylist } = require('./private-resume-hls-cache');
@@ -2824,6 +2825,16 @@ const canUseRecentResumeSamples = createRecentResumeOwnerGate({
     enabled: process.env.PRIVATE_RESUME_RECENT_SAMPLES_ENABLED === 'true',
     ownerHashes: process.env.PRIVATE_RESUME_RECENT_SAMPLES_OWNER_HASHES,
     allAuthenticatedOwners: process.env.PRIVATE_RESUME_RECENT_SAMPLES_ALL_AUTHENTICATED_OWNERS === 'true',
+});
+// Separate, explicit pilot opt-in. Omission (including an empty owner list)
+// leaves decoder retention disabled; the existing cache policy is unchanged.
+const retainedSessionOwnerGate = createRecentResumeOwnerGate({
+    enabled: process.env.PRIVATE_RETAINED_SESSION_ENABLED === 'true',
+    ownerHashes: process.env.PRIVATE_RETAINED_SESSION_OWNER_HASHES,
+});
+const retainedSessionTransfer = new RetainedSessionTransfer({
+    stop: session => stopSession(session, { reason: 'retained-session-discarded' }),
+    revoke: session => revokeSessionPlaybackAccess(session),
 });
 const privateResumeHlsCache = new PrivateResumeHlsCache({
     recentRevalidation: process.env.PRIVATE_RESUME_RECENT_SAMPLES_ENABLED === 'true',
@@ -7364,11 +7375,14 @@ async function createStrictLidBroker(options = {}) {
     server.unref?.();
     const address = server.address();
     let closePromise = null;
-    // Not enabled by any production session call site. This internal opt-in
-    // prepares the drained transport primitive without retaining user sessions.
+    // A separately gated session owner can retain this private decoder input.
     if (options.retainedInputScope) context.retainedInputBarrier = new RetainedInputBarrier({
         scope: options.retainedInputScope, ttlMs: options.retainedInputTtlMs ?? 5000,
-        onClose: () => { setImmediate(() => broker.close().catch(() => {})); },
+        onClose: reason => {
+            // Mark interrupted synchronously, before the blocked input can EOF.
+            try { options.onRetainedInputClose?.(reason); } catch (_) {}
+            setImmediate(() => broker.close().catch(() => {}));
+        },
     });
     const broker = {
         async parkRetainedInput(scope) {
@@ -7385,7 +7399,7 @@ async function createStrictLidBroker(options = {}) {
                 if (remaining) await new Promise(resolve => setTimeout(resolve, remaining));
             }) ?? null;
         },
-        async resumeRetainedInput(token, scope, validate) {
+        async resumeRetainedInput(token, scope, validate, commit = () => true) {
             if (!context.retainedInputBarrier || typeof validate !== 'function') return false;
             return context.retainedInputBarrier.resume(token, scope, validate, () => {
                 if (context.closed || context.terminalError) return false;
@@ -7397,7 +7411,9 @@ async function createStrictLidBroker(options = {}) {
                 }
                 context.dispatcher = replacement;
                 context.dispatcherCreatedAtMs = Date.now();
-                return true;
+                // Rotate session ownership synchronously before queued provider
+                // reads resume. No media token is exposed during validation.
+                return commit() === true;
             });
         },
         get retainedInputStatus() { return context.retainedInputBarrier?.status() || null; },
@@ -12259,6 +12275,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             clientAudioPassthrough: clientAudioPassthrough === false || normalizedPlaybackHint.clientAudioPassthrough === false || normalizedPlaybackHint.client_audio_passthrough === false ? false : true,
             completeHlsCachePolicy: normalizedCompleteHlsCachePolicy,
         };
+        const retainedRequestBinding = retainedSessionRequestBinding(req.body, normalizedOwnerKey);
         // Authenticate and validate an immutable local hit before touching any
         // provider holder or background worker. A complete cache session owns
         // no provider socket and must not evict one merely to discover that hit.
@@ -12354,6 +12371,21 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             }
         }
         const cleanupMs = Math.max(0, Date.now() - cleanupStartedAt);
+
+        if (!completeHlsCacheLookup.hit && retainedRequestBinding) {
+            const retained = await tryResumeRetainedSession({ lookup: { ...cacheLookupSession,
+                userAgent, sourceContainerAuthority: normalizedSourceContainerAuthority,
+                canaryProviderRoute: adaptiveRouteDecision?.controlStatus === 'canary-shadow-applied' ? adaptiveRouteDecision : null },
+                binding: retainedRequestBinding, playbackSessionId, expiresAt,
+                signal: sessionRequestAbortController.signal });
+            if (retained) {
+                createdSession = retained;
+                if (sessionRequestAbortController.signal.aborted) throw new Error('Session request aborted');
+                retained.startupTimings.retainedSessionTransferMs = Math.max(0, Date.now() - sessionCreateStartedAt);
+                retained.startupTimings.totalMs = retained.startupTimings.retainedSessionTransferMs;
+                return res.status(201).json(gatewayCreatedSessionPayload(req, retained));
+            }
+        }
 
         const id = crypto.randomUUID();
         const accessToken = randomToken();
@@ -12469,6 +12501,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             ownerKey: normalizedOwnerKey,
             canaryProviderRoute: adaptiveRouteDecision?.controlStatus === 'canary-shadow-applied'
                 ? adaptiveRouteDecision : null,
+            retainedRequestBinding,
             providerSlotKey: playbackProviderSlotKey,
             mode: mode === 'transcode' ? 'transcode' : 'remux',
             userAgent: sanitizeUserAgent(userAgent),
@@ -12999,7 +13032,7 @@ function gatewayCreatedSessionPayload(req, session) {
         multiAudioHls: multiAudioHlsDiagnosticsForSession(session),
         subtitleRenditions: exactSubtitleRenditionsForSession(session),
         exactSubtitleHls: exactSubtitleHlsDiagnosticsForSession(session),
-        requestedSeekOffset: session.seekOffset || 0,
+        requestedSeekOffset: session.retainedResumePosition ?? session.seekOffset ?? 0,
         actualStartOffset: session.actualStartOffset || 0,
         localSeekTarget: session.localSeekTarget || 0,
         sourceTimestamps: session.sourceTimestamps === true,
@@ -13039,6 +13072,9 @@ app.delete('/raw-pumps', requireGatewayAuth, async (req, res) => {
     // Await socket drain before the coordinator admits a replacement viewer.
     try {
         const nativeRevoked = await nativeMp4Sessions.revoke(ownerKey, sid, globalCleanup);
+        await Promise.all([...sessions.values()].filter(session => session.retainedSessionState
+            && session.ownerKey === ownerKey && (globalCleanup || session.playbackSessionId === sid))
+            .map(session => stopSession(session, { reason: 'owner-revoked' })));
         if (globalCleanup) {
             privateResumeByteRanges.revokeOwner(ownerKey);
             finitePlaybackRangeReuse.revokeOwner(ownerKey);
@@ -13249,6 +13285,15 @@ app.delete('/sessions/:id/viewers/:attachmentId', requireGatewayAuth, async (req
 app.delete('/sessions/:id', requireGatewayAuth, async (req, res) => {
     const session = sessions.get(req.params.id);
     if (!session) return res.status(404).json({ error: 'Session not found' });
+    if (session.retainedSessionState) {
+        // Replayed cleanup of the old ID must neither acknowledge an undrained
+        // pause nor stop a decoder being adopted by a different session ID.
+        await session.retainedDetachPromise;
+        if (sessions.get(req.params.id) !== session) return res.status(404).json({ error: 'Session not found' });
+        if (session.retainedSessionState === 'parked' || session.retainedSessionState === 'validating') {
+            return res.json({ success: true, finalCodecProfile: privateFinalCodecProfileForSession(session) });
+        }
+    }
     const continuationRequested = String(
         req.query?.completeCache ?? req.query?.complete_cache ?? '',
     ).trim().toLowerCase() === 'continue';
@@ -13288,6 +13333,10 @@ app.delete('/sessions/:id', requireGatewayAuth, async (req, res) => {
     if (req.query?.resumePosition !== undefined && Number.isFinite(resumePosition)
         && resumePosition > 0 && resumePosition < 86_400) session.privateResumeStopPosition = resumePosition;
     const finalCodecProfile = await privateFinalCodecProfileAfterPendingCacheWork(session);
+    if (sessions.get(req.params.id) !== session) return res.status(404).json({ error: 'Session not found' });
+    if (await tryParkRetainedSession(session, resumePosition)) {
+        return res.json({ success: true, finalCodecProfile });
+    }
     await stopSession(session);
     res.json(compactRecord({
         success: true,
@@ -15476,6 +15525,126 @@ async function closePreopenedBoundedMkvInput(session) {
     await closeVodInputAttempt(opened.attempt).catch(() => {});
 }
 
+// Retained session lifecycle: no durable subtitle certificate is fabricated.
+// The very same decoder, output graph, clocks and bounded output reservation
+// survive a short, fully drained detachment.
+function retainedSessionRequestBinding(body, ownerKey) {
+    if (!retainedSessionOwnerGate(ownerKey) || !canUsePrivateResumeCache(ownerKey)
+        || !canUseRecentResumeSamples(ownerKey)) return null;
+    const identity = asRecord(body?.playbackIdentity);
+    if (!identity.sourceId || !identity.sourceRevision || !identity.vodIdentityKey) return null;
+    const copy = { ...body };
+    for (const field of ['playbackSessionId', 'expiresAt', 'seekOffset', 'startOffset', 'resumeTime',
+        'preparationProtocol', 'preparationExpiresAt', 'preparationGatewayGeneration']) delete copy[field];
+    copy.playbackHint = { ...asRecord(copy.playbackHint) };
+    for (const field of ['seekOffset', 'seek_offset', 'startOffset', 'start_offset', 'resumeTime', 'resume_time']) {
+        delete copy.playbackHint[field];
+    }
+    // Exact request facts, including the source revision, all tracks, file
+    // metadata and playback settings. Enrichment can cause a conservative miss.
+    return sha256Hex(canonicalResumeProfile({ ownerKey, request: copy }));
+}
+
+function revokeSessionPlaybackAccess(session) {
+    session.primaryViewerAttached = false;
+    session.accessToken = randomToken();
+    session.viewerAttachments?.clear?.();
+    for (const response of session.playbackResponses || []) response.destroy();
+    session.playbackResponses?.clear();
+}
+
+async function retainedSessionPositionAvailable(session, position) {
+    if (!Number.isFinite(session.actualStartOffset)) return false;
+    const name = exactSubtitleHlsEnabled(session) ? 'video.m3u8' : 'playlist.m3u8';
+    const bytes = await readPrivateResumeAsset(session, name, 2 * 1024 * 1024).catch(() => null);
+    const text = bytes?.toString('utf8'), parsed = parseResumeMediaPlaylist(text);
+    if (!parsed || parsed.ended || !parsed.segments.length) return false;
+    const origin = parsed.sequence > 0 ? session.hlsOutputAdmission?.resumePlaylistClock.originFor(name, text) : 0;
+    if (!Number.isFinite(origin) || origin < 0) return false;
+    const local = position - session.actualStartOffset - origin;
+    // Keep at least one complete segment beyond the requested point. The
+    // ordinary client startup reserve still decides when playback may start.
+    return local >= parsed.segments[0].start && local < parsed.segments.at(-1).start;
+}
+
+async function tryParkRetainedSession(session, position) {
+    if (!session.retainedRequestBinding || !retainedSessionOwnerGate(session.ownerKey)
+        || !session.retainedInputScope || !session.boundedHlsOutput || !session.hlsOutputReservation
+        || session.mediaCacheProducer || session.completeHlsCacheLease || session.privateResumeLease
+        || multiAudioHlsEnabled(session) || session.inputPump || session.linearSeekBridge
+        || session.finiteMkvSeekBroker?.dispatcherFallbacks > 0
+        || session.lastError || session.inputFailure || session.retainedInputInterrupted
+        || session.retainedSessionState || session.expiresAt.getTime() <= Date.now()
+        || !Number.isFinite(position) || position <= 0) return false;
+    if (!await retainedSessionPositionAvailable(session, position)) return false;
+    // A second DELETE can enter while the playlist is being inspected.
+    if (session.retainedDetachPromise) return session.retainedDetachPromise;
+    session.retainedDetachPromise = retainedSessionTransfer.park(session, session.retainedRequestBinding, position);
+    return session.retainedDetachPromise;
+}
+
+async function tryResumeRetainedSession({ lookup, binding, playbackSessionId, expiresAt, signal }) {
+    const expiry = expiresAt ? Date.parse(expiresAt) : Date.now() + DEFAULT_TTL_SECONDS * 1000;
+    if (!Number.isFinite(expiry) || expiry <= Date.now() || signal.aborted) return null;
+    let retained = null;
+    const abort = () => { if (retained) void stopSession(retained, { reason: 'retained-request-aborted' }).catch(() => {}); };
+    signal.addEventListener('abort', abort, { once: true });
+    try {
+        return await retainedSessionTransfer.resume(binding, lookup.seekOffset, {
+            accept: async session => {
+                retained = session;
+                if (signal.aborted || session.expiresAt.getTime() <= Date.now()
+                    || recentDeliveryRouteKey(session) !== recentDeliveryRouteKey(lookup)
+                    || fileSizeBytesForSession(session) !== fileSizeBytesForSession(lookup)) return false;
+                return retainedSessionPositionAvailable(session, lookup.seekOffset);
+            },
+            validate: async (session, validationSignal) => {
+                const plan = sampleProof(session.finiteMkvSeekBroker.snapshotRecentSamples(),
+                    fileSizeBytesForSession(session), session.vodInputEffectiveUrlIdentitySha256);
+                if (!plan || signal.aborted) return false;
+                // Separate uncached broker under this new authenticated request's
+                // ordinary provider claim. The parked broker stays closed.
+                lookup.startupTimings = {};
+                const validationStarted = Date.now();
+                const observed = await revalidateRecentResumeSession(lookup, plan, validationSignal);
+                lookup.startupTimings.retainedSessionValidationMs = Math.max(0, Date.now() - validationStarted);
+                // This decoder keeps its original resolved transport target.
+                // Even equal samples must not adopt an expired/rotated URL or
+                // a new validator that its live broker would later reject.
+                return !signal.aborted && !validationSignal.aborted
+                    && /^[a-f0-9]{64}$/.test(session.vodInputEffectiveUrlSha256 || '')
+                    && observed?.effectiveUrlSha256 === session.vodInputEffectiveUrlSha256
+                    && canonicalResumeProfile(observed?.validator || null) === canonicalResumeProfile(session.vodInputValidator || null)
+                    && samplesMatch(plan, observed?.samples,
+                    observed?.fileSizeBytes, observed?.effectiveUrlIdentitySha256);
+            },
+            adopt: session => {
+                if (signal.aborted || session.expiresAt.getTime() <= Date.now()) return false;
+                const oldId = session.id, newId = crypto.randomUUID(), token = randomToken();
+                if (sessions.get(oldId) !== session || sessions.has(newId)) return false;
+                revokeSessionPlaybackAccess(session);
+                sessions.delete(oldId);
+                session.id = newId; session.accessToken = token;
+                session.playbackSessionId = String(playbackSessionId || '').slice(0, 128);
+                session.expiresAt = new Date(Math.min(expiry, session.expiresAt.getTime()));
+                session.retainedResumePosition = lookup.seekOffset;
+                session.localSeekTarget = lookup.seekOffset - session.actualStartOffset;
+                session.privateResumeStopPosition = null;
+                session.retainedDetachPromise = null;
+                session.primaryViewerAttached = true; session.status = 'ready';
+                session.lastClientAccessAtMs = Date.now();
+                // Previous throughput/startup observations predate this pause.
+                // Do not reuse them to lower the new viewer's startup reserve.
+                session.startupPolicy = null;
+                session.startupTimings = { ...lookup.startupTimings, retainedSessionHit: true,
+                    ffmpegSpawnCount: 0, analyzerSpawnCount: 0, fileSizeBytes: fileSizeBytesForSession(session) };
+                sessions.set(newId, session);
+                return true;
+            },
+        });
+    } finally { signal.removeEventListener('abort', abort); }
+}
+
 function privateResumeNeedsMp4Preparation(session) {
     // Newly imported M3U profiles may identify MP4 without its exact size.
     // Reuse the bounded identity/header preflight and serialized metadata
@@ -15593,6 +15762,7 @@ async function trySeedRecentRetainedInput(session, signal) {
 async function capturePrivateResumeWindow(session, playlistClock = null) {
     const position = session.privateResumeStopPosition;
     if (!Number.isFinite(position) || position <= 0) return false;
+    if (session.retainedInputInterrupted) return privateResumeHlsCache.rejectCapture('retained-input-interrupted');
     if (session.lastError || session.inputFailure) return privateResumeHlsCache.rejectCapture('session-error');
     // A second exit must not splice a previously spliced playlist into another
     // discontinuity graph. The new encoder's output is independently reusable.
@@ -15936,6 +16106,9 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     // of retained bytes still owns its small complete current response.
     const warmupWindowBytes = coldFiniteTs && !resumeRanges?.hasPriorRanges && !resumeRanges?.requiresValidation
         ? 0 : FINITE_MKV_RESUME_WARMUP_WINDOW_BYTES;
+    if (finiteMkv && session.retainedRequestBinding && retainedSessionOwnerGate(session.ownerKey)) {
+        session.retainedInputScope ||= Object.freeze({});
+    }
     const broker = await createStrictLidBroker({
         sourceUrl: session.sourceUrl,
         fileSizeBytes,
@@ -15956,6 +16129,13 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         effectiveUrlIdentitySha256: session.vodInputEffectiveUrlIdentitySha256,
         onProviderIdentity: (identity) => applyFiniteMkvSeekProviderIdentity(session, identity),
         pathPrefix: 'finite-mkv-seek',
+        retainedInputScope: session.retainedInputScope,
+        retainedInputTtlMs: 10000,
+        onRetainedInputClose: () => {
+            if (!session.retainedSessionState) return;
+            session.retainedInputInterrupted = true;
+            setImmediate(() => stopSession(session, { reason: 'retained-input-closed' }).catch(() => {}));
+        },
         freshResumeHandoff: session.freshResumeHandoff,
         freshResumeScope: session,
         captureRecentSamples: canUseRecentResumeSamples(session.ownerKey),
@@ -17683,7 +17863,8 @@ function startFfmpeg(session) {
             applyFiniteMkvSeekBrokerFailure(session);
             let plannedStop = Boolean(session.stoppingPromise) || session.status === 'stopping';
             const inputEndedEarly = pumpedMkvInput && inputPump && inputPump.completed !== true;
-            let completedCleanly = !plannedStop && code === 0 && !inputEndedEarly && !session.inputFailure && !session.lastError;
+            let completedCleanly = !plannedStop && code === 0 && !inputEndedEarly && !session.inputFailure && !session.lastError
+                && session.retainedInputInterrupted !== true;
             if (completedCleanly && outputAdmission) {
                 session.hlsOutputDrainPromise = session.hlsOutputControl.finish();
                 try { await session.hlsOutputDrainPromise; }
@@ -22525,6 +22706,8 @@ async function waitForPlaylist(session, timeoutMs, abortSignal = null) {
 async function stopSession(session, options = {}) {
     if (session.stoppingPromise) return session.stoppingPromise;
 
+    retainedSessionTransfer.forget(session);
+
     const stopReason = String(options?.reason || 'stopped');
     if (session.backgroundCacheContinuation === true && !session.backgroundCacheContinuationOutcome) {
         settleMkvCompleteHlsBackgroundContinuation(
@@ -22628,7 +22811,7 @@ async function stopProviderAffinities(affinityHashes, { backgroundOnly = false }
     providerMetadataPriorityFence.reserve(affinityHashes);
     const matches = (key) => requested.has(providerAffinityHashForGatewayKey(key));
     const sessionsToStop = backgroundOnly ? [] : Array.from(sessions.values()).filter((session) => (
-        matches(proxyKeyFromUrl(session?.sourceUrl || '')) && isSessionBlockingProviderSlot(session)
+        matches(proxyKeyFromUrl(session?.sourceUrl || '')) && (isSessionBlockingProviderSlot(session) || session.retainedSessionState)
     ));
     await Promise.allSettled(sessionsToStop.map((session) => (
         stopSession(session, { reason: 'account-deletion' })
@@ -22719,7 +22902,7 @@ async function stopConflictingOwnerSessions(ownerKey) {
 
 function activeSessionCount() {
     return Array.from(sessions.values())
-        .filter((session) => session.status === 'starting' || session.status === 'ready')
+        .filter((session) => session.status === 'starting' || session.status === 'ready' || session.retainedSessionState)
         .length;
 }
 
@@ -22730,6 +22913,7 @@ function isSessionBlockingProviderSlot(session) {
     }
     return session?.status === 'starting' ||
         session?.status === 'ready' ||
+        session?.status === 'retained-parking' || session?.status === 'retained-validating' ||
         session?.status === 'stopping' ||
         Boolean(session?.inputPump && session.inputPump.completed !== true);
 }
@@ -22813,6 +22997,11 @@ function requirePlaybackToken(req, res, next) {
     }
     req.playbackToken = token;
     req.playbackAttachmentId = attachment?.attachmentId || null;
+    if (session.retainedInputScope) {
+        session.playbackResponses ||= new Set();
+        session.playbackResponses.add(res);
+        res.once('close', () => session.playbackResponses.delete(res));
+    }
     next();
 }
 
@@ -22856,7 +23045,7 @@ function serializeSession(req, session) {
         multiAudioHls: multiAudioHlsDiagnosticsForSession(session),
         subtitleRenditions: exactSubtitleRenditionsForSession(session),
         exactSubtitleHls: exactSubtitleHlsDiagnosticsForSession(session),
-        requestedSeekOffset: session.seekOffset || 0,
+        requestedSeekOffset: session.retainedResumePosition ?? session.seekOffset ?? 0,
         actualStartOffset: session.actualStartOffset || 0,
         localSeekTarget: session.localSeekTarget || 0,
         sourceTimestamps: session.sourceTimestamps === true,
@@ -22914,7 +23103,7 @@ function debugSession(session) {
         multiAudioHls: multiAudioHlsDiagnosticsForSession(session),
         subtitleRenditions: exactSubtitleRenditionsForSession(session),
         exactSubtitleHls: exactSubtitleHlsDiagnosticsForSession(session),
-        requestedSeekOffset: session.seekOffset || 0,
+        requestedSeekOffset: session.retainedResumePosition ?? session.seekOffset ?? 0,
         actualStartOffset: session.actualStartOffset || 0,
         localSeekTarget: session.localSeekTarget || 0,
         sourceTimestamps: session.sourceTimestamps === true,

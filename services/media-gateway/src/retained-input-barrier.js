@@ -6,6 +6,7 @@
 class RetainedInputBarrier {
     #scope; #state = 'active'; #active = 0; #waiters = new Set(); #idle = new Set();
     #token = null; #timer = null; #started = null; #deadline = null;
+    #generation = 0;
     #now; #ttl; #onClose; #setTimer; #clearTimer;
     #validationController = null;
     #validationDone = Promise.resolve();
@@ -62,7 +63,10 @@ class RetainedInputBarrier {
         this.#expire();
         if (scope !== this.#scope || this.#state !== 'active') return null;
         this.#state = 'parking'; this.#started = this.#now(); this.#deadline = this.#started + this.#ttl;
-        this.#timer = this.#setTimer(() => this.close('expired'), this.#ttl);
+        const generation = ++this.#generation;
+        this.#timer = this.#setTimer(() => {
+            if (generation === this.#generation) this.close('expired');
+        }, this.#ttl);
         this.#timer?.unref?.();
         try {
             if (this.#active) await new Promise(resolve => this.#idle.add(resolve));
@@ -96,6 +100,7 @@ class RetainedInputBarrier {
             // close has already cleaned up its owner.
             if (restartTransport() !== true) { this.close('restart-failed'); return false; }
             this.#clearTimer(this.#timer); this.#timer = null; this.#deadline = null;
+            this.#generation++;
             this.#state = 'active'; this.#notify(); return true;
         } catch (_) { this.close('validation-failed'); return false; }
         finally { this.#validationController = null; validationSettled(); }
@@ -104,6 +109,7 @@ class RetainedInputBarrier {
     close(reason = 'closed') {
         if (this.#state === 'closed') return;
         this.#state = 'closed'; this.#token = null; this.#deadline = null;
+        this.#generation++;
         this.#validationController?.abort();
         this.#clearTimer(this.#timer); this.#timer = null; this.#notify();
         try { this.#onClose(reason); } catch (_) { /* Owner cleanup is idempotent. */ }
