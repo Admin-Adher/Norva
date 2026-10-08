@@ -14,10 +14,11 @@ namespace "tv.norva.tv"
 
     defaultConfig {
         applicationId "tv.norva.tv"
-        minSdk 23
+        // Google Play automatic protection requires Android 7 / API 24.
+        minSdk 24
         targetSdk 36
-        versionCode 38
-        versionName "3.8.25-hybrid"
+        versionCode 39
+        versionName "3.8.26-hybrid"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Public routing configuration for the dedicated Android TV project.
         // Operators can still override it for an isolated build when needed.
