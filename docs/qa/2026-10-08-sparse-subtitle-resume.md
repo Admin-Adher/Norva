@@ -222,3 +222,56 @@ La comparaison confirme une piste exploitable pour l'audio compatible conservé 
 Contrôle read-only à **2026-10-08T13:21:43.009446+00:00**, soit **15:21 Paris** : deux Gateways sains, même image PR706 et mêmes démarrages ; portée `owner-allowlist`, dispatcher permanent actif, conteneur de preuve absent. Les cinq contrôles documentaires de PR709 ont réussi, paquets compris.
 
 Reçus et scripts : `.codex-artifacts/subtitle-coverage-20261008/`, notamment `byte-prefix-proof`, `real-prefix-proof`, `audio-clock-matrix`, `audio-overlap-proof`, `unit-tests.tap` et `runtime-check.safe.json`. Les 27 tests unitaires, les six essais de règle fixe et les dix essais de recouvrement sont trois groupes distincts ; ils ne constituent pas une certification de lecture sur toutes les VOD.
+
+
+## Stockage réel du cache et grille audio — intégration isolée suivante
+
+Cette phase utilise la **vraie classe `PrivateResumeHlsCache` de l'image déployée**, instanciée dans un conteneur de preuve réseau `none`. Elle ne branche pas encore le prototype sur les sessions de production. L'empreinte SHA-256 du module est `300d54c20cd120fbb7fc6c4eceeff70516841cb3f3ca12153cbd812afc864b7b`, concordante avec la source locale normalisée en LF. Aucune VOD fournisseur ni interface utilisateur n'est sollicitée.
+
+### Cycle de vie et conservation après passage par le cache
+
+Les **4 577 010 octets** du préfixe synthétique sont stockés par `captureInput`, puis récupérés uniquement après `acquireInput` et sa revalidation habituelle. Le helper de parcours reconstruit son reçu à partir des octets retournés par cette classe. Après continuation contiguë, les **cinq paquets** concordent à nouveau avec le témoin complet : positions, timestamps, durées et empreintes identiques. Les quatre paquets du préfixe, dont la réplique future, ont traversé le stockage et la relecture.
+
+Les assertions vérifient aussi les copies détachées à l'entrée et à la sortie, l'isolation du propriétaire et de la révision, la révocation d'un bail, le refus d'un échantillon ou d'une cible changés et l'expiration. La fin de l'essai libère toutes les entrées, tous les octets et toutes les réservations de cette instance isolée. Ce sont des contrôles d'intégration distincts des **27 tests précédents**, qui ne sont pas recomptés comme nouveaux tests.
+
+Un cache d'entrée contenant un trou est volontairement admis comme cache de plages ordinaire : le lecteur peut encore demander les octets manquants. En revanche, le helper refuse d'en tirer une preuve de parcours des sous-titres (`noncontiguous-range`). Une entrée d'octets ne devient pas un succès HLS : `hasCandidate` reste faux. Le test n'ajoute aucun contournement à l'admission vidéo existante.
+
+**Limite :** cela valide le stockage et ses gardes, pas l'interception des lectures du broker réel ni le démultiplexeur en cours de lecture. La couverture physique ne prouve toujours pas qu'un intervalle temporel futur est vide de sous-titres. Les pistes dispersées et les fichiers initialement ouverts après un saut restent hors du domaine prouvé.
+
+### Nouveau raccord audio : conserver une grille d'échantillons
+
+La suite explore un parent et une continuation partageant une politique explicite de timestamps natifs. L'audio du second encodeur est préparé avant la frontière, sur une grille AAC-LC 48 kHz ; le nombre de paquets antérieurs à écarter est calculé à partir de la fin du dernier paquet **déjà conservé**, au lieu de retirer systématiquement deux paquets. La frontière vidéo vient de la fin du dernier segment conservé. La suite du parent sert seulement à vérifier le résultat final ; elle ne fournit plus de paramètre au candidat.
+
+Les erreurs intermédiaires sont conservées :
+
+- Le premier essai conservait encore un déplacement de muxage de 1 920 ticks vidéo. Le contrôle explicite des horloges de transport le supprime dans ces fixtures. Les premières différences PCM calculées par simple position dans le tableau mélangent aussi le signal et le positionnement : elles ne valent pas comparaison à temps égal.
+- Le nouveau lecteur de PCM indexe les échantillons par leur timestamp décodé. Sa première exécution s'arrête sur des timestamps dupliqués. Le diagnostic suivant les compte explicitement et exclut les positions ambiguës de la comparaison ; il ne les considère pas comme réussies. Les deux essais à 44,1 kHz présentent encore des chevauchements et des diagnostics de timestamps non monotones. Imposer seulement la base de temps du filtre ne suffit pas.
+- La sélection par nombre de paquets, calculé sur la grille du parent, aligne ensuite les six débuts audio et vidéo. Le signal reste cependant fortement décalé pour les sources à 44,1 kHz. Une recherche de corrélation sur un bruit rose déterministe retrouve environ 707 ms d'écart dans le premier de ces essais.
+- La cause de ce dernier défaut **du prototype** est l'unité de `first_pts` : le calcul utilisait des échantillons à 48 kHz alors que le rééchantillonneur les interprète à la fréquence d'entrée. L'ancre est désormais convertie avec cette fréquence avant de construire la grille de sortie. La lecture du code FFmpeg 5.1.9 et le rejeu confirment la correction. Aucun défaut équivalent du réglage de production `first_pts=0` n'est déduit de cette expérience. [Rééchantillonneur FFmpeg](https://ffmpeg.org/ffmpeg-resampler.html), [implémentation 5.1.9](https://raw.githubusercontent.com/FFmpeg/FFmpeg/n5.1.9/libswresample/swresample.c).
+
+### Derniers résultats, avec la seule fin conservée comme ancre
+
+Chaque source synthétique de 32 s est essayée à deux frontières. Les sorties sont toujours H.264 et **AAC-LC stéréo 48 kHz**. Les tests n'incluent pas HE-AAC, AC3, DTS, multicanal ou changement de piste.
+
+| Source | Frontière vidéo | Écart du premier PTS audio / vidéo face au témoin | Décalage de signal estimé dans le diagnostic |
+| --- | --- | --- | --- |
+| AAC 48 kHz, vidéo 24 i/s | 16 s | 0 / 0 tick | 0 ms |
+| AAC 48 kHz, vidéo 24 i/s | 20 s | 0 / 0 tick | +0,167 ms |
+| AAC 44,1 kHz, vidéo 25 i/s | 16 s | 0 / 0 tick | −0,229 ms |
+| AAC 44,1 kHz, vidéo 25 i/s | 20 s | 0 / 0 tick | −0,167 ms |
+| MP3 48 kHz, vidéo 29,97 i/s | 16,016 s | 0 / 0 tick | 0 ms |
+| MP3 48 kHz, vidéo 29,97 i/s | 20,020 s | 0 / 0 tick | 0 ms |
+
+Dans les six derniers essais, le premier paquet audio commence à la fin du dernier paquet conservé. Les deux fenêtres de comparaison, de −0,2 à +0,2 s puis de +0,3 à +1 s autour de cette frontière, ne présentent aucun timestamp manquant ou ambigu, sur les deux canaux. Les nombres d'échantillons décodés correspondent au témoin ; aucun diagnostic d'encodage ou de décodage n'est relevé dans **cette dernière matrice**. Les erreurs des variantes précédentes restent conservées.
+
+Le décalage de signal est une estimation par corrélation du canal gauche sur **200 ms** de bruit rose après le raccord ; ce n'est pas une correction appliquée ni un seuil d'acceptation. Les deux encodages AAC ne produisent pas un PCM identique : l'erreur RMS à temps égal autour du raccord vaut environ 0,0034 à 0,0219, et certaines corrélations après raccord restent affectées par ces petits décalages. **Aucune acceptation à l'écoute ou garantie perceptuelle n'est revendiquée.** La cause précise des écarts résiduels n'est pas attribuée.
+
+La politique d'horloge est commune au parent et au second producteur de cette expérience. Le produit ne doit pas réutiliser ses anciennes fenêtres sous une autre politique sans liaison explicite du profil et de l'horloge. L'expérience n'ajoute aucune admission de cache HLS et ne valide pas encore l'assemblage simultané vidéo/audio/sous-titres dans le navigateur ou Android.
+
+### Santé et limites opérationnelles
+
+**Production inchangée par ce travail ; aucun déploiement, appel fournisseur ou gain supplémentaire sur Normal.** Les conteneurs de preuve sont supprimés, leurs médias étaient éphémères. Le pilote reste `owner-allowlist`. Les cinq contrôles documentaires de PR710 réussissent désormais.
+
+Le contrôle du **8 octobre à 16:48 Paris** trouve les deux Gateways sains, avec la même image PR706. Leurs dates de démarrage ont toutefois changé : **14:25:21 UTC** pour les deux, puis 14:25:22 pour le dispatcher. Le contrôle read-only complémentaire situe le démarrage de l'hôte vers **14:24:57 UTC**. Les conteneurs ont leurs anciennes dates de création, `OOMKilled=false` et un compteur Docker de redémarrage à zéro ; leurs champs `FinishedAt` indiquent 13:28:30–31 UTC. Ces champs situent les événements mais ne constituent pas à eux seuls une mesure complète d'indisponibilité. **La raison de l'arrêt/redémarrage de l'hôte n'est pas établie** et n'est pas attribuée aux expériences isolées. Aucun redémarrage n'a été demandé pendant ce travail.
+
+Reçus et scripts : `.codex-artifacts/subtitle-cache-integration-20261008/`. `cache-prefix-proof` porte sur la vraie classe de cache ; `audio-grid-retained-tail` est la dernière matrice ; `audio-grid-proof`, `audio-grid-clocked`, les diagnostics et variantes intermédiaires conservent les échecs. `summary.safe.json` sépare explicitement stockage, horloges, signal et admission de production.

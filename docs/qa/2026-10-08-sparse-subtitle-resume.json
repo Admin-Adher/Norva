@@ -2557,5 +2557,603 @@
       "General audio sample clock and encoder-state handoff; packet equality alone is not audible acceptance.",
       "Real VOD, browser and Android validation before production admission."
     ]
+  },
+  "followupCacheAndAudioGrid": {
+    "scope": "Synthetic isolated integration with the deployed cache class and experimental audio continuation. Not live session wiring or production playback admission.",
+    "cache": {
+      "productionClass": "/app/src/private-resume-hls-cache.js",
+      "productionClassSha256": "300d54c20cd120fbb7fc6c4eceeff70516841cb3f3ca12153cbd812afc864b7b",
+      "retainedBytes": 4577010,
+      "retainedPackets": 4,
+      "continuedPackets": 5,
+      "oraclePackets": 5,
+      "allPacketPositionsTimesDurationsAndHashesEqual": true,
+      "detachedSnapshots": true,
+      "ownerIsolation": true,
+      "revisionIsolation": true,
+      "revocation": true,
+      "changedSampleRejected": true,
+      "changedTargetRejected": true,
+      "expiredEntryRejected": true,
+      "sparseInputUsefulButSubtitleProofRejected": true,
+      "sparseReason": "noncontiguous-range",
+      "remainingCacheEntries": 0,
+      "remainingCacheBytes": 0,
+      "reservedBytes": 0,
+      "providerRequests": 0,
+      "productionChanged": false,
+      "playbackAdmissionProven": false,
+      "liveDemuxerIntegrationProven": false
+    },
+    "finalAudioCandidate": {
+      "results": [
+        {
+          "source": {
+            "name": "aac48-24",
+            "fps": "24",
+            "rate": 48000,
+            "codec": "aac"
+          },
+          "cut": 16,
+          "anchorSamples": 384000,
+          "anchorSeconds": 8,
+          "audioReferenceFromRetainedTail": true,
+          "resumeAudioFromRetainedTail": 1567920,
+          "parentFirstAudio": 1567920,
+          "childFirstAudio": 1567920,
+          "audioOracleDeltaTicks": 0,
+          "audioBoundaryDeltaTicks": 0,
+          "videoOracleDeltaTicks": 0,
+          "parentErr": "",
+          "stderr": "",
+          "decodeStderr": "",
+          "oracleDecodeStderr": "",
+          "stitchedFirstFrames": [
+            {
+              "pts": 644736,
+              "samples": 1024,
+              "offset": 0
+            },
+            {
+              "pts": 645760,
+              "samples": 1024,
+              "offset": 1024
+            }
+          ],
+          "oracleFirstFrames": [
+            {
+              "pts": 644736,
+              "samples": 1024,
+              "offset": 0
+            },
+            {
+              "pts": 645760,
+              "samples": 1024,
+              "offset": 1024
+            }
+          ],
+          "stitchedSamples": 384000,
+          "oracleSamples": 384000,
+          "lag": {
+            "lag": 0,
+            "correlation": 0.9839451567138903,
+            "lagMilliseconds": 0,
+            "scope": "diagnostic left channel, 0.2 s pink-noise window; not production admission"
+          },
+          "pcmWindow": {
+            "startSample": 826624,
+            "endSample": 845824,
+            "sampleValues": 38400,
+            "missingOrAmbiguousTimestamps": 0,
+            "duplicateCandidateTimestamps": 0,
+            "duplicateOracleTimestamps": 0,
+            "rms": 0.003939045154649079,
+            "maxAbsolute": 0.021947629749774933,
+            "correlation": 0.9944381975661407
+          },
+          "afterWindow": {
+            "startSample": 850624,
+            "endSample": 884224,
+            "sampleValues": 67200,
+            "missingOrAmbiguousTimestamps": 0,
+            "duplicateCandidateTimestamps": 0,
+            "duplicateOracleTimestamps": 0,
+            "rms": 0.005802651134545234,
+            "maxAbsolute": 0.025844601914286613,
+            "correlation": 0.9830227899307444
+          }
+        },
+        {
+          "source": {
+            "name": "aac48-24",
+            "fps": "24",
+            "rate": 48000,
+            "codec": "aac"
+          },
+          "cut": 20,
+          "anchorSamples": 575488,
+          "anchorSeconds": 11.989333333333333,
+          "audioReferenceFromRetainedTail": true,
+          "resumeAudioFromRetainedTail": 1928880,
+          "parentFirstAudio": 1928880,
+          "childFirstAudio": 1928880,
+          "audioOracleDeltaTicks": 0,
+          "audioBoundaryDeltaTicks": 0,
+          "videoOracleDeltaTicks": 0,
+          "parentErr": "",
+          "stderr": "",
+          "decodeStderr": "",
+          "oracleDecodeStderr": "",
+          "stitchedFirstFrames": [
+            {
+              "pts": 836224,
+              "samples": 1024,
+              "offset": 0
+            },
+            {
+              "pts": 837248,
+              "samples": 1024,
+              "offset": 1024
+            }
+          ],
+          "oracleFirstFrames": [
+            {
+              "pts": 836224,
+              "samples": 1024,
+              "offset": 0
+            },
+            {
+              "pts": 837248,
+              "samples": 1024,
+              "offset": 1024
+            }
+          ],
+          "stitchedSamples": 384000,
+          "oracleSamples": 384000,
+          "lag": {
+            "lag": 8,
+            "correlation": 0.982044405082747,
+            "lagMilliseconds": 0.16666666666666666,
+            "scope": "diagnostic left channel, 0.2 s pink-noise window; not production admission"
+          },
+          "pcmWindow": {
+            "startSample": 1019136,
+            "endSample": 1038336,
+            "sampleValues": 38400,
+            "missingOrAmbiguousTimestamps": 0,
+            "duplicateCandidateTimestamps": 0,
+            "duplicateOracleTimestamps": 0,
+            "rms": 0.020747988232405992,
+            "maxAbsolute": 0.11151020973920822,
+            "correlation": 0.8039786087844172
+          },
+          "afterWindow": {
+            "startSample": 1043136,
+            "endSample": 1076736,
+            "sampleValues": 67200,
+            "missingOrAmbiguousTimestamps": 0,
+            "duplicateCandidateTimestamps": 0,
+            "duplicateOracleTimestamps": 0,
+            "rms": 0.03042519744531579,
+            "maxAbsolute": 0.11592836817726493,
+            "correlation": 0.5486075882057917
+          }
+        },
+        {
+          "source": {
+            "name": "aac44-25",
+            "fps": "25",
+            "rate": 44100,
+            "codec": "aac"
+          },
+          "cut": 16,
+          "anchorSamples": 384000,
+          "anchorSeconds": 8,
+          "audioReferenceFromRetainedTail": true,
+          "resumeAudioFromRetainedTail": 1569840,
+          "parentFirstAudio": 1569840,
+          "childFirstAudio": 1569840,
+          "audioOracleDeltaTicks": 0,
+          "audioBoundaryDeltaTicks": 0,
+          "videoOracleDeltaTicks": 0,
+          "parentErr": "",
+          "stderr": "",
+          "decodeStderr": "",
+          "oracleDecodeStderr": "",
+          "stitchedFirstFrames": [
+            {
+              "pts": 644736,
+              "samples": 1024,
+              "offset": 0
+            },
+            {
+              "pts": 645760,
+              "samples": 1024,
+              "offset": 1024
+            }
+          ],
+          "oracleFirstFrames": [
+            {
+              "pts": 644736,
+              "samples": 1024,
+              "offset": 0
+            },
+            {
+              "pts": 645760,
+              "samples": 1024,
+              "offset": 1024
+            }
+          ],
+          "stitchedSamples": 384000,
+          "oracleSamples": 384000,
+          "lag": {
+            "lag": -11,
+            "correlation": 0.9847740036061455,
+            "lagMilliseconds": -0.22916666666666666,
+            "scope": "diagnostic left channel, 0.2 s pink-noise window; not production admission"
+          },
+          "pcmWindow": {
+            "startSample": 827648,
+            "endSample": 846848,
+            "sampleValues": 38400,
+            "missingOrAmbiguousTimestamps": 0,
+            "duplicateCandidateTimestamps": 0,
+            "duplicateOracleTimestamps": 0,
+            "rms": 0.021900814020788195,
+            "maxAbsolute": 0.11849125102162361,
+            "correlation": 0.7689854336964972
+          },
+          "afterWindow": {
+            "startSample": 851648,
+            "endSample": 885248,
+            "sampleValues": 67200,
+            "missingOrAmbiguousTimestamps": 0,
+            "duplicateCandidateTimestamps": 0,
+            "duplicateOracleTimestamps": 0,
+            "rms": 0.03177315250200029,
+            "maxAbsolute": 0.14560452848672867,
+            "correlation": 0.5693126531028423
+          }
+        },
+        {
+          "source": {
+            "name": "aac44-25",
+            "fps": "25",
+            "rate": 44100,
+            "codec": "aac"
+          },
+          "cut": 20,
+          "anchorSamples": 575488,
+          "anchorSeconds": 11.989333333333333,
+          "audioReferenceFromRetainedTail": true,
+          "resumeAudioFromRetainedTail": 1928880,
+          "parentFirstAudio": 1928880,
+          "childFirstAudio": 1928880,
+          "audioOracleDeltaTicks": 0,
+          "audioBoundaryDeltaTicks": 0,
+          "videoOracleDeltaTicks": 0,
+          "parentErr": "",
+          "stderr": "",
+          "decodeStderr": "",
+          "oracleDecodeStderr": "",
+          "stitchedFirstFrames": [
+            {
+              "pts": 837248,
+              "samples": 1024,
+              "offset": 0
+            },
+            {
+              "pts": 838272,
+              "samples": 1024,
+              "offset": 1024
+            }
+          ],
+          "oracleFirstFrames": [
+            {
+              "pts": 837248,
+              "samples": 1024,
+              "offset": 0
+            },
+            {
+              "pts": 838272,
+              "samples": 1024,
+              "offset": 1024
+            }
+          ],
+          "stitchedSamples": 384000,
+          "oracleSamples": 384000,
+          "lag": {
+            "lag": -8,
+            "correlation": 0.9740258103118818,
+            "lagMilliseconds": -0.16666666666666666,
+            "scope": "diagnostic left channel, 0.2 s pink-noise window; not production admission"
+          },
+          "pcmWindow": {
+            "startSample": 1019136,
+            "endSample": 1038336,
+            "sampleValues": 38400,
+            "missingOrAmbiguousTimestamps": 0,
+            "duplicateCandidateTimestamps": 0,
+            "duplicateOracleTimestamps": 0,
+            "rms": 0.019081199849797434,
+            "maxAbsolute": 0.09984926506876945,
+            "correlation": 0.8318523618673257
+          },
+          "afterWindow": {
+            "startSample": 1043136,
+            "endSample": 1076736,
+            "sampleValues": 67200,
+            "missingOrAmbiguousTimestamps": 0,
+            "duplicateCandidateTimestamps": 0,
+            "duplicateOracleTimestamps": 0,
+            "rms": 0.028853640223564944,
+            "maxAbsolute": 0.11111922934651375,
+            "correlation": 0.5952185506865264
+          }
+        },
+        {
+          "source": {
+            "name": "mp3-2997",
+            "fps": "30000/1001",
+            "rate": 48000,
+            "codec": "libmp3lame"
+          },
+          "cut": 16.016,
+          "anchorSamples": 384000,
+          "anchorSeconds": 8,
+          "audioReferenceFromRetainedTail": true,
+          "resumeAudioFromRetainedTail": 1569840,
+          "parentFirstAudio": 1569840,
+          "childFirstAudio": 1569840,
+          "audioOracleDeltaTicks": 0,
+          "audioBoundaryDeltaTicks": 0,
+          "videoOracleDeltaTicks": 0,
+          "parentErr": "",
+          "stderr": "",
+          "decodeStderr": "",
+          "oracleDecodeStderr": "",
+          "stitchedFirstFrames": [
+            {
+              "pts": 645760,
+              "samples": 1024,
+              "offset": 0
+            },
+            {
+              "pts": 646784,
+              "samples": 1024,
+              "offset": 1024
+            }
+          ],
+          "oracleFirstFrames": [
+            {
+              "pts": 645760,
+              "samples": 1024,
+              "offset": 0
+            },
+            {
+              "pts": 646784,
+              "samples": 1024,
+              "offset": 1024
+            }
+          ],
+          "stitchedSamples": 384000,
+          "oracleSamples": 384000,
+          "lag": {
+            "lag": 0,
+            "correlation": 0.9823729545144572,
+            "lagMilliseconds": 0,
+            "scope": "diagnostic left channel, 0.2 s pink-noise window; not production admission"
+          },
+          "pcmWindow": {
+            "startSample": 827648,
+            "endSample": 846848,
+            "sampleValues": 38400,
+            "missingOrAmbiguousTimestamps": 0,
+            "duplicateCandidateTimestamps": 0,
+            "duplicateOracleTimestamps": 0,
+            "rms": 0.003417433022779137,
+            "maxAbsolute": 0.019621157087385654,
+            "correlation": 0.9952595432332858
+          },
+          "afterWindow": {
+            "startSample": 851648,
+            "endSample": 885248,
+            "sampleValues": 67200,
+            "missingOrAmbiguousTimestamps": 0,
+            "duplicateCandidateTimestamps": 0,
+            "duplicateOracleTimestamps": 0,
+            "rms": 0.005318139480160412,
+            "maxAbsolute": 0.02591884136199951,
+            "correlation": 0.9840992977000921
+          }
+        },
+        {
+          "source": {
+            "name": "mp3-2997",
+            "fps": "30000/1001",
+            "rate": 48000,
+            "codec": "libmp3lame"
+          },
+          "cut": 20.019999999999996,
+          "anchorSamples": 576512,
+          "anchorSeconds": 12.010666666666667,
+          "audioReferenceFromRetainedTail": true,
+          "resumeAudioFromRetainedTail": 1930800,
+          "parentFirstAudio": 1930800,
+          "childFirstAudio": 1930800,
+          "audioOracleDeltaTicks": 0,
+          "audioBoundaryDeltaTicks": 0,
+          "videoOracleDeltaTicks": 0,
+          "parentErr": "",
+          "stderr": "",
+          "decodeStderr": "",
+          "oracleDecodeStderr": "",
+          "stitchedFirstFrames": [
+            {
+              "pts": 837248,
+              "samples": 1024,
+              "offset": 0
+            },
+            {
+              "pts": 838272,
+              "samples": 1024,
+              "offset": 1024
+            }
+          ],
+          "oracleFirstFrames": [
+            {
+              "pts": 837248,
+              "samples": 1024,
+              "offset": 0
+            },
+            {
+              "pts": 838272,
+              "samples": 1024,
+              "offset": 1024
+            }
+          ],
+          "stitchedSamples": 385024,
+          "oracleSamples": 385024,
+          "lag": {
+            "lag": 0,
+            "correlation": 0.9851145818881824,
+            "lagMilliseconds": 0,
+            "scope": "diagnostic left channel, 0.2 s pink-noise window; not production admission"
+          },
+          "pcmWindow": {
+            "startSample": 1020160,
+            "endSample": 1039360,
+            "sampleValues": 38400,
+            "missingOrAmbiguousTimestamps": 0,
+            "duplicateCandidateTimestamps": 0,
+            "duplicateOracleTimestamps": 0,
+            "rms": 0.0035110729395664217,
+            "maxAbsolute": 0.020816569682210684,
+            "correlation": 0.9936397696330042
+          },
+          "afterWindow": {
+            "startSample": 1044160,
+            "endSample": 1077760,
+            "sampleValues": 67200,
+            "missingOrAmbiguousTimestamps": 0,
+            "duplicateCandidateTimestamps": 0,
+            "duplicateOracleTimestamps": 0,
+            "rms": 0.005113223119914872,
+            "maxAbsolute": 0.022595777176320553,
+            "correlation": 0.9862479663863875
+          }
+        }
+      ],
+      "clock": 90000,
+      "providerRequests": 0,
+      "productionChanged": false,
+      "usesOracleParentNextPacketForCandidate": false,
+      "oracleUsedForVerificationOnly": true,
+      "productionAdmissionProven": false,
+      "signal": "deterministic pink noise, both output channels",
+      "audibleAcceptance": false
+    },
+    "preservedFailures": {
+      "initialGrid": "six-case initial grid experiment has clock errors; raw concatenated PCM comparison is not time aligned and is not a standalone audio-quality conclusion",
+      "explicitClockAttempt": "the strict audio-grid-clocked diagnostic stopped on duplicate decoded timestamps; original failure is preserved",
+      "diagnosticClockAttempt": "4/6 audio packet boundaries matched; 44.1 kHz candidates overlapped, and forcing the filter timebase did not fix them",
+      "packetCountedAttempt": "6/6 timestamps matched, but decoded signal still shifted for 44.1 kHz due to input sample-rate units in first_pts",
+      "sourceUnitFix": "first_pts scaled by input rate; six packet clocks match, no missing/ambiguous PCM timestamp in compared windows; small signal lags remain"
+    },
+    "limits": [
+      "Synthetic H.264 plus AAC48/AAC44/MP3 inputs only; output AAC-LC48k stereo.",
+      "Controlled native transport clock in parent and child. No conversion of older production cached clocks is implemented.",
+      "No post-restart continuity of the in-memory cache, no live broker/demuxer integration, no proof for sparse input windows.",
+      "Audio packet boundary derived from retained tail; the full parent is a test oracle only.",
+      "A 200 ms left-channel cross-correlation is a diagnostic, not perceptual acceptance or a general alignment algorithm.",
+      "No VOD, browser, Android, six-channel, AAC-HE, AC3 or DTS validation in this phase."
+    ],
+    "health": {
+      "atUtc": "2026-10-08T14:48:29.794997+00:00",
+      "productionChanged": false,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        }
+      ],
+      "dispatcherRunning": true,
+      "proofContainerAbsent": true
+    },
+    "observedHostRestart": {
+      "atUtc": "2026-10-08T14:49:14.820476+00:00",
+      "approximateHostBootUtc": "2026-10-08T14:24:57.860476+00:00",
+      "containers": [
+        {
+          "name": "norva-media-gateway",
+          "created": "2026-10-08T08:44:26.62522617Z",
+          "restartCount": 0,
+          "running": true,
+          "oomKilled": false,
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "finishedAt": "2026-10-08T13:28:30.73371812Z",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9"
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "created": "2026-10-08T08:44:28.744742347Z",
+          "restartCount": 0,
+          "running": true,
+          "oomKilled": false,
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "finishedAt": "2026-10-08T13:28:31.252584659Z",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9"
+        },
+        {
+          "name": "norva-language-campaign",
+          "created": "2026-10-04T09:16:02.838184533Z",
+          "restartCount": 0,
+          "running": true,
+          "oomKilled": false,
+          "startedAt": "2026-10-08T14:25:22.69220184Z",
+          "finishedAt": "2026-10-08T13:28:31.455810135Z",
+          "image": "sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2"
+        }
+      ],
+      "dockerJournal": {
+        "readSucceeded": true,
+        "lines": 178,
+        "events": [
+          {
+            "time": "2026-10-08T16:25:15+02:00",
+            "kind": "initialization"
+          }
+        ]
+      }
+    },
+    "productionChangedByThisWork": false,
+    "providerRequests": 0,
+    "normalPerformanceGainDemonstrated": false,
+    "priorDocumentationPr710AllFiveChecksSucceeded": true,
+    "evidenceDirectory": ".codex-artifacts/subtitle-cache-integration-20261008",
+    "scriptSha256": {
+      "audio-grid-clocked-diagnostic.cjs": "af3d071cb4d9948f0f4e64be5f9ef3890d3d8465f58094b9a9d3f1c58b9f9609",
+      "audio-grid-clocked.cjs": "0168ef0c3b440d821bfb71fd8cfa72c737810348e74ecd9dfdd6c286b06eb152",
+      "audio-grid-correlation.cjs": "1bee2c4327c0bb2412a8ad50e550f8a7e143f4c3943b8f1a8003fc3cbb033fe1",
+      "audio-grid-counted.cjs": "6ceb366562365a1d640833b0a7ca48ce9110fdf6c809385acf13fb3a5f31acd6",
+      "audio-grid-debug.cjs": "b737e75219da64aae0e8d757044109cf104b8d8109363db546f6918b395c6ebf",
+      "audio-grid-debug2.cjs": "1d3b60d0db3c829f904676225d2e211ee1cd5d5debb431d57fa2f22d1d963393",
+      "audio-grid-debug3.cjs": "7a2f075816f77b5e495eacdc6ccc6d775bd428245580e9a2019fa27f28c0980a",
+      "audio-grid-input-scale.cjs": "7b38c9243c019eea662541ead8fd0855916f3952c0389ba0b975262e30fcf9ef",
+      "audio-grid-proof.cjs": "9b06e18941e1a0c363aa2b6f910b009d312864d6bfd5350c6ddf01c7afa597d3",
+      "audio-grid-retained-tail.cjs": "c594693ac0f215defcf1169a498f86d5cbd8b9a298d54a27e0b987114b5b7e2a",
+      "audio-grid-timebase.cjs": "17de84c15dfcb1da1a81934ff0383aac99d73bee47e5cf9e14d87d5941ea9c2e",
+      "cache-prefix-proof.cjs": "357adb3ff9896376e2719735378fb689644454fd05b79c47d268c31ca3de1021"
+    }
   }
 }
