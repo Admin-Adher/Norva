@@ -235,6 +235,25 @@ test('retained input cannot use strict LID or a shared dispatcher', async()=>{
   await Promise.resolve();assert.equal(destroyed,1);
 });
 
+test('retained broker closure awaits the aborted validation transport cleanup',async t=>{
+  const N=65536,data=Buffer.alloc(8*N,9),scope={};let validationOpened,releaseDrain;
+  const opened=new Promise(r=>validationOpened=r),drain=new Promise(r=>releaseDrain=r);
+  const provider=http.createServer((req,res)=>sendExactRange(req,res,data));
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const h=brokerHarness(),options={sourceUrl,fileSizeBytes:data.length,completedReleaseDelayMs:0,
+    dispatcherFactory:()=>new(require('undici').Agent)({connections:1,pipelining:1})};
+  const broker=await h.createStrictLidBroker({...options,pathPrefix:'finite-mkv-seek',retainedInputScope:scope});t.after(()=>broker.close());
+  const token=await broker.parkRetainedInput(scope);assert.ok(token);let signal,closed=false;
+  const resumed=broker.resumeRetainedInput(token,scope,async s=>{
+    signal=s;const fresh=await h.createStrictLidBroker(options);
+    await (await fetch(fresh.inputUrl,{headers:{Range:`bytes=0-${N-1}`}})).arrayBuffer();
+    validationOpened();await drain;await fresh.close();return true;
+  });await opened;
+  const stopping=broker.close().then(()=>closed=true);await new Promise(r=>setTimeout(r,25));
+  assert.equal(signal.aborted,true);assert.equal(closed,false);assert.equal(h.strictLidBrokers.size,1);
+  releaseDrain();await stopping;assert.equal(await resumed,false);assert.equal(closed,true);assert.equal(h.strictLidBrokers.size,0);
+});
+
 test('recent HLS samples use four fresh serialized broker responses, including a changed body', async t => {
   const { SAMPLE_BYTES: N, sampleProof, samplesMatch } = require('../services/media-gateway/src/recent-resume-samples');
   const { validateRecentResume } = require('../services/media-gateway/src/recent-resume-validation');

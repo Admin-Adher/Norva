@@ -8128,23 +8128,23 @@
     "productionGatewayDeployment": false,
     "sessionRetentionActivated": false,
     "tests": {
-      "tests": 207,
-      "pass": 202,
+      "tests": 208,
+      "pass": 203,
       "fail": 0,
       "skipped": 5
     },
     "newTests": {
       "barrierUnit": 14,
-      "realHttpBroker": 6
+      "realHttpBroker": 7
     },
-    "finalTargetedRetest": {
+    "intermediateFactoryRetest": {
       "passed": 6,
       "failed": 0,
       "overlapsMainSuite": true,
       "reason": "dispose rejected asynchronous dispatcher factories"
     },
     "positive": {
-      "atUtc": "2026-10-08T17:18:51.389Z",
+      "atUtc": "2026-10-08T17:23:12.507Z",
       "productionChanged": false,
       "externalProviderRequests": 0,
       "localFixtureRequests": 17,
@@ -8160,21 +8160,21 @@
       "observedParkMs": 1500,
       "configuredParkTtlMs": 5000,
       "parked": {
-        "rssKiB": 80668,
-        "cpuTicks": 96,
+        "rssKiB": 80256,
+        "cpuTicks": 94,
         "state": "R"
       },
       "afterPark": {
-        "rssKiB": 80896,
-        "cpuTicks": 142,
+        "rssKiB": 80296,
+        "cpuTicks": 122,
         "state": "S"
       },
-      "cpuTicksDuringObservation": 46,
-      "parkedPlaylistEndSeconds": 52,
+      "cpuTicksDuringObservation": 28,
+      "parkedPlaylistEndSeconds": 56,
       "parkedPlaylistUnchanged": false,
       "parkedPlaylistFinal": false,
       "validationRequests": 4,
-      "firstNewSegmentMs": 34,
+      "firstNewSegmentMs": 30,
       "finalSegments": 60,
       "allTransportStreamBytesEqualReference": true,
       "segmentHashes": [
@@ -8362,7 +8362,7 @@
         },
         "proofSupervisorRequired": true,
         "expectedStopDiagnosticsPresent": true,
-        "stderrSha256": "374bd4ab1705bedbc1645b7d25423ebbad49b661633b5f80dab8139fe24b1b9c"
+        "stderrSha256": "6fa51e9ebf109eaa102f52b85e88eab07cf0379554ee9b6ec389d7df2caadfe7"
       },
       {
         "scenario": "source-changed",
@@ -8425,7 +8425,7 @@
         "reason": "owner-revoked",
         "validationRequests": 0,
         "validationRejected": false,
-        "cleanupMs": 453,
+        "cleanupMs": 454,
         "childExit": {
           "code": null,
           "signal": "SIGKILL"
@@ -8467,11 +8467,11 @@
         },
         "proofSupervisorRequired": true,
         "expectedStopDiagnosticsPresent": true,
-        "stderrSha256": "804f61b1c9de3f1f0a105320f7205a9722e8e80723024c9c650143ded89fde65"
+        "stderrSha256": "3487dc0fdd0a4d47cdb7a88d7bb066e69eaa7fad5599f359783b2a94a3282e7c"
       }
     ],
     "runtime": {
-      "atUtc": "2026-10-08T17:19:44.504730+00:00",
+      "atUtc": "2026-10-08T17:23:45.345032+00:00",
       "productionChanged": false,
       "gateways": [
         {
@@ -8500,24 +8500,24 @@
       "The proof supervisor still kills remaining child processes, clears the cache and removes ephemeral outputs.",
       "Same synthetic source and timeline only; no general seek support, subtitle-before-EOF certificate, audible real-source acceptance or additional Normal gain.",
       "Five native/FFmpeg/GPU opt-in tests were skipped on Windows. The separate new real FFmpeg proof ran in the isolated Linux container with candidate broker source.",
-      "Local 34-ms next-playlist update is not browser startup time; about 79 MiB process RSS excludes Node/cache memory and larger production resolutions."
+      "Local next-playlist update is not browser startup time; about 79 MiB process RSS excludes Node/cache memory and larger production resolutions."
     ],
     "artifacts": [
       {
         "file": "services/media-gateway/src/index.js",
-        "sha256": "2cc88f5c162847ee577d5a4f7f0eb93d59e1930e54cccd77b44d83f0c309fe5e"
+        "sha256": "e325405cb9d86555e70b22d53cc2fe4401e12e5e13aec912978e6f88b2ef7b76"
       },
       {
         "file": "services/media-gateway/src/retained-input-barrier.js",
-        "sha256": "0f0d430ade55ec7d0486035642384bcebe594a6f81579c043b156dc8f2f4e20f"
+        "sha256": "bc9330a9a0f018b529b2c2e015fedcdc1b2702f9cce794043cf82efc9719eb8e"
       },
       {
         "file": "tests/media-gateway-strict-lid-broker.test.js",
-        "sha256": "1e4b491041e76e287b6b1c7404be98de9fdd46204ff11ad1a6006879ff62c957"
+        "sha256": "50e1655d29f87849badac0f308c5e391bf8a4b9afeef3cc6151e847d48025cf2"
       },
       {
         "file": "tests/retained-input-barrier.test.js",
-        "sha256": "093fd407d1125631e7df32f446e91a27ff8dc6d06d76897068f10ca017ee26ea"
+        "sha256": "de7e9e9351742ad6d123dfd305cfd99a28ae93f36a5c50cc9b764a86efa51ce5"
       },
       {
         "file": ".codex-artifacts/retained-input-barrier-20261008/build-negative.py",
@@ -8537,19 +8537,31 @@
       },
       {
         "file": ".codex-artifacts/retained-input-barrier-20261008/summarize.py",
-        "sha256": "2228a33fd5368294f52f3bea6057a8e3c0b6f54cf9c0b622335dcce5a5f98b4d"
+        "sha256": "32cf678e01b3602103eaaed7f6715152d7d449c974c2c536ef6937447f047669"
       },
       {
-        "file": ".codex-artifacts/retained-input-barrier-20261008/broker-warm-negative.safe.json",
+        "file": ".codex-artifacts/retained-input-barrier-20261008/broker-warm-negative-before-close-drain.safe.json",
         "sha256": "c0d6e324554922672f44534922df36a4febd049dec75a952bae1059c085a07c0"
       },
       {
-        "file": ".codex-artifacts/retained-input-barrier-20261008/broker-warm-proof.safe.json",
+        "file": ".codex-artifacts/retained-input-barrier-20261008/broker-warm-negative.safe.json",
+        "sha256": "171f0ac481d609bbe51fdc96ec2e5466f99828edb03e0d519781cf40ebb912fb"
+      },
+      {
+        "file": ".codex-artifacts/retained-input-barrier-20261008/broker-warm-proof-before-close-drain.safe.json",
         "sha256": "d07fdf20aa2d222d7cc2562f929378c5b8e3b81de9161727bb9d275c580bd817"
+      },
+      {
+        "file": ".codex-artifacts/retained-input-barrier-20261008/broker-warm-proof.safe.json",
+        "sha256": "c1769524e7e4668d62cec997e308f10b21b95e1e4eff32265013d710425a3985"
       },
       {
         "file": ".codex-artifacts/retained-input-barrier-20261008/tests.tap",
         "sha256": "92490f82ab2d76c92aad8449ec23065e019d4477a6a0c39508f86699996f0aac"
+      },
+      {
+        "file": ".codex-artifacts/retained-input-barrier-20261008/tests-final.tap",
+        "sha256": "7562850c1569af1207d1bd8a3d1daf0faa0ef1921bd4ac52862ca8ffd044d82c"
       },
       {
         "file": ".codex-artifacts/retained-input-barrier-20261008/retained-final.tap",

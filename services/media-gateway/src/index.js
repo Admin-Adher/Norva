@@ -7533,6 +7533,10 @@ async function createStrictLidBroker(options = {}) {
                         closeStrictLidBrokerAttempt(context, attempt, reason)
                     )),
                 );
+                // The fresh validation uses another uncached broker. Its
+                // callback must finish draining before this owner can attest
+                // closure and let a session release the real account claim.
+                if (context.retainedInputBarrier) await context.retainedInputBarrier.waitForValidation();
                 try { await context.queue; } catch (_) {}
                 await Promise.allSettled([...context.finiteLocalResponses]);
                 try { await context.finiteProviderQueue; } catch (_) {}

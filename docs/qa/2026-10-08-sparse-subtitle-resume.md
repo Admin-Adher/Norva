@@ -511,7 +511,7 @@ Cette piste couvre la poursuite du **même processus et de sa timeline existante
 
 Reçus et scripts : `.codex-artifacts/warm-decoder-resume-20261008/`, dont `summary.safe.json`. À **18:56:09 Paris**, les deux Gateways restent sains, même image PR706 et mêmes démarrages de 16:25:21 ; dispatcher actif, pilote `owner-allowlist`, conteneur de preuve supprimé. **Aucun déploiement, gain supplémentaire sur Normal ou extension du pilote.**
 
-## Barrière intégrée au broker, conservation de session encore désactivée — 8 octobre, 19:19 Paris
+## Barrière intégrée au broker, conservation de session encore désactivée — 8 octobre, 19:23 Paris
 
 Les cinq contrôles de PR715 sont réussis. Cette étape ajoute la primitive de suspension au **code du broker**, avec `retained-input-barrier.js` et ses tests versionnés. L’option interne `retainedInputScope` n’est fournie par aucun appel de session en production. Aucun endpoint public, réglage de déploiement ou comportement utilisateur n’active cette conservation ; `stopSession` continue à fermer normalement le broker et FFmpeg.
 
@@ -531,9 +531,11 @@ La rétention est bornée dès la demande de pause. L’expiration est contrôl�
 
 ### Tests de concurrence et parcours FFmpeg
 
-**20 nouveaux tests** couvrent la primitive : 14 tests du composant et six cas HTTP du broker. La suite ciblée complète — broker, barrière, préemption, traitement des langues et fermeture des sessions Gateway — compte **207 tests : 202 réussis, cinq ignorés, zéro échec**. Les cinq ignorés sont les cas natifs FFmpeg/GPU conditionnés par leurs options ; ils ne sont pas présentés comme validés par Windows. Ce groupe recoupe le premier relevé de 144 réussites et ne s’y additionne pas.
+**21 nouveaux tests** couvrent la primitive : 14 tests du composant et sept cas HTTP du broker. La suite ciblée complète — broker, barrière, préemption, traitement des langues et fermeture des sessions Gateway — compte finalement **208 tests : 203 réussis, cinq ignorés, zéro échec**. Les cinq ignorés sont les cas natifs FFmpeg/GPU conditionnés par leurs options ; ils ne sont pas présentés comme validés par Windows. Ce groupe recoupe les relevés intermédiaires de 144 puis 202 réussites et ne s’y additionne pas.
 
 La revue ajoute le nettoyage d’un dispatcher promis par une factory asynchrone refusée, pour éviter qu’il apparaisse après le rejet. Les six cas HTTP sont rejoués avec succès après ce durcissement et restent recoupés avec le groupe précédent. Les expériences FFmpeg suivantes sont également rejouées sur ce code final.
+
+Une seconde course est traitée avant fusion : **fermer le broker conservé doit attendre aussi la fin du callback de revalidation fraîche**. Son signal était déjà interrompu, mais un simple abort ne prouvait pas la fermeture de l’autre broker. Le septième test HTTP retient ce nettoyage : la fermeture reste en attente avec un broker strict enregistré, puis s’achève seulement après drainage et désinscription. Ce contrat exige que le callback utilise et ferme son propre broker, sans attendre récursivement la fermeture du broker conservé. Les 208 tests et les deux expériences FFmpeg sont rejoués après ce correctif.
 
 Les cas HTTP vérifient notamment une attente de **250 ms** en pause avec des délais réseau inchangés de **100 ms** : zéro nouvel appel, zéro timeout terminal, puis lecture exacte après reprise. Un autre test retient un corps HTTP actif : aucun jeton avant la fin du corps et la grâce ordinaire de 100 ms de cette fixture. Fermeture, expiration, validation refusée, mauvais périmètre et jeton forgé empêchent la poursuite.
 
@@ -545,7 +547,7 @@ Sur la fixture de 240 s :
 - Maximum une réponse et une connexion source actives sur le parcours ; 17 requêtes locales.
 - 60 segments TS et les deux sorties WebVTT contenant cinq répliques identiques au témoin.
 - PCM décodé complet identique, sans diagnostic de décodage dans le cas positif.
-- Premier changement de playlist 34 ms après la validation lors du dernier replay, **toujours sans valeur de délai utilisateur ou gain sur Normal**.
+- Premier changement de playlist 30 ms après la validation lors du dernier replay, **toujours sans valeur de délai utilisateur ou gain sur Normal**.
 
 Les trois contrôles FFmpeg négatifs sont aussi rejoués : expiration, source modifiée à taille/cible identiques et révocation. La barrière ferme le broker, aucun accès source de continuation n’est effectué, et le superviseur de preuve termine les processus restants et vide le cache. Le cas expiré montre un détail à conserver : **FFmpeg peut sortir avec le code zéro tout en signalant une entrée interrompue**. Ce n’est pas une lecture complète. Le futur gestionnaire doit déclarer le producteur interrompu avant nettoyage et ne jamais promouvoir ce résultat sur le seul code de sortie. Aucun fichier de cet essai n’entre dans le cache de production.
 
@@ -555,4 +557,4 @@ Le prochain niveau concerne la session authentifiée : révoquer l’ancien acc�
 
 Le coût observé du seul processus reste d’environ 79 Mio sur la petite fixture, hors Node/cache. La portée reste une continuation sur la même timeline ; sauts arbitraires, reprise après perte du processus et preuve générale de couverture avant EOF ne sont pas résolus. Aucune acceptation sonore humaine ni nouvelle mesure sur Normal.
 
-Reçus : `.codex-artifacts/retained-input-barrier-20261008/`. À **19:19:44 Paris**, les deux Gateways sont sains, image PR706 et démarrages inchangés, dispatcher actif, pilote `owner-allowlist`, conteneur de preuve absent. Aucun déploiement Gateway ni activation de conservation des sessions.
+Reçus : `.codex-artifacts/retained-input-barrier-20261008/`. À **19:23:45 Paris**, les deux Gateways sont sains, image PR706 et démarrages inchangés, dispatcher actif, pilote `owner-allowlist`, conteneur de preuve absent. Aucun déploiement Gateway ni activation de conservation des sessions.

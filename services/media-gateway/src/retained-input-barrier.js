@@ -8,6 +8,7 @@ class RetainedInputBarrier {
     #token = null; #timer = null; #started = null; #deadline = null;
     #now; #ttl; #onClose; #setTimer; #clearTimer;
     #validationController = null;
+    #validationDone = Promise.resolve();
 
     constructor({ scope, ttlMs = 5000, onClose, now = Date.now,
         setTimer = setTimeout, clearTimer = clearTimeout }) {
@@ -82,6 +83,8 @@ class RetainedInputBarrier {
         if (this.#state !== 'parked' || scope !== this.#scope || !token || token !== this.#token) return false;
         this.#token = null; this.#state = 'validating';
         this.#validationController = new AbortController();
+        let validationSettled;
+        this.#validationDone = new Promise(resolve => { validationSettled = resolve; });
         try {
             // The caller checks its ordinary claim and fresh file samples. The
             // gate remains shut until that uncached validation has drained.
@@ -95,7 +98,7 @@ class RetainedInputBarrier {
             this.#clearTimer(this.#timer); this.#timer = null; this.#deadline = null;
             this.#state = 'active'; this.#notify(); return true;
         } catch (_) { this.close('validation-failed'); return false; }
-        finally { this.#validationController = null; }
+        finally { this.#validationController = null; validationSettled(); }
     }
 
     close(reason = 'closed') {
@@ -107,5 +110,6 @@ class RetainedInputBarrier {
     }
 
     status() { this.#expire(); return { state: this.#state, activeWindows: this.#active, waiting: this.#waiters.size }; }
+    async waitForValidation() { await this.#validationDone; }
 }
 module.exports = { RetainedInputBarrier };

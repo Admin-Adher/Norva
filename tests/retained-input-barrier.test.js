@@ -66,8 +66,9 @@ test('clock rollback rejects retained state', async () => {
 test('revocation aborts fresh validation and never restarts transport', async () => {
     const {gate,scope}=setup();const token=await gate.park(scope,async()=>{});let signal,opens=0;
     const check=deferred(),p=gate.resume(token,scope,s=>{signal=s;return check.promise;},()=>{opens++;return true;});
-    gate.close('revoked');assert.equal(signal.aborted,true);check.resolve(true);
-    assert.equal(await p,false);assert.equal(opens,0);
+    gate.close('revoked');assert.equal(signal.aborted,true);let drained=false;
+    const drain=gate.waitForValidation().then(()=>drained=true);await Promise.resolve();assert.equal(drained,false);
+    check.resolve(true);assert.equal(await p,false);await drain;assert.equal(drained,true);assert.equal(opens,0);
 });
 test('close wakes both draining and queued input without renewing the TTL', async () => {
     const {gate,scope,closed}=setup();const release=gate.enter();const p=gate.park(scope,async()=>assert.fail());
