@@ -323,3 +323,65 @@ Les quatre raccords n'ont ni timestamp manquant/ambigu dans les fenêtres contr�
 Les assertions des deux expériences et du récapitulatif passent ; les **27 tests du helper n'ont pas été recomptés**. Les cinq checks de PR711 passent désormais, paquets compris. Reçus reproductibles sous `.codex-artifacts/subtitle-playback-chain-20261008/` : `chain`, `stereo-grid`, les quatre lectures DOM et `summary.safe.json`.
 
 Le contrôle read-only à **17:11:58 Paris** trouve les deux Gateways sains, l'image PR706 et leurs démarrages de 16:25:21 inchangés, le dispatcher actif et le pilote `owner-allowlist`. Le conteneur de preuve est absent, le serveur loopback est arrêté et l'onglet synthétique fermé. L'incident d'hôte signalé précédemment conserve sa cause inconnue ; ce contrôle de santé ne l'efface pas.
+
+
+## Collecte progressive et origine du décalage audio — 8 octobre, 17:29–17:46 Paris
+
+Cette phase reste un prototype isolé, sans appel fournisseur ni modification de production. Elle sépare la collecte des paquets de sous-titres, leur couverture temporelle et le signal audio. Les cinq contrôles de PR712 réussissent désormais, paquets compris.
+
+### Collecter avant la fin du fichier
+
+Le collecteur peut maintenant produire des instantanés immuables après chaque cluster complet sans fermer son entrée. Les observations suivantes restent possibles ; les reprises effectives conservent leur chaîne de révocation. Les deltas ne répètent pas les paquets hérités. Un trou d'octets, un rejeu, un changement de liaison ou le dépassement du budget invalide la preuve, y compris les instantanés déjà remis. La borne historique de 64 reprises ne devient plus une limite artificielle de 64 observations pendant une même lecture.
+
+**39 tests passent : 27 antérieurs rejoués et 12 nouveaux.** Ils vérifient notamment 160 observations successives, le cluster incomplet, la reprise sans répétition, la révocation, le budget et le rejet d'une preuve JSON forgée.
+
+Une fixture de 240 s, H.264/AAC 48 kHz et deux pistes UTF-8, est ensuite envoyée par morceaux de 32 Kio vers un vrai FFmpeg en stdin. Seule la taille est lue avant le flux, sans précharger le fichier entier. Le collecteur observe les mêmes octets au passage ; FFmpeg les démultiplexe en copie de flux vers une sortie nulle. Ce test n'est ni un nouveau contrôle de décodage vidéo ni le broker de session de production.
+
+- **10 988 142 octets / 336 morceaux** parcourus ; les cinq paquets concordent avec un `ffprobe` indépendant sur position, timestamp, durée et empreinte.
+- Premier sous-titre disponible après **196 608 octets**, soit **1,79 %** du fichier.
+- Réplique future à **150,021 s** disponible après **3 211 264 octets**, soit **29,22 %** du fichier. Sa collecte n'attend donc plus la fin de cette fixture.
+- Maximum du tampon du parseur : **217 947 octets** ; texte des cinq paquets conservés : 38 octets. Ces chiffres n'incluent pas toute la mémoire Node ni les instantanés que conserverait l'appelant.
+- Aucune erreur FFmpeg dans l'essai final ; la révocation rend ensuite le reçu inutilisable.
+
+Le premier harnais décodait vers une sortie nulle avec la politique de temps par défaut. Il a dépassé sa limite de stderr puis échoué sur une assertion dans le callback ; le détail initial du diagnostic n'a pas été conservé. Le harnais corrigé conserve un stderr borné et utilise la copie de flux pour isoler le démultiplexage. L'origine précise de ce premier stderr reste inconnue ; aucune réparation de décodeur de production n'en est déduite.
+
+**Collecte progressive ne signifie pas couverture temporelle complète.** Un test conserve le même préfixe puis ajoute un paquet physique ultérieur dont la date est antérieure. Le collecteur reste `timeCoverage:false`. L'index Matroska référence certains clusters ; l'indexation de chaque sous-titre est recommandée, sans garantie d'exhaustivité. Ni `Cues`, ni la dernière date vidéo, ni `ENDLIST` ne suffisent ici pour ouvrir l'admission HLS. [Index Matroska](https://www.matroska.org/technical/cues.html), [ordre des éléments](https://www.matroska.org/technical/ordering.html).
+
+### Le décalage peut précéder l'encodeur AAC
+
+La comparaison emploie d'abord deux fichiers contenant **exactement les mêmes paquets audio PCM sans compression**, vérifiés par taille et SHA-256. Seul le conteneur diffère : NUT à horloge précise et Matroska à timestamps arrondis. Deux fréquences, 48 et 44,1 kHz, et deux frontières, 16 et 20 s, donnent huit comparaisons. Aucun encodeur audio avec perte n'intervient dans cette première expérience.
+
+La précédente politique reproduit pourtant le décalage avec Matroska. Une ancre commune aux grilles d'entrée et de sortie corrige le cas NUT 44,1 kHz/20 s, mais ne suffit pas pour Matroska. L'essai suivant conserve un curseur d'échantillons d'entrée lié à une position déjà décodée avant la frontière. Une correction constante de l'origine du premier paquet élimine alors les différences à 48 kHz ; le redémarrage du rééchantillonneur garde une différence de phase à 44,1 kHz.
+
+Le dernier candidat combine :
+
+1. Une correspondance unique avec une trame antérieure conservée, par position et nombre d'échantillons ; la fixture garantit l'identité du fichier.
+2. Une correction constante des timestamps d'entrée ; aucun décalage estimé par corrélation n'est appliqué.
+3. Un début de préparation sur une phase commune : **147 échantillons à 44,1 kHz correspondent à 160 à 48 kHz**. La grille de sortie commune aux paquets AAC de 1 024 échantillons vaut ici 5 120 échantillons. Les 108–135 échantillons d'entrée écartés dans ces fixtures sont plusieurs secondes avant la frontière de lecture.
+
+Les huit comparaisons PCM deviennent **strictement identiques** sur les deux canaux, dans la fenêtre **+0,3 à +1 s** après chaque frontière : erreur RMS et décalage nuls, aucun timestamp manquant. Cela ne certifie pas le film entier. Le curseur cumulé suppose ici une source continue, à fréquence constante et origine connue. Sa reconstruction sur un fichier à trous, avec origine non nulle, changement de fréquence ou règles de priming différentes reste à sécuriser ; ce n'est pas encore une politique générale de production.
+
+### Contrôle AAC et nouveau raccord HLS
+
+Avec des sources AAC, six comparaisons sur huit deviennent identiques avant l'encodeur de sortie. Les deux autres gardent une erreur RMS de **0,002929**, sans décalage mesuré. Le premier bloc décodé après saut diffère aussi du bloc historique : sa somme de contrôle PCM ne peut pas servir de preuve d'identité. La correspondance de cette expérience utilise le fichier fixe, la position physique et le nombre d'échantillons, puis plusieurs secondes de préparation avant le raccord.
+
+Un contrôle désactive uniquement la substitution perceptuelle de bruit (PNS) lors de la fabrication des sources synthétiques : **huit comparaisons sur huit deviennent identiques**. Le code du décodeur emploie un état pseudo-aléatoire pour ces bandes. Ce résultat désigne la PNS comme contributeur plausible aux différences de signal de ces fixtures ; il n'attribue pas tous les écarts précédents à ce mécanisme et ne prouve aucune nuisance audible. L'option de production n'est pas modifiée. [Décodeur FFmpeg 5.1.9](https://raw.githubusercontent.com/FFmpeg/FFmpeg/n5.1.9/libavcodec/aacdec_template.c), [option AAC PNS](https://ffmpeg.org/ffmpeg-codecs.html#aac_pns).
+
+La nouvelle préparation est enfin appliquée à **quatre vrais raccords de segments HLS synthétiques**, AAC-LC stéréo 48 kHz en sortie, avec les mêmes sources stéréo et frontières que la matrice de PR712. PNS conserve ses valeurs par défaut dans cette matrice.
+
+| Source / frontière | Ancien décalage de signal estimé | Nouveau décalage estimé | Nouvelle erreur RMS autour du raccord |
+| --- | --- | --- | --- |
+| AAC 48 kHz / 16 s | 0 ms | 0 ms | 0,00326 |
+| AAC 48 kHz / 20 s | +0,167 ms | 0 ms | 0,00655 |
+| AAC 44,1 kHz / 16 s | −0,229 ms | 0 ms | 0,01033 |
+| AAC 44,1 kHz / 20 s | −0,167 ms | 0 ms | 0,01092 |
+
+Les quatre horloges audio et vidéo concordent avec le témoin. Aucun trou ou doublon de timestamp dans les fenêtres PCM contrôlées ; aucun diagnostic d'encodage/décodage, saturation ou série de valeurs proches de zéro dans les 600 ms autour du raccord. La corrélation reste un diagnostic du canal gauche sur 200 ms. Après réencodage, le signal n'est toujours pas identique au témoin : l'erreur RMS après raccord vaut 0,00622–0,01538, et les variations de niveau restent documentées. **Aucune équivalence perceptuelle ni acceptation à l'écoute n'est revendiquée.** Aucun nouveau test navigateur ou Android dans cette phase.
+
+### Ce qui reste avant une admission réelle
+
+Il faut relier le collecteur aux gardes et au cycle de vie du broker réel, établir les périodes de sous-titres couvertes sans déclarer de silence à partir d'un préfixe incomplet, puis valider le curseur audio et le raccord sur des sources moins régulières. Les protections actuelles restent en place. **Aucun gain supplémentaire sur Normal et aucun déploiement.**
+
+Reçus, scripts et résultats intermédiaires : `.codex-artifacts/subtitle-progressive-ledger-20261008/`. `summary.safe.json` vérifie les comptes et sépare collecte, couverture, horloges, signal et admission. Les six premières matrices audio servent au diagnostic ; elles ne sont pas additionnées aux 39 tests unitaires.
+
+Le contrôle read-only du **8 octobre à 17:42:15 Paris** trouve les deux Gateways sains, même image PR706 et mêmes démarrages de 16:25:21. Dispatcher actif, pilote `owner-allowlist`, conteneur de preuve supprimé. Les médias synthétiques étaient éphémères. L'incident historique de redémarrage de l'hôte reste de cause inconnue.
