@@ -15589,7 +15589,9 @@ async function buildPrivateResumeSubtitleContinuation(session) {
         const bytes = await readPrivateResumeAsset(session, rendition.playlistName, 2 * 1024 * 1024);
         const subtitle = bytes && parseSubtitlePlaylist(bytes.toString('utf8'));
         if (!subtitle || subtitle.bootstrap) return session.privateResumeSubtitleGraph || null;
-        if (!subtitle.ended) coverage = Math.min(coverage, subtitle.segments.at(-1).end);
+        // An encoder can close a subtitle playlist on early stop. ENDLIST
+        // cannot extend its finalized coverage to the remaining video.
+        coverage = Math.min(coverage, subtitle.segments.at(-1).end);
     }
     const covered = parsed.segments.filter(segment => segment.end <= coverage);
     if (!covered.length) return session.privateResumeSubtitleGraph || null;

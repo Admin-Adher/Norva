@@ -99,6 +99,36 @@ test('missing coverage, bootstrap, unsupported clocks, escaping names and budget
     }
 });
 
+test('an early subtitle ENDLIST cannot certify the rest of a video window', async () => {
+    const result = await captureSubtitleWindow({ renditions, videoSegments,
+        readAsset: async name => name.endsWith('.m3u8')
+            ? Buffer.from('#EXTM3U\n#EXTINF:4,\nsubtitle_0-00001.vtt\n#EXT-X-ENDLIST\n') : await readAsset(name) });
+    assert.equal(result, null);
+});
+
+test('native empty WebVTT and nonempty fragments have the same header clock', () => {
+    assert.equal(parseWebVtt(Buffer.from('WEBVTT\n')).header, parseWebVtt(vtt).header);
+    assert.deepEqual(parseWebVtt(Buffer.from('WEBVTT\n')).cues, []);
+});
+
+test('continuation never publishes video beyond a prematurely ended subtitle lane', async () => {
+    const source = fs.readFileSync(require.resolve('../services/media-gateway/src/index.js'), 'utf8');
+    const block = source.slice(source.indexOf('async function privateResumeSubtitleContinuation('),
+        source.indexOf('\nfunction recentDeliveryRouteKey('));
+    const build = vm.runInNewContext(`(()=>{${block};return privateResumeSubtitleContinuation})()`, {
+        fsp: { readFile: async () => 'video' },
+        parseResumeMediaPlaylist: () => ({ ended: false, sequence: 0, segments: [
+            {name:'segment-0.ts',start:0,end:4,duration:4}, {name:'segment-1.ts',start:4,end:8,duration:4}] }),
+        exactSubtitleRenditionsForSession: () => renditions,
+        readPrivateResumeAsset: async () => Buffer.from('subtitle'),
+        parseSubtitlePlaylist: () => ({ segments: [{end:4}], ended:true }),
+    });
+    const graph = await build({privateResumeContinuationReady:true});
+    assert.equal(graph.segments.length,1);
+    assert.equal(graph.segments[0].end,4);
+    assert.equal(graph.ended,false);
+});
+
 test('sliding subtitle continuation preserves original clocks, coverage and stable fragment names', async () => {
     const source = fs.readFileSync(require.resolve('../services/media-gateway/src/index.js'), 'utf8');
     const block = source.slice(source.indexOf('async function privateResumeSubtitleContinuation('),
