@@ -8086,5 +8086,475 @@
         "sha256": "be61f265b3df7083968d72e33580e46c0f3fc9e23b60f8f055883f2b4d30a140"
       }
     ]
+  },
+  "retainedInputBrokerBarrier": {
+    "date": "2026-10-08",
+    "status": "broker primitive integrated in source, no production session caller or deployment",
+    "previousPullRequest": {
+      "atUtc": "2026-10-08T17:14:37.5562361Z",
+      "number": 715,
+      "merged": true,
+      "head": "7704561b0c10b6218b0a86b5860783fb0f601180",
+      "merge": "a23e806680f940f5460ea9ab2ba0c8351d6f5ffb",
+      "checks": [
+        {
+          "name": "Build Android Phone APK",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build Android TV APK",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build Windows Portable",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Vercel Preview Comments",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify cloud contracts",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    "externalProviderRequests": 0,
+    "productionGatewayDeployment": false,
+    "sessionRetentionActivated": false,
+    "tests": {
+      "tests": 207,
+      "pass": 202,
+      "fail": 0,
+      "skipped": 5
+    },
+    "newTests": {
+      "barrierUnit": 14,
+      "realHttpBroker": 6
+    },
+    "finalTargetedRetest": {
+      "passed": 6,
+      "failed": 0,
+      "overlapsMainSuite": true,
+      "reason": "dispose rejected asynchronous dispatcher factories"
+    },
+    "positive": {
+      "atUtc": "2026-10-08T17:18:51.389Z",
+      "productionChanged": false,
+      "externalProviderRequests": 0,
+      "localFixtureRequests": 17,
+      "maxActive": 1,
+      "active": 0,
+      "maxSockets": 1,
+      "keptSameDecoderProcess": true,
+      "providerNetworkRequestsDuringPark": 0,
+      "providerSocketsDuringPark": 0,
+      "upstreamConnectionCloseUsed": false,
+      "privateDispatcherDestroyed": true,
+      "networkDeadlinePausedByOverride": false,
+      "observedParkMs": 1500,
+      "configuredParkTtlMs": 5000,
+      "parked": {
+        "rssKiB": 80668,
+        "cpuTicks": 96,
+        "state": "R"
+      },
+      "afterPark": {
+        "rssKiB": 80896,
+        "cpuTicks": 142,
+        "state": "S"
+      },
+      "cpuTicksDuringObservation": 46,
+      "parkedPlaylistEndSeconds": 52,
+      "parkedPlaylistUnchanged": false,
+      "parkedPlaylistFinal": false,
+      "validationRequests": 4,
+      "firstNewSegmentMs": 34,
+      "finalSegments": 60,
+      "allTransportStreamBytesEqualReference": true,
+      "segmentHashes": [
+        "ba4d96a8aa5cc6da0efbbbbf556067a54e1e5314dbf1ad743302baeae8db35d4",
+        "38ff257a0c83c32b8a1369d1b806e02e35326e1bea60b772ff653c2b863daec3",
+        "f60482cffbfad0f94d3e6445f121b37dfd7e75c7a89ad5c0d0db1c209e775c61",
+        "7c38aa40ed671dd94316ba82b09dec4742d321c524a47b23d37db482e2ecd24f",
+        "988e36b06faccbca96d037fb0e1cf4e5932e98a2bc522c78f155c18616dbdc90",
+        "289e99d79b45b186f56a00383f5b1ee6f28f90fe77f7c4401843f204d2596b64",
+        "13c81305e91b86f315ed239dc50f0a2e814f5803811503164455f8d078ed58fa",
+        "3a3009cb0c857d2820b2bf564275a4b4324adbc89b3a2685a73cb32513e14a19",
+        "9860f285eb4c99d181db2b2930cb9e93165ecbed0a570b538c675f98d0fe4ef3",
+        "8bf71bf5a7cf44792fca3a13d57dcdd4119139867dcbb89ce39183d0d1e7680e",
+        "928d892ea07ae48f654dd661f062147ebfb227e9fcb3309a7293d341078b9c57",
+        "e5c602dfb8bf793d7a8437e0ab1461ba5f26acf737caded75f634454d092a93e",
+        "041808f3049bae20d710356ec67faa0aa09bcd832a99940e3af5e6d21d683bf2",
+        "f9118e4bba2d352d34b2818a1271a01c370983e8950c099fba4a89a5201a8730",
+        "5c1e67b4b0719c1dfc49fbb5a72b939f3e6493c6215b314d1aa3fa77b0409994",
+        "8a7816671371bb6e9a8ece2e8591b71126160a59af04b0ba018457070fe5a975",
+        "1bacf4ae78c3a7cf05abd6e46ee99f54fb42ef56b913d9b58360d85d0c02511e",
+        "7787b2bd4c89ddffc745e6efe04aaf4f9b62f7d6f20dff5f01dfdd9c4d7152a3",
+        "b180289f3193b6eb1e22ab43a46fbe6d36911dc188b5cd181b6bd8aaaaf8ed74",
+        "cd9d688f50d7b75e992b379188a9f0048c837cd93efc9eb65c9748d14d68b6ba",
+        "40c0bee7aeb15ecf9a2aef008b105f8ebf9fe9dad9ad0ed9a7c9c734fc3ec327",
+        "b7a8e4f5b81023c4a21c566564b1556c50a9ad78a5540cf829bbe5fdae8c139a",
+        "0103ddd6a82fe1df366b1bb89df2a1316b19e62ff3e49c7cd52beca86ff55ebf",
+        "f8ba850c3fe487e9f78834a5a9387898d5efb33ddb7342d4eb55bb913d3e48d8",
+        "041d77a311be0b2b7d128958d3023243af320ebecfa1b2d427f487fe70a1cb67",
+        "2bba7f7d3cce041901fb5cc87fbf543d193529ec53ffdc3d962199cd24a507d1",
+        "9e2236ba79f3b12f14fe6ba883bdeefb062e07903a8c20a829f7f9017ceb9b79",
+        "48b7f0a70f6d62c8f057c9371bdf54de9165de9054102f32ecf58c46f79aa6bb",
+        "929f4f057850f2f70cb4e7cb063f2c970fad01f11b8c40f16ffece34bab19427",
+        "58a608b2ded2166b951700aa12c3cd10f75949179ac29c74d7e975e25c08ebad",
+        "5f347bb6ac4f5abd00f5819f51bb0fb0cb48a5a6c59dac9e60f20b6a85c71c9b",
+        "c41c39cf1b1b77cefcb1ba247cb3775eff3199a1302224712d04fa0544e3a4dd",
+        "4a8f3a450e3913ee575c01f506f5ed321b095dc02cce3ac45b282d08b7aa405e",
+        "eb0946731952d6dc6ec773a2e778af5869574949d18cbee1bd5f4e4f2d592ed1",
+        "f8cf96501a15b38bfcb86e7cc92c38ef561e51790a588fd23df19159ef05146f",
+        "966a17f96188057e511fa6a0e2e69fec7b678cc785f813cf7fc9c5fb13318e9c",
+        "cf3ffed30d6150e0cf735182c922253380c55a897295498fac0e3b02156ed95e",
+        "3c5bbe32312eebda02a796bc4a16e2f4757e1c742093f37f12a6dc381ff11329",
+        "682572bacf369ad90bedbeb500e1387a278d76e03b957d53e4e87349ee142bbe",
+        "dbdced7cda4b665839901aba203cf9bda33b9cf12f6e1988d952ddbc5422c9f0",
+        "af785f026209c05d30f9e4dcdbe93b05a6e7206cca40eb1acadca20074f78632",
+        "7daaa55d5c84ff10ab85e1ed9327250a5388bd1743124abb1ff3ad08916c5276",
+        "a44609c85dd4c9dd4388ae0b6da95de3ba5021cfcf0767fa37f3988678e2cc50",
+        "33e84a89f3307cfcd8606e792dcced6750261e75d0d5487be9cf1b467b13b42c",
+        "74a24c8588e02b0316d088479f4310c7fd5bab498e7252c41f1f258062993d3c",
+        "a7259ce994d80a646e6ea972c1a124386ed0d9ed571dbe2efb85cd380cd71a14",
+        "e1ce74470c4b15b33605a1560dea54925b7ee8efb901a8ded8adb7b8b646b00d",
+        "8e926b1fed2699ce98085077dfa156205125e9a285d5952bf3726301d7527669",
+        "e78bc1233acf158a4ddecca13f7d8cadf8cb57ea46ef48dc485d1d2959f6428a",
+        "bc85abb0b4255666fbe1e557dfb45ebf11ce21c6431b0c1d54726dc2675a4fa1",
+        "7b2df0ae8cd29b599a18cfe7f53f0c055063e20e5afdf4c7abe62cafeb22cf89",
+        "20f364f980cba20db7861f25fd25c2807b43d8666f1cab21ba69dbbfdaad1712",
+        "f8960023ceda44b1b11150bfeb00546083115043f8ba51d24e8cb57cc8cdb304",
+        "8c50eb1f7773c2467c207068d4ae07ab7161d8ee457a534aa8c0e04679d74b76",
+        "6edadc92a7fca060f35a2affed5637465e0b2565973d9a046404e0c51f1c8953",
+        "ae667b46c4429c94f9e5bbcb682ee1bfa7249adf584c48a2a6d733cb89548c47",
+        "6183d3e85c58583fa844ad6a2382c339deb9357293d14da32cd22169726f1ec3",
+        "6f8c9e936de578831b2b8c143acafda929f4510b4a96906ec4fae2d4cdf32762",
+        "5b6d378035106fd7627e7af17704a0eb80b27a64ddac9ada6ad452a79fd17be1",
+        "73acd3f5cc2bdcf9a8852f57752155627f70a51da37427d69638ad81de6dde6c"
+      ],
+      "subtitles": [
+        {
+          "name": "forced.vtt",
+          "count": 2,
+          "cues": [
+            {
+              "start": 70.023,
+              "end": 75.023
+            },
+            {
+              "start": 150.023,
+              "end": 155.023
+            }
+          ],
+          "hash": "3eed5073dc605bf093e34928d5be9968ffaaeae327ab9cf5fe553d2fbf3207a0"
+        },
+        {
+          "name": "full.vtt",
+          "count": 3,
+          "cues": [
+            {
+              "start": 2.023,
+              "end": 14.023
+            },
+            {
+              "start": 60.023,
+              "end": 110.023
+            },
+            {
+              "start": 190.023,
+              "end": 195.023
+            }
+          ],
+          "hash": "9fcff15e1a817237b221551064bcb5a9f323981a9cc3b059b4806e235007eac0"
+        }
+      ],
+      "decodedPcmHash": "SHA256=76020d4817f5b3529cf79c550f6e2db9268cb35b598d3f868f2daf36fd04b0e8",
+      "decodedPcmEqualsUninterruptedReference": true,
+      "stderr": "",
+      "scope": "integrated broker barrier; retains loopback connection and process; no real account claim release/transfer or authenticated session handoff",
+      "productionAdmissionProven": false,
+      "audibleAcceptance": false,
+      "cacheAfter": {
+        "protocol": 1,
+        "stores": 0,
+        "hits": 1,
+        "misses": 0,
+        "invalidations": 1,
+        "evictions": 0,
+        "inputStores": 1,
+        "inputHits": 1,
+        "sampledStores": 0,
+        "sampledHits": 0,
+        "captureRejects": 0,
+        "lastCaptureRejection": null,
+        "lastSampledValidation": {
+          "complete": true,
+          "sameSize": true,
+          "sameTarget": true,
+          "matchingSamples": 4,
+          "outcome": "accepted"
+        },
+        "entries": 0,
+        "bytes": 0,
+        "reservedBytes": 0,
+        "maxBytes": 67108864,
+        "perFileBytes": 16777216,
+        "ttlMs": 1800000,
+        "windowSeconds": 48,
+        "recentRevalidation": true,
+        "recentTtlMs": 600000,
+        "scope": "private-owner-source-revision",
+        "revalidation": "current-strong-etag-size-target"
+      }
+    },
+    "negativeControls": [
+      {
+        "scenario": "expiry",
+        "reason": "expired",
+        "validationRequests": 0,
+        "validationRejected": false,
+        "cleanupMs": 452,
+        "childExit": {
+          "code": 0,
+          "signal": null
+        },
+        "childAlive": false,
+        "requests": 4,
+        "maxActive": 1,
+        "active": 0,
+        "staleContinuationRequests": 0,
+        "gate": {
+          "state": "closed",
+          "activeWindows": 0,
+          "waiting": 0
+        },
+        "cache": {
+          "protocol": 1,
+          "stores": 0,
+          "hits": 0,
+          "misses": 0,
+          "invalidations": 1,
+          "evictions": 0,
+          "inputStores": 1,
+          "inputHits": 0,
+          "sampledStores": 0,
+          "sampledHits": 0,
+          "captureRejects": 0,
+          "lastCaptureRejection": null,
+          "entries": 0,
+          "bytes": 0,
+          "reservedBytes": 0,
+          "maxBytes": 67108864,
+          "perFileBytes": 16777216,
+          "ttlMs": 1800000,
+          "windowSeconds": 48,
+          "recentRevalidation": true,
+          "recentTtlMs": 600000,
+          "scope": "private-owner-source-revision",
+          "revalidation": "current-strong-etag-size-target"
+        },
+        "proofSupervisorRequired": true,
+        "expectedStopDiagnosticsPresent": true,
+        "stderrSha256": "374bd4ab1705bedbc1645b7d25423ebbad49b661633b5f80dab8139fe24b1b9c"
+      },
+      {
+        "scenario": "source-changed",
+        "reason": "source-changed",
+        "validationRequests": 4,
+        "validationRejected": true,
+        "cleanupMs": 455,
+        "childExit": {
+          "code": null,
+          "signal": "SIGKILL"
+        },
+        "childAlive": false,
+        "requests": 8,
+        "maxActive": 1,
+        "active": 0,
+        "staleContinuationRequests": 0,
+        "gate": {
+          "state": "closed",
+          "activeWindows": 0,
+          "waiting": 0
+        },
+        "cache": {
+          "protocol": 1,
+          "stores": 0,
+          "hits": 0,
+          "misses": 1,
+          "invalidations": 1,
+          "evictions": 0,
+          "inputStores": 1,
+          "inputHits": 0,
+          "sampledStores": 0,
+          "sampledHits": 0,
+          "captureRejects": 0,
+          "lastCaptureRejection": null,
+          "lastSampledValidation": {
+            "complete": true,
+            "sameSize": true,
+            "sameTarget": true,
+            "matchingSamples": 0,
+            "outcome": "sample-changed"
+          },
+          "entries": 0,
+          "bytes": 0,
+          "reservedBytes": 0,
+          "maxBytes": 67108864,
+          "perFileBytes": 16777216,
+          "ttlMs": 1800000,
+          "windowSeconds": 48,
+          "recentRevalidation": true,
+          "recentTtlMs": 600000,
+          "scope": "private-owner-source-revision",
+          "revalidation": "current-strong-etag-size-target"
+        },
+        "proofSupervisorRequired": true,
+        "expectedStopDiagnosticsPresent": false,
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "scenario": "owner-revoked",
+        "reason": "owner-revoked",
+        "validationRequests": 0,
+        "validationRejected": false,
+        "cleanupMs": 453,
+        "childExit": {
+          "code": null,
+          "signal": "SIGKILL"
+        },
+        "childAlive": false,
+        "requests": 4,
+        "maxActive": 1,
+        "active": 0,
+        "staleContinuationRequests": 0,
+        "gate": {
+          "state": "closed",
+          "activeWindows": 0,
+          "waiting": 0
+        },
+        "cache": {
+          "protocol": 1,
+          "stores": 0,
+          "hits": 0,
+          "misses": 0,
+          "invalidations": 1,
+          "evictions": 0,
+          "inputStores": 1,
+          "inputHits": 0,
+          "sampledStores": 0,
+          "sampledHits": 0,
+          "captureRejects": 0,
+          "lastCaptureRejection": null,
+          "entries": 0,
+          "bytes": 0,
+          "reservedBytes": 0,
+          "maxBytes": 67108864,
+          "perFileBytes": 16777216,
+          "ttlMs": 1800000,
+          "windowSeconds": 48,
+          "recentRevalidation": true,
+          "recentTtlMs": 600000,
+          "scope": "private-owner-source-revision",
+          "revalidation": "current-strong-etag-size-target"
+        },
+        "proofSupervisorRequired": true,
+        "expectedStopDiagnosticsPresent": true,
+        "stderrSha256": "804f61b1c9de3f1f0a105320f7205a9722e8e80723024c9c650143ded89fde65"
+      }
+    ],
+    "runtime": {
+      "atUtc": "2026-10-08T17:19:44.504730+00:00",
+      "productionChanged": false,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "healthy": true,
+          "recentOwnerScope": "owner-allowlist"
+        }
+      ],
+      "dispatcherRunning": true,
+      "proofContainerAbsent": true
+    },
+    "limits": [
+      "Caller still must own the real provider claim, validate source/profile/track identity and drain its fresh validation callback.",
+      "No Edge session/token revocation, DB claim handoff or retained-process registry is connected to these internal methods.",
+      "Existing stopSession still closes the broker and decoder normally; no user session opts into retainedInputScope.",
+      "The expiry negative can leave FFmpeg exiting with code zero despite input-error diagnostics. A future session controller must mark the interrupted producer failed before cleanup; exit zero alone is not completion.",
+      "The proof supervisor still kills remaining child processes, clears the cache and removes ephemeral outputs.",
+      "Same synthetic source and timeline only; no general seek support, subtitle-before-EOF certificate, audible real-source acceptance or additional Normal gain.",
+      "Five native/FFmpeg/GPU opt-in tests were skipped on Windows. The separate new real FFmpeg proof ran in the isolated Linux container with candidate broker source.",
+      "Local 34-ms next-playlist update is not browser startup time; about 79 MiB process RSS excludes Node/cache memory and larger production resolutions."
+    ],
+    "artifacts": [
+      {
+        "file": "services/media-gateway/src/index.js",
+        "sha256": "2cc88f5c162847ee577d5a4f7f0eb93d59e1930e54cccd77b44d83f0c309fe5e"
+      },
+      {
+        "file": "services/media-gateway/src/retained-input-barrier.js",
+        "sha256": "0f0d430ade55ec7d0486035642384bcebe594a6f81579c043b156dc8f2f4e20f"
+      },
+      {
+        "file": "tests/media-gateway-strict-lid-broker.test.js",
+        "sha256": "1e4b491041e76e287b6b1c7404be98de9fdd46204ff11ad1a6006879ff62c957"
+      },
+      {
+        "file": "tests/retained-input-barrier.test.js",
+        "sha256": "093fd407d1125631e7df32f446e91a27ff8dc6d06d76897068f10ca017ee26ea"
+      },
+      {
+        "file": ".codex-artifacts/retained-input-barrier-20261008/build-negative.py",
+        "sha256": "38af19e2ab624df0bdc84bd7c6659e0c290aa542214a16d824ba8566c95090b2"
+      },
+      {
+        "file": ".codex-artifacts/retained-input-barrier-20261008/build-proof.py",
+        "sha256": "0e4083aa1efb4f0f9718a3f1607afb4f215741709023da4bb077d85126189f05"
+      },
+      {
+        "file": ".codex-artifacts/retained-input-barrier-20261008/run-proof.py",
+        "sha256": "034de5d9ecabd524e12ab34cf51358f91f2617c909fd9fcfe035019674b19784"
+      },
+      {
+        "file": ".codex-artifacts/retained-input-barrier-20261008/runtime-check.py",
+        "sha256": "f533f1e0823eddc81f7129b5459271c4a5fa378fdf5bd6e739d51ededaab128b"
+      },
+      {
+        "file": ".codex-artifacts/retained-input-barrier-20261008/summarize.py",
+        "sha256": "2228a33fd5368294f52f3bea6057a8e3c0b6f54cf9c0b622335dcce5a5f98b4d"
+      },
+      {
+        "file": ".codex-artifacts/retained-input-barrier-20261008/broker-warm-negative.safe.json",
+        "sha256": "c0d6e324554922672f44534922df36a4febd049dec75a952bae1059c085a07c0"
+      },
+      {
+        "file": ".codex-artifacts/retained-input-barrier-20261008/broker-warm-proof.safe.json",
+        "sha256": "d07fdf20aa2d222d7cc2562f929378c5b8e3b81de9161727bb9d275c580bd817"
+      },
+      {
+        "file": ".codex-artifacts/retained-input-barrier-20261008/tests.tap",
+        "sha256": "92490f82ab2d76c92aad8449ec23065e019d4477a6a0c39508f86699996f0aac"
+      },
+      {
+        "file": ".codex-artifacts/retained-input-barrier-20261008/retained-final.tap",
+        "sha256": "f5020bae56d56fea04c73e9023eed9d2101aecbcfa28ad545117ea2b047c0543"
+      }
+    ]
   }
 }

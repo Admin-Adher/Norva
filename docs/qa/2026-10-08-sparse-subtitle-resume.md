@@ -510,3 +510,49 @@ Avant tout pilote réel, il faut intégrer :
 Cette piste couvre la poursuite du **même processus et de sa timeline existante**. Elle ne couvre pas les sauts arbitraires hors des segments conservés, la perte du processus ou la reprise ancienne à partir du seul disque. Le chemin de cache durable conserve donc ses blocages de couverture et d’intégration déjà décrits.
 
 Reçus et scripts : `.codex-artifacts/warm-decoder-resume-20261008/`, dont `summary.safe.json`. À **18:56:09 Paris**, les deux Gateways restent sains, même image PR706 et mêmes démarrages de 16:25:21 ; dispatcher actif, pilote `owner-allowlist`, conteneur de preuve supprimé. **Aucun déploiement, gain supplémentaire sur Normal ou extension du pilote.**
+
+## Barrière intégrée au broker, conservation de session encore désactivée — 8 octobre, 19:19 Paris
+
+Les cinq contrôles de PR715 sont réussis. Cette étape ajoute la primitive de suspension au **code du broker**, avec `retained-input-barrier.js` et ses tests versionnés. L’option interne `retainedInputScope` n’est fournie par aucun appel de session en production. Aucun endpoint public, réglage de déploiement ou comportement utilisateur n’active cette conservation ; `stopSession` continue à fermer normalement le broker et FFmpeg.
+
+### Une frontière sûre avant l’appel réseau
+
+Le prototype précédent bloquait dans `fetchImpl`, alors que le chronomètre réseau avait déjà démarré. La nouvelle barrière attend **avant la file du verrou fournisseur et la création du délai réseau**. Après acquisition du verrou, elle relit son état : une pause arrivée pendant l’attente fait libérer le verrou et attendre de nouveau. La réponse déjà en cours se termine normalement ; la barrière compte cette opération jusqu’à sa libération.
+
+La pause produit un jeton opaque à usage unique seulement après :
+
+1. La fin des opérations fournisseur déjà entrées.
+2. La destruction réussie du dispatcher privé, donc de son transport. Une erreur interdit le jeton ; la fermeture générale reste appelée.
+3. Le délai ordinaire de libération déjà enregistré par le broker.
+
+Un dispatcher partagé et la voie de reconnaissance stricte des langues sont refusés pour cette option. La reprise exige le même objet de périmètre, le vrai jeton, une validation asynchrone réussie et la reconstruction du transport par la même factory. La fermeture ou l’expiration interrompt également le signal transmis à la validation. Le jeton n’est jamais une preuve de claim SQL : ce claim et les faits du fichier/pistes/profil restent à vérifier par le futur propriétaire de session.
+
+La rétention est bornée dès la demande de pause. L’expiration est contrôlée aussi lors des appels, même si le callback du timer a du retard ; un recul d’horloge refuse la reprise. Deux reprises concurrentes ne peuvent pas lancer deux validations. Aucun timeout fournisseur ou délai de libération n’est augmenté.
+
+### Tests de concurrence et parcours FFmpeg
+
+**20 nouveaux tests** couvrent la primitive : 14 tests du composant et six cas HTTP du broker. La suite ciblée complète — broker, barrière, préemption, traitement des langues et fermeture des sessions Gateway — compte **207 tests : 202 réussis, cinq ignorés, zéro échec**. Les cinq ignorés sont les cas natifs FFmpeg/GPU conditionnés par leurs options ; ils ne sont pas présentés comme validés par Windows. Ce groupe recoupe le premier relevé de 144 réussites et ne s’y additionne pas.
+
+La revue ajoute le nettoyage d’un dispatcher promis par une factory asynchrone refusée, pour éviter qu’il apparaisse après le rejet. Les six cas HTTP sont rejoués avec succès après ce durcissement et restent recoupés avec le groupe précédent. Les expériences FFmpeg suivantes sont également rejouées sur ce code final.
+
+Les cas HTTP vérifient notamment une attente de **250 ms** en pause avec des délais réseau inchangés de **100 ms** : zéro nouvel appel, zéro timeout terminal, puis lecture exacte après reprise. Un autre test retient un corps HTTP actif : aucun jeton avant la fin du corps et la grâce ordinaire de 100 ms de cette fixture. Fermeture, expiration, validation refusée, mauvais périmètre et jeton forgé empêchent la poursuite.
+
+Le code candidat du broker et le nouveau module sont ensuite chargés dans une VM au sein du conteneur Linux isolé, avec FFmpeg et le vrai cache. L’image de production fournit les dépendances inchangées ; il ne s’agit pas d’une nouvelle image déployée. Le parcours de PR715 est rejoué **sans override de `fetch` et sans ajout de `Connection: close` pour la lecture finie**. Le dispatcher Undici privé est réellement détruit, puis un nouveau est créé après les quatre contrôles frais.
+
+Sur la fixture de 240 s :
+
+- Zéro requête et zéro socket source pendant 1 500 ms d’observation de pause.
+- Maximum une réponse et une connexion source actives sur le parcours ; 17 requêtes locales.
+- 60 segments TS et les deux sorties WebVTT contenant cinq répliques identiques au témoin.
+- PCM décodé complet identique, sans diagnostic de décodage dans le cas positif.
+- Premier changement de playlist 34 ms après la validation lors du dernier replay, **toujours sans valeur de délai utilisateur ou gain sur Normal**.
+
+Les trois contrôles FFmpeg négatifs sont aussi rejoués : expiration, source modifiée à taille/cible identiques et révocation. La barrière ferme le broker, aucun accès source de continuation n’est effectué, et le superviseur de preuve termine les processus restants et vide le cache. Le cas expiré montre un détail à conserver : **FFmpeg peut sortir avec le code zéro tout en signalant une entrée interrompue**. Ce n’est pas une lecture complète. Le futur gestionnaire doit déclarer le producteur interrompu avant nettoyage et ne jamais promouvoir ce résultat sur le seul code de sortie. Aucun fichier de cet essai n’entre dans le cache de production.
+
+### Raccordement restant avant un pilote utilisateur
+
+Le prochain niveau concerne la session authentifiée : révoquer l’ancien accès média, retirer son activité fournisseur seulement après drainage, conserver le processus sous un budget borné, puis acquérir le claim normal pour une nouvelle session avant ses contrôles frais. Les callbacks du processus et les réservations encodeur/disque doivent suivre cette propriété sans transformer une expiration en succès. Il faut aussi prouver les sous-titres progressifs dans le lecteur réel. **La primitive du broker ne réalise pas encore ce transfert.**
+
+Le coût observé du seul processus reste d’environ 79 Mio sur la petite fixture, hors Node/cache. La portée reste une continuation sur la même timeline ; sauts arbitraires, reprise après perte du processus et preuve générale de couverture avant EOF ne sont pas résolus. Aucune acceptation sonore humaine ni nouvelle mesure sur Normal.
+
+Reçus : `.codex-artifacts/retained-input-barrier-20261008/`. À **19:19:44 Paris**, les deux Gateways sont sains, image PR706 et démarrages inchangés, dispatcher actif, pilote `owner-allowlist`, conteneur de preuve absent. Aucun déploiement Gateway ni activation de conservation des sessions.
