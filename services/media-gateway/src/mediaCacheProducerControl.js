@@ -120,6 +120,7 @@ class MediaCacheProducerControl {
         session.mediaCacheProducer = context;
         session.mediaCacheProducerStage = 'probing';
         session.mediaCacheProducerCompleted = false;
+        session.mediaCacheProducerAbandoned = false;
         session.mediaCacheProducerPreemptRequested = false;
         this.stats.attached += 1;
         this.schedule(session, this.initialDelayMs);
@@ -135,13 +136,14 @@ class MediaCacheProducerControl {
 
     schedule(session, delayMs = this.heartbeatMs) {
         this.detach(session);
-        if (!session?.mediaCacheProducer || session.mediaCacheProducerCompleted === true) return;
+        if (!session?.mediaCacheProducer || session.mediaCacheProducerCompleted === true
+            || session.mediaCacheProducerAbandoned === true) return;
         const timer = setTimeout(() => {
             session.mediaCacheProducerHeartbeatTimer = null;
             this.pulse(session, session.mediaCacheProducerStage || 'producing')
                 .catch(() => null)
                 .finally(() => {
-                    if (!session.mediaCacheProducerCompleted
+                    if (!session.mediaCacheProducerCompleted && !session.mediaCacheProducerAbandoned
                         && (session.status !== 'ended' || session.sharedMediaCachePublicationPending === true)) {
                         const nextDelay = session.backgroundCacheContinuation === true
                             ? Math.min(this.heartbeatMs, 5_000)
@@ -186,6 +188,7 @@ class MediaCacheProducerControl {
     }
 
     async pulse(session, stage = 'producing') {
+        if (session?.mediaCacheProducerAbandoned === true) return 'abandoned';
         if (!session?.mediaCacheProducer || session.mediaCacheProducerCompleted === true) return 'completed';
         if (!STAGES.has(stage)) throw new TypeError('MEDIA_CACHE_PRODUCER_STAGE_INVALID');
         session.mediaCacheProducerStage = stage;
@@ -222,12 +225,14 @@ class MediaCacheProducerControl {
 
     async abandon(session) {
         this.detach(session);
+        if (session?.mediaCacheProducerAbandoned === true) return 'abandoned';
         if (!session?.mediaCacheProducer || session.mediaCacheProducerCompleted === true) return 'completed';
         let lastError = null;
         for (let attempt = 0; attempt < 2; attempt += 1) {
             try {
                 const state = await this.request(session, { action: 'abandon' });
                 if (['abandoned', 'completed', 'missing'].includes(state)) {
+                    session.mediaCacheProducerAbandoned = state === 'abandoned';
                     session.mediaCacheProducerCompleted = state === 'completed';
                     this.stats.abandons += state === 'abandoned' ? 1 : 0;
                     return state;

@@ -96,7 +96,9 @@ test('input-only body uses the configured per-file allowance while HLS defaults 
 
 test('partial subtitle input retains the full ordinary plan and selected tracks in its private binding',()=>{
     const start=source.indexOf('function privateResumeRetainedInputBinding('),end=source.indexOf('\nasync function trySeedRecentRetainedInput',start);
-    const run=vm.runInNewContext('('+source.slice(start,end)+')',{
+    const guard=source.slice(source.indexOf('function privateResumeProducerReleased('),
+        source.indexOf('function privateResumeHlsBindingForSession('));
+    const run=vm.runInNewContext(guard+'\n('+source.slice(start,end)+')',{
         canUsePrivateResumeCache:()=>true,canUseRecentResumeSamples:()=>true,
         privateResumeFormat:s=>s.format,multiAudioHlsEnabled:s=>s.multiAudioHls?.enabled===true,
         exactSubtitleHlsEnabled:s=>s.exactSubtitleHls?.enabled===true,
@@ -122,9 +124,10 @@ test('partial subtitle input retains the full ordinary plan and selected tracks 
         {exactSubtitleHls:{...session.exactSubtitleHls,sourceTrackCount:22}},
         {playbackIdentity:{sourceId:'one',sourceRevision:'2'}}])
         assert.notEqual(run({...session,...change}).profileHash,a.profileHash);
-    for(const change of [{format:'mp4'},{size:null},{audio:null},{completeHlsCacheLease:{}},
+    for(const change of [{format:'mp4'},{size:null},{audio:null},{completeHlsCacheLease:{}},{mediaCacheProducer:{}},
         {exactSubtitleHls:{...session.exactSubtitleHls,enabled:false}}])
         assert.equal(run({...session,...change}),null);
+    assert.equal(run({...session,mediaCacheProducer:{},status:'stopping',mediaCacheProducerAbandoned:true}).profileHash,a.profileHash);
     assert.ok(run({...session,exactSubtitleHls:{...session.exactSubtitleHls,cacheEligible:true}}));
 });
 

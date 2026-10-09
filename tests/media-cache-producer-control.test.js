@@ -183,4 +183,28 @@ test('successful publication suppresses abandon; failed work abandons with bound
   control.attach(failed, context);
   assert.equal(await control.abandon(failed), 'abandoned');
   assert.equal(calls, 1);
+  assert.equal(failed.mediaCacheProducerAbandoned, true);
+  assert.equal(await control.abandon(failed), 'abandoned');
+  assert.equal(await control.pulse(failed), 'abandoned');
+  control.schedule(failed, 1);
+  assert.equal(failed.mediaCacheProducerHeartbeatTimer, null);
+  assert.equal(calls, 1, 'retired authority cannot be renewed');
+});
+
+test('late heartbeat completion cannot reschedule an abandoned producer', async () => {
+  let releasePulse, pulseStarted;
+  const started = new Promise(resolve => { pulseStarted = resolve; });
+  const control = new MediaCacheProducerControl({ edgeBase: 'https://edge.example',
+    gatewayToken: 'g'.repeat(32), fetchImpl: async (_url, init) => {
+      if (JSON.parse(init.body).action === 'abandon') return new Response(JSON.stringify({ protocol: 1, state: 'abandoned' }));
+      pulseStarted();
+      return new Promise(resolve => { releasePulse = () => resolve(new Response(JSON.stringify({ protocol: 1, state: 'renewed' }))); });
+    } });
+  const current = session(); control.attach(current, context); control.schedule(current, 1);
+  current.mediaCacheProducerHeartbeatTimer.ref(); // keep this standalone test alive until its controlled request starts
+  await started;
+  assert.equal(await control.abandon(current), 'abandoned');
+  releasePulse(); await new Promise(resolve => setTimeout(resolve, 15));
+  assert.equal(current.mediaCacheProducerHeartbeatTimer, null);
+  assert.equal(current.mediaCacheProducerAbandoned, true);
 });
