@@ -3846,12 +3846,16 @@ class WatchPage {
             this._cloudPlaybackHeartbeatInFlight = true;
             try {
                 await heartbeat(id);
+                if (generation === this._cloudPlaybackHeartbeatGeneration && this.currentCloudPlaybackSessionId === id) {
+                    await window.NorvaDesktop?.nativePlayer?.authorize?.(id);
+                }
             } catch (error) {
                 if (
                     generation === this._cloudPlaybackHeartbeatGeneration
                     && this.currentCloudPlaybackSessionId === id
                     && this.isPlaybackSupersededError(error)
                 ) {
+                    await window.NorvaDesktop?.nativePlayer?.stop?.();
                     await this.handlePlaybackSuperseded(id);
                 }
             } finally {

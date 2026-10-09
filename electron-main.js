@@ -1,4 +1,5 @@
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, shell, ipcMain } = require('electron');
+const fs = require('fs');
 const http = require('http');
 const net = require('net');
 const path = require('path');
@@ -85,6 +86,10 @@ function isAuthNavigation(targetUrl) {
 }
 
 function createWindow(url, transcoderUrl) {
+    const nativeExecutable = path.join(app.isPackaged ? process.resourcesPath : __dirname,
+        'native-player', 'Norva.NativePlayer.exe');
+    const nativeEnabled = process.platform === 'win32' && process.env.NORVA_DESKTOP_NATIVE_PLAYER === '1'
+        && fs.existsSync(nativeExecutable);
     const window = new BrowserWindow({
         width: 1280,
         height: 820,
@@ -101,8 +106,15 @@ function createWindow(url, transcoderUrl) {
             // Tells the page where the in-app transcoder lives (residential IP),
             // so cloud-mode playback transcodes locally instead of via the
             // datacenter gateway the provider blocks.
-            additionalArguments: transcoderUrl ? [`--norva-transcoder=${transcoderUrl}`] : []
+            additionalArguments: [
+                ...(transcoderUrl ? [`--norva-transcoder=${transcoderUrl}`] : []),
+                ...(nativeEnabled ? ['--norva-native-player=1',`--norva-native-origin=${new URL(url).origin}`] : [])
+            ]
         }
+    });
+
+    if (nativeEnabled) require('./desktop/native-player-ipc').wireNativePlayer({
+        ipcMain, window, executable:nativeExecutable, origin:new URL(url).origin
     });
 
     window.webContents.setWindowOpenHandler(({ url: targetUrl }) => {

@@ -14,8 +14,14 @@ function _hubBase() {
 // inferred when the page is served by a local Norva server (localhost). Used to
 // transcode locally while still syncing catalog/resume through the cloud, so the
 // IPTV provider never sees a datacenter IP. Empty in a normal browser on norva.tv.
-function _localTranscoderBase() {
+function _desktopNativePlayer(type, container) {
+    const player = typeof window !== 'undefined' && window.NorvaDesktop?.nativePlayer;
+    return player?.protocol === 1 && player.supportsPlayback?.(type, container) === true ? player : null;
+}
+
+function _localTranscoderBase(type, container) {
     if (typeof window === 'undefined') return '';
+    if (_desktopNativePlayer(type, container)) return '';
     const explicit = window.NorvaDesktop && window.NorvaDesktop.transcoder;
     if (explicit) return String(explicit).replace(/\/$/, '');
     const host = window.location && window.location.hostname;
@@ -1628,7 +1634,7 @@ const CloudAdapter = (() => {
             committedSubtitleDelivery: typeof window !== 'undefined'
                 && window.WatchPage?.committedSubtitleDelivery === 1
                 && (window.MediaSource || window.ManagedMediaSource)
-                && !window.NodeCastNative && !window.NorvaTVCloud ? 1 : undefined,
+                && !window.NodeCastNative && !window.NorvaTVCloud && !_desktopNativePlayer(type, container) ? 1 : undefined,
             // Series playback uses the episode id as itemId. Keep the provider's
             // parent series id so the server can prove that exact episode belongs
             // to the selected catalog variant before sharing any track metadata.
@@ -2039,7 +2045,7 @@ const CloudAdapter = (() => {
                 // its direct cloud session, failure is terminal for this playback
                 // intention: creating a second gateway session would open another
                 // provider socket and prolong a single-slot HTTP 458 conflict.
-                const localTranscoder = _localTranscoderBase();
+                const localTranscoder = _localTranscoderBase(type, container);
                 if (localTranscoder) {
                     let direct = null;
                     try {
@@ -2100,7 +2106,7 @@ const CloudAdapter = (() => {
                 // off to the apps immediately. A working source is never skipped
                 // (only set after a real block) and it self-heals after a TTL.
                 const hasNativeOrLocal = (typeof window !== 'undefined'
-                    && (window.NodeCastNative || window.NorvaTVCloud)) || localTranscoder;
+                    && (window.NodeCastNative || window.NorvaTVCloud || _desktopNativePlayer(type, container))) || localTranscoder;
                 if (!hasNativeOrLocal && isVodPlayback && _isSourceCloudBlocked(sourceId)) {
                     const blockedErr = new Error('Lecture cloud refusee par le fournisseur (401).');
                     blockedErr.cloudBrowserBlocked = true;
@@ -2194,7 +2200,7 @@ const CloudAdapter = (() => {
                 // gateway, whose datacenter IP the provider 401-blocks. This is what
                 // makes the TV behave like TiviMate.
                 const nativePlayer = typeof window !== 'undefined'
-                    && (window.NodeCastNative || window.NorvaTVCloud);
+                    && (window.NodeCastNative || window.NorvaTVCloud || _desktopNativePlayer(type, container));
                 const browserMkv = isVodPlayback
                     && !nativePlayer
                     && isMatroskaContainer(container);
