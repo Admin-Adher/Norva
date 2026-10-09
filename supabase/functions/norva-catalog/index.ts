@@ -799,7 +799,8 @@ async function listExactCatalogMediaItems(url: URL, userId: string) {
   const title = await loadTitleById(userId, titleId);
   if (!title || title.item_type !== itemType) return empty;
   const titles = await loadExactMovieRecoveryTitles(title, userId);
-  const variantsByTitle = await listVariantsByTitleIds(titles.map(row => String(row.id)), userId);
+  const variantsByTitle = await listVariantsByTitleIds(titles.map(row => String(row.id)), userId,
+    HOME_RAIL_VARIANT_LIMIT, null, null, { titleId, sourceId, externalId });
   const variants = variantsByTitle.get(titleId) ?? [];
   // A visibility change during hydration must not substitute another source's
   // file, even when that source contains the same provider-local identifier.
@@ -3936,6 +3937,7 @@ async function listVariantsByTitleIds(
   exposedLimit = HOME_RAIL_VARIANT_LIMIT,
   requiredAudioIso: string | null = null,
   sourceId: string | null = null,
+  requiredFile: { titleId: string; sourceId: string; externalId: string } | null = null,
 ) {
   const variantsByTitle = new Map<string, JsonRecord[]>();
   if (!titleIds.length) return variantsByTitle;
@@ -3972,6 +3974,18 @@ async function listVariantsByTitleIds(
     if (health.errored.size) {
       sorted.sort((a, b) =>
         Number(health.errored.has(String(a.source_id))) - Number(health.errored.has(String(b.source_id))));
+    }
+    // Exact recovery must retain the file the viewer selected even when it
+    // ranks below the rail's display bound. Only pin a current visible row
+    // already read through this owner's query, after disabled-source filtering.
+    // Keep the same bound and do not pin a provider-ID collision from a sibling.
+    if (requiredFile?.titleId === key && !requiredAudioIso && exposedLimit > 0) {
+      const selectedIndex = sorted.findIndex(variant =>
+        String(variant.source_id) === requiredFile.sourceId
+        && String(variant.external_id) === requiredFile.externalId);
+      if (selectedIndex >= exposedLimit) {
+        sorted.splice(exposedLimit - 1, 0, sorted.splice(selectedIndex, 1)[0]);
+      }
     }
     variantsByTitle.set(key, requiredAudioIso ? sorted : sorted.slice(0, exposedLimit));
   }
