@@ -82,6 +82,8 @@ function pumpHarness(overrides = {}) {
     );
     const globals = {
         canUsePrivateResumeCache: () => false,
+        exactSubtitleHlsEnabled: s => s.exactSubtitleHls?.enabled === true,
+        multiAudioHlsEnabled: s => s.multiAudioHls?.enabled === true,
         ...require('../services/media-gateway/src/public-vod-route'),
         useProviderHttpForward,
         providerHttpForwardAccounts: new Set(),
@@ -4274,11 +4276,13 @@ for (const failure of ['premature-eof', 'transport-error']) test(`linear samplin
     });
     const session = mkvSession(fixture.length);
     session.vodInputEffectiveUrlSha256 = crypto.createHash('sha256').update(session.sourceUrl).digest('hex');
+    session.exactSubtitleHls = { enabled: true };
     const sink = new CapturingWritable();
     const result = await h.runBoundedMkvInputPump(session, sink, new AbortController().signal, null);
     assert.equal(result.reconnects, 1);
     assert.deepEqual(sink.bytes(), fixture);
     assert.equal(tracker.maxActive, 1); assert.equal(tracker.active, 0);
+    assert.equal(session.linearResumeEvidence.samples.prefixWindows.length, 0);
     assert.equal(session.linearResumeEvidence.samples.finish({ graceful: true,
         fileSizeBytes: fixture.length, target: session.vodInputEffectiveUrlSha256 }), null);
 });
