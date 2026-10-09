@@ -23,6 +23,16 @@ function clients() {
     vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../public/js/pages/WatchPage.js'),'utf8'),browser);
     return {edge:env.normalize,watch:Object.create(browser.window.WatchPage.prototype)};
 }
+test('a brief Gateway observation survives Edge sanitization and selects the sustained browser gate',()=>{
+    const {edge,watch}=clients();
+    const raw={protocol:2,eligible:false,pipeline:'video-transcode',targetBufferSeconds:null,
+        minimumEncodeRateX:2,observedEncodeRateX:20,reason:'encode-rate-observation-too-short'};
+    const publicPolicy=edge(raw), options=watch.gatewayStartupBufferOptions(publicPolicy);
+    assert.equal(publicPolicy.reason,raw.reason);
+    assert.equal(options.adaptive,true);assert.equal(options.sustainedObservation,true);
+    assert.equal(options.minimumSeconds,96);
+});
+
 test('real TS evidence reaches Edge and browser without the old 96-second fallback',()=>{
     const {edge,watch}=clients();
     for(const pipeline of ['copy','audio-transcode']) {

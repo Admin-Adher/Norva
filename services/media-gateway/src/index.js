@@ -2834,6 +2834,11 @@ const retainedSessionOwnerGate = createRecentResumeOwnerGate({
     enabled: process.env.PRIVATE_RETAINED_SESSION_ENABLED === 'true',
     ownerHashes: process.env.PRIVATE_RETAINED_SESSION_OWNER_HASHES,
 });
+// A separate pilot: a brief production burst cannot certify future delivery.
+const startupObservationOwnerGate = createRecentResumeOwnerGate({
+    enabled: process.env.VOD_STARTUP_OBSERVATION_ENABLED === 'true',
+    ownerHashes: process.env.VOD_STARTUP_OBSERVATION_OWNER_HASHES,
+});
 const retainedSessionTransfer = new RetainedSessionTransfer({
     stop: session => stopSession(session, { reason: 'retained-session-discarded' }),
     revoke: session => revokeSessionPlaybackAccess(session),
@@ -20346,12 +20351,16 @@ function startupPolicyForSession(session) {
     const targetBufferSeconds = vaapiTranscodeSelected
         ? VAAPI_VOD_FAST_START_BUFFER_SECONDS
         : MKV_H264_FAST_START_BUFFER_SECONDS;
-    const eligible = selected &&
+    const rateEligible = selected &&
         observedEncodeRateX !== null &&
         observedEncodeRateX >= minimumEncodeRateX;
+    const productionSpanMs = Number(session?.startupTimings?.playlistProductionSpanMs);
+    const needsObservation = rateEligible && startupObservationOwnerGate(session?.ownerKey)
+        && (!Number.isFinite(productionSpanMs) || productionSpanMs < 6000);
+    const eligible = rateEligible && !needsObservation;
     const reason = eligible
         ? (vaapiTranscodeSelected ? 'vaapi-transcode-ready' : 'mkv-h264-copy-ready')
-        : (selected
+        : (needsObservation ? 'encode-rate-observation-too-short' : selected
             ? (observedEncodeRateX === null ? 'encode-rate-unavailable' : 'encode-rate-below-minimum')
             : (stringOrNull(assessment.reason) || (videoMode === 'encode' ? 'video-transcode' : 'missing-proof')));
     return {

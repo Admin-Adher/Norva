@@ -108,6 +108,7 @@ function loadFastStartHarness(overrides = {}) {
     '\nfunction multiAudioHlsEnabled(',
   );
   const context = {
+    startupObservationOwnerGate: () => false,
     retainedVodStartupPolicy: require('../services/media-gateway/src/finite-vod-startup').retainedVodStartupPolicy,
     crypto,
     TextDecoder,
@@ -1789,6 +1790,31 @@ test('startup policy protocol 2 admits only a measured VAAPI video transcode abo
     ffmpegReadyMs: 500,
   };
   assert.equal(h.policy(session).eligible, false);
+});
+
+test('the owner pilot does not certify a 171 ms burst, missing evidence, or a short production span', () => {
+  const h = loadFastStartHarness({ VIDEO_ENCODER_CONFIG: { backend: 'vaapi' },
+    startupObservationOwnerGate: owner => owner === 'pilot' });
+  const session = proofSession(h);
+  Object.assign(session, { ownerKey: 'pilot', videoMode: 'encode' });
+  session.startupTimings = { videoEncoder: 'vaapi', sustainedMediaProductionRateX: 20 };
+  for (const span of [undefined, null, NaN, Infinity, -1, 0, 170.993408, 5999]) {
+    session.startupTimings.playlistProductionSpanMs = span;
+    const policy = h.policy(session);
+    assert.equal(policy.eligible, false, String(span));
+    assert.equal(policy.targetBufferSeconds, null);
+    assert.equal(policy.reason, 'encode-rate-observation-too-short');
+  }
+  session.startupTimings.playlistProductionSpanMs = 6000;
+  assert.equal(h.policy(session).eligible, true);
+  session.startupTimings.playlistProductionSpanMs = 171;
+  session.ownerKey = 'outside';
+  assert.equal(h.policy(session).eligible, true);
+  session.ownerKey = 'pilot';
+  session.startupTimings.sustainedMediaProductionRateX = 1;
+  assert.equal(h.policy(session).reason, 'encode-rate-below-minimum');
+  session.startupTimings.videoEncoder = 'software';
+  assert.notEqual(h.policy(session).reason, 'encode-rate-observation-too-short');
 });
 
 test('VAAPI finite MKV readiness uses three two-second segments without weakening multi-audio proof', () => {
