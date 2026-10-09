@@ -1,6 +1,6 @@
 # NorvaEngine : démarrage, lectures concurrentes et limite de décodage
 
-9 octobre 2026, suite de PR752/753. Preuves résumées dans le JSON homonyme ; reçus locaux sous `.codex-artifacts/web-engine-startup-20261009/`. PR754, code `67aafad1c`. Le candidat est en validation CI ; aucune nouvelle publication n'est encore revendiquée.
+9 octobre 2026, suite de PR752/753. Preuves résumées dans le JSON homonyme ; reçus locaux sous `.codex-artifacts/web-engine-startup-20261009/`. PR754, code `67aafad1c`. Les corrections sont intégrées et publiées ; les limites des copies réelles restent ouvertes. Voir la clôture ci-dessous.
 
 ## Deux défauts Norva observés
 
@@ -59,3 +59,13 @@ Première CI : le contrôle « Notification channel policy » échoue avant les 
 Le même quota Docker Hub échoue sur la tête documentaire suivante. Vérification indépendante des deux registres : [miroir officiel Supabase ECR](https://gallery.ecr.aws/supabase/postgres) et Docker Hub retournent des index, manifeste Linux/amd64, configuration et 29 couches strictement identiques pour 17.6.1.136. Manifeste `sha256:5a4314708484bec672de2c09653a5c01fb1c84a998564ac231b0325e2238ed5b`, configuration `sha256:f519727303f0af6862882be2a30f420e28710d4209226e681aaddb2c01d12d9b`.
 
 Le job CI des notifications tire désormais le miroir officiel par ce digest immuable, vérifie l'ID de configuration puis lui donne le même tag local attendu par le script. Tests SQL, réseau isolé, mémoire, utilisateur et script inchangés. Aucun registre ni conteneur de production modifié. Cela répare un téléchargement de dépendance ; aucun contrôle n'est supprimé ni considéré réussi avant exécution.
+
+## Intégration et publication vérifiée
+
+PR754 fusionnée par `d42e4d8680af4b366cc6b04f7e9c0d1255373dcd`, tête `90a1784fc` (code moteur `67aafad1c`, complément documentaire `754b316a0`, disponibilité CI `90a1784fc`). Contrats cloud, types Edge, parcours web/mobile, base isolée, notifications et tests Android réussis avant intégration. Suite : **6 314 tests, 6 280 réussis, 34 ignorés, zéro échec**. Les 92 tests ciblés sont inclus, pas additionnels. Les paquets Android Phone/TV réussissent ; le paquet Windows est encore en construction au contrôle de publication, aucune nouvelle préversion Windows n'est publiée ici.
+
+Cloudflare `37991131023`, job `114025274196` : réussite. Publication à **23:06:08 Paris**, vérification des octets servis à 23:06:09. Contrôle indépendant à 23:06:31 : révision 48, SHA-256 `ec21b67c217d6407e0f3d37eaa0d8991fe77cc0f4b5b3e693c096c6b3f007f78`, URL immuable `/js/norvaEngine.ec21b67c217d6407.js`, intégrité du shell conforme, 60 entrées du manifeste comparées aux octets Git. Le vérificateur Node confirme également les 60 réponses publiques. Sa première invocation locale avait omis le manifeste généré (ENOENT local) ; l'argument du fichier récupéré et comparé à Git a été fourni, sans modification du contrôle ni incident de production.
+
+À **23:06:29 Paris**, deux Gateways sains, image de production inchangée, zéro session/pompe et zéro claim actif du propriétaire testé. Six essais expirés normalement ; contrôleurs, tunnels et serveur local stoppés, onglet de test fermé. Pas de déploiement Gateway ou Edge. Le routage n'a pas été élargi, aucune copie remplacée, aucune langue ou réserve de démarrage modifiée.
+
+**Conclusion bornée :** le moteur évite deux attentes Norva démontrées. Abduct atteint une première image en 7,1–8,9 s dans les essais du code livré mais conserve des pauses et une erreur de décodage ; Conclave dépasse encore 15 s en attendant les données. Les replays ont été réalisés sur le candidat dont les octets sont ensuite vérifiés publiés ; aucune nouvelle lecture fournisseur n'a été faite après publication uniquement pour répéter ces échecs connus. Aucune fluidité globale ni validation à l'écoute revendiquée.
