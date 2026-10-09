@@ -6646,7 +6646,7 @@ class WatchPage {
             }
 
             if (this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls) return;
-            if (!autoplay) return;
+            if (!autoplay || (isGatewaySession && this._gatewayUserPaused === true)) return;
             this.video.play()
                 .then(() => {
                     if (Number.isInteger(Number(options.audioSwitchRequestId))) {
@@ -14729,6 +14729,16 @@ class WatchPage {
 
     // Restart the current movie/episode from 0 (works for all VOD).
     async restartFromStart() {
+        if (this.currentPlaybackMode === 'gateway-session' && this.canRestartForSeek(0)) {
+            // A replacement stream owns its asynchronous startup gate. Starting
+            // the media element after seekToTime returns bypasses that gate and
+            // can play a slow source with only its first segments buffered.
+            this._gatewayUserPaused = false;
+            this._gatewayPendingSeekIntent = { attemptId: this._playbackAttemptId, autoplay: true };
+            try { await this.seekToTime(0, { immediate: true }); } catch (_) {}
+            this.showOverlay();
+            return;
+        }
         try { await this.seekToTime(0, { immediate: true }); } catch (_) {}
         try { await this.video?.play?.(); } catch (_) {}
         this.showOverlay();
