@@ -1666,5 +1666,112 @@
   "initialCIFailure": {
     "run": 37985687127,
     "cause": "Stale generated i18n/asset-manifest.json; corrected by normal i18n build. SQL tests passed 40/40 before this failure."
+  },
+  "integration": {
+    "pr": 752,
+    "merge": "b2269b0b0eecddee64e20afe7fa33d2c6f388275",
+    "head": "e800f4508",
+    "codeChecksPassed": 10,
+    "ciTests": {
+      "total": 6307,
+      "passed": 6273,
+      "skipped": 34,
+      "failed": 0
+    },
+    "nativeAndroidOrWebViewUIChanged": false,
+    "newEmulatorMatrixClaimed": false
+  },
+  "deployment": {
+    "workflowRun": 37986319029,
+    "firstAttempt": {
+      "uploadSucceededAtUtc": "2026-10-09T20:22:30Z",
+      "conclusion": "failure",
+      "failedStep": "Verify delivered application shell and asset bytes",
+      "firstObservation": "Stale application shell; subsequent attempts failed on unchanged provider-access-config.js",
+      "expectedSHA256": "6012a648c52566b8f93cf9b1e1d2ab58b638de8ad1c23f0fdc77ba5dd8159a2a",
+      "receivedSHA256": "eac9c55386f87ed3d0cd4ab657642a3baca9cb4b7f5a40da1ffd836e57510436",
+      "receivedBytes": 117501,
+      "bodySavedByRunner": false,
+      "causeEstablished": false
+    },
+    "independentVerification": {
+      "atUtc": "2026-10-09T20:28:58.022815+00:00",
+      "engineVersion": 47,
+      "sourceCommit": "e800f4508",
+      "sha256": "161d18badd601f8e758409168f51c71ffe0539b23752ce8598115ddd1680e8a3",
+      "publicURL": "https://norva.tv/js/norvaEngine.161d18badd601f8e.js",
+      "shellReferencesExactAsset": true,
+      "integrityMatches": true,
+      "deliveredBytesMatchGit": true,
+      "allManifestEntriesMatchGit": 60
+    },
+    "sameNodeVerifierPassedDeliveredAssets": 60,
+    "secondAttemptRequestedAfterIndependentVerification": true,
+    "secondAttempt": {
+      "job": 114011380514,
+      "conclusion": "success",
+      "uploadSucceededAtUtc": "2026-10-09T20:28:03Z",
+      "allAssetVerificationSucceededAtUtc": "2026-10-09T20:28:04Z"
+    },
+    "gatewayDeployment": false
+  },
+  "finalHealth": {
+    "atUtc": "2026-10-09T20:26:55.728613+00:00",
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "ok": true,
+        "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815",
+        "activeSessions": 0,
+        "rawPumpCount": 0
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "ok": true,
+        "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815",
+        "activeSessions": 0,
+        "rawPumpCount": 0
+      }
+    ],
+    "sessions": [
+      {
+        "case": "0-engine-baseline-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:11:36.559169+00:00",
+            "expiresAt": "2026-10-09T20:12:13.416+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      },
+      {
+        "case": "4-engine-baseline-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:08:51.322205+00:00",
+            "expiresAt": "2026-10-09T20:09:26.565+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      }
+    ],
+    "ownerLiveClaims": [
+      {
+        "count": 0
+      }
+    ]
+  },
+  "testCleanup": {
+    "providerSessionsExpired": true,
+    "controllerStopped": true,
+    "tunnelStopped": true,
+    "localServerStopped": true,
+    "testBrowserTabClosed": true
   }
 }
