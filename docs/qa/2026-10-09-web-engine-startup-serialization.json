@@ -1,5 +1,5 @@
 {
-  "status": "candidate_pending_CI",
+  "status": "deployed",
   "date": "2026-10-09",
   "productionBaseline": "070d91d7a71b16a1c6be9c6bc3431c2b6278f5ae",
   "engineCandidate": 48,
@@ -3204,5 +3204,197 @@
       ]
     },
     "identical": true
+  },
+  "merge": "d42e4d8680af4b366cc6b04f7e9c0d1255373dcd",
+  "deployment": {
+    "atUtc": "2026-10-09T21:06:31.551227+00:00",
+    "engineVersion": 48,
+    "sourceCommit": "90a1784fc",
+    "sha256": "ec21b67c217d6407e0f3d37eaa0d8991fe77cc0f4b5b3e693c096c6b3f007f78",
+    "publicURL": "https://norva.tv/js/norvaEngine.ec21b67c217d6407.js",
+    "shellReferencesExactAsset": true,
+    "integrityMatches": true,
+    "deliveredBytesMatchGit": true,
+    "allManifestEntriesMatchGit": 60
+  },
+  "finalHealth": {
+    "atUtc": "2026-10-09T21:06:29.934421+00:00",
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "ok": true,
+        "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815",
+        "activeSessions": 0,
+        "rawPumpCount": 0
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "ok": true,
+        "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815",
+        "activeSessions": 0,
+        "rawPumpCount": 0
+      }
+    ],
+    "sessions": [
+      {
+        "case": "4-engine-instrumented-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:35:24.366995+00:00",
+            "expiresAt": "2026-10-09T20:36:05.196+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      },
+      {
+        "case": "0-engine-serial-flush-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:43:42.388962+00:00",
+            "expiresAt": "2026-10-09T20:45:17.898+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      },
+      {
+        "case": "4-engine-candidate-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:40:25.022227+00:00",
+            "expiresAt": "2026-10-09T20:41:10.191+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      },
+      {
+        "case": "0-engine-candidate-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:38:59.350544+00:00",
+            "expiresAt": "2026-10-09T20:39:52.013+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      },
+      {
+        "case": "0-engine-decode-capture-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:49:27.679735+00:00",
+            "expiresAt": "2026-10-09T20:50:48.524+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      },
+      {
+        "case": "0-engine-instrumented-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:36:16.967707+00:00",
+            "expiresAt": "2026-10-09T20:36:48.194+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      }
+    ],
+    "ownerLiveClaims": [
+      {
+        "count": 0
+      }
+    ]
+  },
+  "ciChecksAtPublication": [
+    {
+      "id": 114024440050,
+      "name": "Build Android Phone APK",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 114024439999,
+      "name": "Build Android TV APK",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 114024439982,
+      "name": "Build Windows Portable",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "id": 114023995157,
+      "name": "Android TV compile and tests",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 114023994997,
+      "name": "Android Phone compile and tests",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 114023748709,
+      "name": "Contracts and Edge type-check",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 114023748706,
+      "name": "Mocked Web and mobile journey",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 114023748670,
+      "name": "Notification channel policy",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 114023748380,
+      "name": "Disposable Supabase database",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 114023748155,
+      "name": "Verify cloud contracts",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "cloudflare": {
+    "run": 37991131023,
+    "job": 114025274196,
+    "status": "success",
+    "deployedAtUtc": "2026-10-09T21:06:08Z",
+    "verifiedAtUtc": "2026-10-09T21:06:09Z",
+    "verifiedAssets": 60
+  },
+  "regressionSuite": {
+    "tests": 6314,
+    "pass": 6280,
+    "skipped": 34,
+    "fail": 0
   }
 }
