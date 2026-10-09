@@ -145,7 +145,7 @@
 <p>A progress bar is generally derived from elapsed time divided by scheduled duration. It can look precise while the underlying schedule is stale. Read it as a visual estimate based on guide data.</p>
 <h2 id="check-freshness-before-drawing-conclusions">Check freshness before drawing conclusions</h2>
 <p>Record when the schedule was fetched or refreshed, the coverage window, and whether a recent event boundary transitioned correctly. A guide that still shows yesterday’s event as current may have a clock, zone, cache, or source update problem.</p>
-<p>Use the program-guide freshness audit to classify current, stale, partial, or unknown data. A blank block is similarly ambiguous; it does not by itself prove that the service is off air.</p>
+<p>Use <a href="/blog/check-program-guide-freshness/">the program-guide freshness audit</a> to classify current, stale, partial, or unknown data. A blank block is similarly ambiguous; it does not by itself prove that the service is off air.</p>
 <h2 id="apply-an-uncertainty-label">Apply an uncertainty label</h2>
 <p>Use four outcomes:</p>
 <ul><li><strong>Confirmed listing:</strong> identity, schedule, zone, and freshness are supported.</li><li><strong>Plausible listing:</strong> most fields align, but one non-critical element is unverified.</li><li><strong>Conflicting listing:</strong> sources or fields disagree.</li><li><strong>Unknown:</strong> evidence is insufficient.</li></ul>
@@ -180,6 +180,12 @@
           <div class="card-title">How Time Zones Affect Program Guide Listings</div>
 
           <p>A UTC-to-local worksheet reveals whether an apparent guide shift comes from source time, display zone, daylight-saving rules, or date rollover.</p>
+        </a>
+        <a class="card" href="/blog/check-program-guide-freshness/">
+          <span class="tag">Live Guide Literacy</span>
+          <div class="card-title">How to Judge Whether Program Guide Data Is Current</div>
+
+          <p>A guide freshness ledger separates when data was retrieved, how far it covers, whether boundaries transition, and what the source currently reports.</p>
         </a>
       </div>
     </section>

@@ -145,7 +145,7 @@
 <p><strong>Elapsed proportion = (current time − scheduled start) ÷ scheduled duration</strong></p>
 <p>This is precise arithmetic over potentially imperfect inputs. A bar at 75% does not independently confirm the broadcast is 75% complete. It describes where the guide clock falls within the scheduled interval.</p>
 <h2 id="check-freshness-at-the-transition">Check freshness at the transition</h2>
-<p>A useful quick test is the most recent boundary. Did “next” become “now” when its scheduled start arrived? Does the data window continue beyond the current event? If not, run the program-guide freshness audit.</p>
+<p>A useful quick test is the most recent boundary. Did “next” become “now” when its scheduled start arrived? Does the data window continue beyond the current event? If not, run <a href="/blog/check-program-guide-freshness/">the program-guide freshness audit</a>.</p>
 <p>Record the result as current, plausible, conflicting, or unknown. W3C labeling guidance supports explicit control and state names; “Schedule not refreshed since 18:00” is clearer than a spinning icon or an unchanged “Now” label.</p>
 <h2 id="handle-common-edge-cases">Handle common edge cases</h2>
 <ul><li><strong>No current event:</strong> preserve the gap; do not promote the next title early.</li><li><strong>Two current candidates:</strong> investigate overlap, duplicate service rows, or mixed zones.</li><li><strong>No next event:</strong> check coverage horizon and refresh state.</li><li><strong>Midnight boundary:</strong> compare full date and time, not time alone.</li><li><strong>Late schedule change:</strong> prefer a clearly identified actual-time update when the source supplies it.</li></ul>
@@ -165,7 +165,17 @@
       <section class="sources" aria-labelledby="sources"><h2 id="sources">Sources</h2>
 <ul><li><a href="https://dvb.org/resources/public/standards/a177_dvb-i_specification.pdf" target="_blank" rel="noopener">DVB-I Specification</a></li><li><a href="https://www.w3.org/WAI/tutorials/forms/labels/" target="_blank" rel="noopener">W3C: Labeling Controls</a></li><li><a href="https://norva.tv/#features">Norva Features</a></li></ul>
 </section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/check-program-guide-freshness/">
+          <span class="tag">Live Guide Literacy</span>
+          <div class="card-title">How to Judge Whether Program Guide Data Is Current</div>
 
+          <p>A guide freshness ledger separates when data was retrieved, how far it covers, whether boundaries transition, and what the source currently reports.</p>
+        </a>
+      </div>
+    </section>
     </article>
   </main>
   <footer class="blog-footer">
