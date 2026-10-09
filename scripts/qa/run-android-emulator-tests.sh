@@ -102,7 +102,7 @@ if [[ "${NORVA_ANDROID_TEST_CLASS:-}" == *SlowVodPreparationInstrumentedTest* ]]
         qpid="$(pgrep -f '^/.*/emulator/qemu/.*/qemu-system-' | head -n 1 || true)"
         if [[ -n "$qpid" ]]; then
           printf 'utc=%s pid=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$qpid" > "$diagnostic_dir/emulator-guest-hang-stack.txt"
-          timeout --kill-after=2s 15s sudo gdb -batch -ex 'set pagination off' \
+          timeout --kill-after=2s 15s sudo gdb -nx -batch -iex 'set debuginfod enabled off' -ex 'set pagination off' \
             -ex 'thread apply all bt 12' -p "$qpid" >> "$diagnostic_dir/emulator-guest-hang-stack.txt" 2>&1 || true
         fi
         break

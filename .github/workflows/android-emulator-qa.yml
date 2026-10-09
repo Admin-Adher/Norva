@@ -70,6 +70,11 @@ jobs:
           gradle-version: '8.11.1'
       - name: Install phone compile SDK
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+      - name: Install host debugger for explicit freeze diagnostic
+        if: contains(inputs['phone-test-class'], 'SlowVodPreparationInstrumentedTest')
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gdb
       # Compile before boot so Gradle does not compete with first-start setup of
       # the launcher and keyboard. The connected test task still runs below.
       - name: Compile phone and instrumentation APKs before emulator boot
