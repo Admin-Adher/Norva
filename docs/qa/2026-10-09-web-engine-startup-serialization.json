@@ -1,0 +1,2968 @@
+{
+  "status": "candidate_pending_CI",
+  "date": "2026-10-09",
+  "productionBaseline": "070d91d7a71b16a1c6be9c6bc3431c2b6278f5ae",
+  "engineCandidate": 48,
+  "sourceSHA256": "ec21b67c217d6407e0f3d37eaa0d8991fe77cc0f4b5b3e693c096c6b3f007f78",
+  "focusedTests": {
+    "pass": 92,
+    "fail": 0
+  },
+  "realTests": [
+    {
+      "receiptIndex": 1,
+      "copy": "Conclave — Dino",
+      "firstFrameMs": null,
+      "position": 0,
+      "events": [
+        {
+          "name": "error",
+          "ms": 751,
+          "time": 0,
+          "error": 4
+        },
+        {
+          "name": "error",
+          "ms": 40718.799999952316,
+          "time": 0,
+          "error": 4
+        }
+      ],
+      "gaps": [],
+      "failures": [
+        {
+          "stage": "startup:global",
+          "message": "ENGINE_STARTUP_TIMEOUT:global:15000",
+          "timings": {
+            "startupDeadlineMs": 15000,
+            "initialWindowKB": 512,
+            "startupWindowMaxKB": 1024,
+            "fetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 4249,
+                "outcome": "ok",
+                "phase": "prefetch",
+                "headersMs": 2737,
+                "firstByteMs": 2738,
+                "receivedBytes": 524288
+              },
+              {
+                "start": 3093965715,
+                "requestedBytes": 1304,
+                "bytes": 1304,
+                "ms": 705,
+                "outcome": "ok",
+                "phase": "open-header",
+                "headersMs": 705,
+                "firstByteMs": 705,
+                "receivedBytes": 1304
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2880,
+                "outcome": "ok",
+                "phase": "stream-info",
+                "headersMs": 787,
+                "firstByteMs": 787,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 1572864,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 5213,
+                "outcome": "ok",
+                "phase": "stream-info",
+                "headersMs": 1014,
+                "firstByteMs": 1014,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 2621440,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 1854,
+                "outcome": "timeout",
+                "phase": "media",
+                "headersMs": 1193,
+                "firstByteMs": 1193,
+                "receivedBytes": 61440
+              }
+            ],
+            "fetchAttempts": 5,
+            "startupFetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 4249,
+                "outcome": "ok",
+                "phase": "prefetch",
+                "headersMs": 2737,
+                "firstByteMs": 2738,
+                "receivedBytes": 524288
+              },
+              {
+                "start": 3093965715,
+                "requestedBytes": 1304,
+                "bytes": 1304,
+                "ms": 705,
+                "outcome": "ok",
+                "phase": "open-header",
+                "headersMs": 705,
+                "firstByteMs": 705,
+                "receivedBytes": 1304
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2880,
+                "outcome": "ok",
+                "phase": "stream-info",
+                "headersMs": 787,
+                "firstByteMs": 787,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 1572864,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 5213,
+                "outcome": "ok",
+                "phase": "stream-info",
+                "headersMs": 1014,
+                "firstByteMs": 1014,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 2621440,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 1854,
+                "outcome": "timeout",
+                "phase": "media",
+                "headersMs": 1193,
+                "firstByteMs": 1193,
+                "receivedBytes": 61440
+              }
+            ],
+            "wasmMs": 55,
+            "probeMs": 4194,
+            "demuxHeaderMs": 716,
+            "demuxStreamInfoMs": 8156,
+            "demuxStreamCount": 4,
+            "openInputMs": 8874,
+            "detectMimeMs": 1,
+            "mediaSourceMs": 1,
+            "encoderMs": 0,
+            "firstAppendMs": 13129,
+            "muxerMs": 8,
+            "seekMs": 0,
+            "loadTotalMs": 13133,
+            "fetches": 4,
+            "fetchMB": 2.5,
+            "fetchMs": 13047,
+            "audio": "copy",
+            "video": "h264",
+            "engineVersion": 47
+          }
+        },
+        {
+          "stage": "load",
+          "message": "ENGINE_STARTUP_TIMEOUT:global:15000",
+          "timings": {
+            "startupDeadlineMs": 15000,
+            "initialWindowKB": 512,
+            "startupWindowMaxKB": 1024,
+            "fetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 4249,
+                "outcome": "ok",
+                "phase": "prefetch",
+                "headersMs": 2737,
+                "firstByteMs": 2738,
+                "receivedBytes": 524288
+              },
+              {
+                "start": 3093965715,
+                "requestedBytes": 1304,
+                "bytes": 1304,
+                "ms": 705,
+                "outcome": "ok",
+                "phase": "open-header",
+                "headersMs": 705,
+                "firstByteMs": 705,
+                "receivedBytes": 1304
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2880,
+                "outcome": "ok",
+                "phase": "stream-info",
+                "headersMs": 787,
+                "firstByteMs": 787,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 1572864,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 5213,
+                "outcome": "ok",
+                "phase": "stream-info",
+                "headersMs": 1014,
+                "firstByteMs": 1014,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 2621440,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 1854,
+                "outcome": "timeout",
+                "phase": "media",
+                "headersMs": 1193,
+                "firstByteMs": 1193,
+                "receivedBytes": 61440
+              }
+            ],
+            "fetchAttempts": 5,
+            "startupFetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 4249,
+                "outcome": "ok",
+                "phase": "prefetch",
+                "headersMs": 2737,
+                "firstByteMs": 2738,
+                "receivedBytes": 524288
+              },
+              {
+                "start": 3093965715,
+                "requestedBytes": 1304,
+                "bytes": 1304,
+                "ms": 705,
+                "outcome": "ok",
+                "phase": "open-header",
+                "headersMs": 705,
+                "firstByteMs": 705,
+                "receivedBytes": 1304
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2880,
+                "outcome": "ok",
+                "phase": "stream-info",
+                "headersMs": 787,
+                "firstByteMs": 787,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 1572864,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 5213,
+                "outcome": "ok",
+                "phase": "stream-info",
+                "headersMs": 1014,
+                "firstByteMs": 1014,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 2621440,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 1854,
+                "outcome": "timeout",
+                "phase": "media",
+                "headersMs": 1193,
+                "firstByteMs": 1193,
+                "receivedBytes": 61440
+              }
+            ],
+            "wasmMs": 55,
+            "probeMs": 4194,
+            "demuxHeaderMs": 716,
+            "demuxStreamInfoMs": 8156,
+            "demuxStreamCount": 4,
+            "openInputMs": 8874,
+            "detectMimeMs": 1,
+            "mediaSourceMs": 1,
+            "encoderMs": 0,
+            "firstAppendMs": 13129,
+            "muxerMs": 8,
+            "seekMs": 0,
+            "loadTotalMs": 13133,
+            "fetches": 4,
+            "fetchMB": 2.5,
+            "fetchMs": 13047,
+            "audio": "copy",
+            "video": "h264",
+            "engineVersion": 47
+          }
+        }
+      ],
+      "timings": null,
+      "finalTime": null
+    },
+    {
+      "receiptIndex": 2,
+      "copy": "Abduct — MAX OTT",
+      "firstFrameMs": null,
+      "position": 0,
+      "events": [
+        {
+          "name": "error",
+          "ms": 858.2999999523163,
+          "time": 0,
+          "error": 4
+        },
+        {
+          "name": "error",
+          "ms": 31249.699999809265,
+          "time": 0,
+          "error": 4
+        }
+      ],
+      "gaps": [],
+      "failures": [
+        {
+          "stage": "startup:global",
+          "message": "ENGINE_STARTUP_TIMEOUT:global:15000",
+          "timings": {
+            "startupDeadlineMs": 15000,
+            "initialWindowKB": 512,
+            "startupWindowMaxKB": 1024,
+            "fetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 2726,
+                "outcome": "ok",
+                "phase": "prefetch",
+                "headersMs": 1736,
+                "firstByteMs": 1736,
+                "receivedBytes": 524288
+              },
+              {
+                "start": 1253875749,
+                "requestedBytes": 7412,
+                "bytes": 7412,
+                "ms": 664,
+                "outcome": "ok",
+                "phase": "open-header",
+                "headersMs": 664,
+                "firstByteMs": 664,
+                "receivedBytes": 7412
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 3058,
+                "outcome": "ok",
+                "phase": "media",
+                "headersMs": 947,
+                "firstByteMs": 947,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 1572864,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2997,
+                "outcome": "ok",
+                "phase": "media",
+                "headersMs": 714,
+                "firstByteMs": 715,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 2621440,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 5430,
+                "outcome": "network_error",
+                "phase": "media",
+                "headersMs": 761,
+                "firstByteMs": 761,
+                "receivedBytes": 983333
+              }
+            ],
+            "fetchAttempts": 5,
+            "startupFetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 2726,
+                "outcome": "ok",
+                "phase": "prefetch",
+                "headersMs": 1736,
+                "firstByteMs": 1736,
+                "receivedBytes": 524288
+              },
+              {
+                "start": 1253875749,
+                "requestedBytes": 7412,
+                "bytes": 7412,
+                "ms": 664,
+                "outcome": "ok",
+                "phase": "open-header",
+                "headersMs": 664,
+                "firstByteMs": 664,
+                "receivedBytes": 7412
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 3058,
+                "outcome": "ok",
+                "phase": "media",
+                "headersMs": 947,
+                "firstByteMs": 947,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 1572864,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2997,
+                "outcome": "ok",
+                "phase": "media",
+                "headersMs": 714,
+                "firstByteMs": 715,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 2621440,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 5430,
+                "outcome": "network_error",
+                "phase": "media",
+                "headersMs": 761,
+                "firstByteMs": 761,
+                "receivedBytes": 983333
+              }
+            ],
+            "wasmMs": 31,
+            "probeMs": 2695,
+            "demuxHeaderMs": 678,
+            "demuxStreamInfoMs": 16,
+            "demuxStreamCount": 23,
+            "openInputMs": 699,
+            "detectMimeMs": 1,
+            "mediaSourceMs": 1,
+            "encoderMs": 0,
+            "firstAppendMs": 3429,
+            "muxerMs": 6,
+            "seekMs": 0,
+            "loadTotalMs": 3433,
+            "fetches": 2,
+            "fetchMB": 0.5,
+            "fetchMs": 3390,
+            "audio": "copy",
+            "video": "h264",
+            "engineVersion": 47
+          }
+        },
+        {
+          "stage": "load",
+          "message": "ENGINE_STARTUP_TIMEOUT:global:15000",
+          "timings": {
+            "startupDeadlineMs": 15000,
+            "initialWindowKB": 512,
+            "startupWindowMaxKB": 1024,
+            "fetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 2726,
+                "outcome": "ok",
+                "phase": "prefetch",
+                "headersMs": 1736,
+                "firstByteMs": 1736,
+                "receivedBytes": 524288
+              },
+              {
+                "start": 1253875749,
+                "requestedBytes": 7412,
+                "bytes": 7412,
+                "ms": 664,
+                "outcome": "ok",
+                "phase": "open-header",
+                "headersMs": 664,
+                "firstByteMs": 664,
+                "receivedBytes": 7412
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 3058,
+                "outcome": "ok",
+                "phase": "media",
+                "headersMs": 947,
+                "firstByteMs": 947,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 1572864,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2997,
+                "outcome": "ok",
+                "phase": "media",
+                "headersMs": 714,
+                "firstByteMs": 715,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 2621440,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 5430,
+                "outcome": "network_error",
+                "phase": "media",
+                "headersMs": 761,
+                "firstByteMs": 761,
+                "receivedBytes": 983333
+              }
+            ],
+            "fetchAttempts": 5,
+            "startupFetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 2726,
+                "outcome": "ok",
+                "phase": "prefetch",
+                "headersMs": 1736,
+                "firstByteMs": 1736,
+                "receivedBytes": 524288
+              },
+              {
+                "start": 1253875749,
+                "requestedBytes": 7412,
+                "bytes": 7412,
+                "ms": 664,
+                "outcome": "ok",
+                "phase": "open-header",
+                "headersMs": 664,
+                "firstByteMs": 664,
+                "receivedBytes": 7412
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 3058,
+                "outcome": "ok",
+                "phase": "media",
+                "headersMs": 947,
+                "firstByteMs": 947,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 1572864,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2997,
+                "outcome": "ok",
+                "phase": "media",
+                "headersMs": 714,
+                "firstByteMs": 715,
+                "receivedBytes": 1048576
+              },
+              {
+                "start": 2621440,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 5430,
+                "outcome": "network_error",
+                "phase": "media",
+                "headersMs": 761,
+                "firstByteMs": 761,
+                "receivedBytes": 983333
+              }
+            ],
+            "wasmMs": 31,
+            "probeMs": 2695,
+            "demuxHeaderMs": 678,
+            "demuxStreamInfoMs": 16,
+            "demuxStreamCount": 23,
+            "openInputMs": 699,
+            "detectMimeMs": 1,
+            "mediaSourceMs": 1,
+            "encoderMs": 0,
+            "firstAppendMs": 3429,
+            "muxerMs": 6,
+            "seekMs": 0,
+            "loadTotalMs": 3433,
+            "fetches": 2,
+            "fetchMB": 0.5,
+            "fetchMs": 3390,
+            "audio": "copy",
+            "video": "h264",
+            "engineVersion": 47
+          }
+        }
+      ],
+      "timings": null,
+      "finalTime": null
+    },
+    {
+      "receiptIndex": 4,
+      "copy": "Abduct — MAX OTT",
+      "firstFrameMs": 8883.399999904632,
+      "position": 0,
+      "events": [
+        {
+          "name": "error",
+          "ms": 701,
+          "time": 0,
+          "error": 4
+        },
+        {
+          "name": "waiting",
+          "ms": 8889.099999904633,
+          "time": 0
+        },
+        {
+          "name": "playing",
+          "ms": 8893.799999952316,
+          "time": 0.005844
+        },
+        {
+          "name": "waiting",
+          "ms": 17910.099999904633,
+          "time": 8.980068
+        },
+        {
+          "name": "playing",
+          "ms": 41658.299999952316,
+          "time": 9.02574
+        },
+        {
+          "name": "waiting",
+          "ms": 49538.40000009537,
+          "time": 16.864107
+        },
+        {
+          "name": "error",
+          "ms": 52703.799999952316,
+          "time": 0,
+          "error": 4
+        }
+      ],
+      "gaps": [
+        {
+          "ms": 9622.799999904633,
+          "gap": 739.4000000000015,
+          "from": 0.656,
+          "to": 0.698,
+          "hidden": false
+        },
+        {
+          "ms": 41665.19999990463,
+          "gap": 23787.8,
+          "from": 8.956,
+          "to": 8.998,
+          "hidden": false
+        },
+        {
+          "ms": 43750.19999990463,
+          "gap": 794.1999999999971,
+          "from": 10.291,
+          "to": 11.083,
+          "hidden": false
+        },
+        {
+          "ms": 48798.899999904635,
+          "gap": 1460.800000000003,
+          "from": 14.67,
+          "to": 16.13,
+          "hidden": false
+        }
+      ],
+      "failures": [],
+      "timings": {
+        "startupDeadlineMs": 15000,
+        "initialWindowKB": 512,
+        "startupWindowMaxKB": 1024,
+        "fetchWindows": [
+          {
+            "start": 0,
+            "requestedBytes": 524288,
+            "bytes": 524288,
+            "ms": 2837,
+            "outcome": "ok",
+            "phase": "prefetch",
+            "headersMs": 1848,
+            "firstByteMs": 1894,
+            "receivedBytes": 524288
+          },
+          {
+            "start": 1253875749,
+            "requestedBytes": 7412,
+            "bytes": 7412,
+            "ms": 1281,
+            "outcome": "ok",
+            "phase": "open-header",
+            "headersMs": 1281,
+            "firstByteMs": 1281,
+            "receivedBytes": 7412
+          },
+          {
+            "start": 524288,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 3971,
+            "outcome": "ok",
+            "phase": "media",
+            "headersMs": 1441,
+            "firstByteMs": 1441,
+            "receivedBytes": 1048576
+          },
+          {
+            "start": 1572864,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 23289,
+            "outcome": "ok",
+            "phase": "media",
+            "headersMs": 1268,
+            "firstByteMs": 1269,
+            "receivedBytes": 4194304
+          },
+          {
+            "start": 0,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 23110,
+            "outcome": "ok",
+            "phase": "media",
+            "headersMs": 1989,
+            "firstByteMs": 1989,
+            "receivedBytes": 4194304
+          },
+          {
+            "start": 5735256,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 8982,
+            "outcome": "ok",
+            "phase": "media",
+            "headersMs": 1919,
+            "firstByteMs": 1920,
+            "receivedBytes": 4194304
+          },
+          {
+            "start": 1253168213,
+            "requestedBytes": 714948,
+            "bytes": 714948,
+            "ms": 4646,
+            "outcome": "ok",
+            "phase": "media",
+            "headersMs": 1044,
+            "firstByteMs": 1045,
+            "receivedBytes": 714948
+          },
+          {
+            "start": 9924992,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 10139,
+            "outcome": "ok",
+            "phase": "media",
+            "headersMs": 1193,
+            "firstByteMs": 1194,
+            "receivedBytes": 4194304
+          },
+          {
+            "start": 9904493,
+            "requestedBytes": 4194304,
+            "bytes": 0,
+            "ms": 848,
+            "outcome": "network_error",
+            "phase": "media"
+          }
+        ],
+        "fetchAttempts": 9,
+        "startupFetchWindows": [
+          {
+            "start": 0,
+            "requestedBytes": 524288,
+            "bytes": 524288,
+            "ms": 2837,
+            "outcome": "ok",
+            "phase": "prefetch",
+            "headersMs": 1848,
+            "firstByteMs": 1894,
+            "receivedBytes": 524288
+          },
+          {
+            "start": 1253875749,
+            "requestedBytes": 7412,
+            "bytes": 7412,
+            "ms": 1281,
+            "outcome": "ok",
+            "phase": "open-header",
+            "headersMs": 1281,
+            "firstByteMs": 1281,
+            "receivedBytes": 7412
+          },
+          {
+            "start": 524288,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 3971,
+            "outcome": "ok",
+            "phase": "media",
+            "headersMs": 1441,
+            "firstByteMs": 1441,
+            "receivedBytes": 1048576
+          }
+        ],
+        "wasmMs": 35,
+        "probeMs": 2802,
+        "demuxHeaderMs": 1288,
+        "demuxStreamInfoMs": 18,
+        "demuxStreamCount": 23,
+        "openInputMs": 1310,
+        "detectMimeMs": 1,
+        "mediaSourceMs": 1,
+        "encoderMs": 0,
+        "firstAppendMs": 4151,
+        "muxerMs": 6,
+        "seekMs": 0,
+        "loadTotalMs": 4155,
+        "fetches": 2,
+        "fetchMB": 0.5,
+        "fetchMs": 4118,
+        "audio": "copy",
+        "video": "h264",
+        "engineVersion": 47,
+        "firstUsableAppendMs": 8180,
+        "firstMediaAppendMs": 8180,
+        "firstMediaAppendFetches": 3,
+        "firstMediaAppendSuccessfulFetches": 3,
+        "firstMediaAppendFetchKB": 1543
+      },
+      "finalTime": null
+    },
+    {
+      "receiptIndex": 5,
+      "copy": "Conclave — Dino",
+      "firstFrameMs": null,
+      "position": 0,
+      "events": [
+        {
+          "name": "error",
+          "ms": 718.1000001430511,
+          "time": 0,
+          "error": 4
+        },
+        {
+          "name": "error",
+          "ms": 45021,
+          "time": 0,
+          "error": 4
+        }
+      ],
+      "gaps": [],
+      "failures": [
+        {
+          "stage": "startup:global",
+          "message": "ENGINE_STARTUP_TIMEOUT:global:15000",
+          "timings": {
+            "startupDeadlineMs": 15000,
+            "initialWindowKB": 512,
+            "startupWindowMaxKB": 1024,
+            "fetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 9860,
+                "outcome": "ok",
+                "phase": "prefetch",
+                "headersMs": 1692,
+                "firstByteMs": 1692,
+                "receivedBytes": 524288
+              },
+              {
+                "start": 3093965715,
+                "requestedBytes": 1304,
+                "bytes": 1304,
+                "ms": 1250,
+                "outcome": "ok",
+                "phase": "open-header",
+                "headersMs": 1250,
+                "firstByteMs": 1250,
+                "receivedBytes": 1304
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 3861,
+                "outcome": "network_error",
+                "phase": "stream-info",
+                "headersMs": 825,
+                "firstByteMs": 825,
+                "receivedBytes": 577283
+              }
+            ],
+            "fetchAttempts": 3,
+            "startupFetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 9860,
+                "outcome": "ok",
+                "phase": "prefetch",
+                "headersMs": 1692,
+                "firstByteMs": 1692,
+                "receivedBytes": 524288
+              },
+              {
+                "start": 3093965715,
+                "requestedBytes": 1304,
+                "bytes": 1304,
+                "ms": 1250,
+                "outcome": "ok",
+                "phase": "open-header",
+                "headersMs": 1250,
+                "firstByteMs": 1250,
+                "receivedBytes": 1304
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 3861,
+                "outcome": "network_error",
+                "phase": "stream-info",
+                "headersMs": 825,
+                "firstByteMs": 825,
+                "receivedBytes": 577283
+              }
+            ],
+            "wasmMs": 43,
+            "probeMs": 9817,
+            "demuxHeaderMs": 1262
+          }
+        },
+        {
+          "stage": "load",
+          "message": "ENGINE_STARTUP_TIMEOUT:global:15000",
+          "timings": {
+            "startupDeadlineMs": 15000,
+            "initialWindowKB": 512,
+            "startupWindowMaxKB": 1024,
+            "fetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 9860,
+                "outcome": "ok",
+                "phase": "prefetch",
+                "headersMs": 1692,
+                "firstByteMs": 1692,
+                "receivedBytes": 524288
+              },
+              {
+                "start": 3093965715,
+                "requestedBytes": 1304,
+                "bytes": 1304,
+                "ms": 1250,
+                "outcome": "ok",
+                "phase": "open-header",
+                "headersMs": 1250,
+                "firstByteMs": 1250,
+                "receivedBytes": 1304
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 3861,
+                "outcome": "network_error",
+                "phase": "stream-info",
+                "headersMs": 825,
+                "firstByteMs": 825,
+                "receivedBytes": 577283
+              }
+            ],
+            "fetchAttempts": 3,
+            "startupFetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 9860,
+                "outcome": "ok",
+                "phase": "prefetch",
+                "headersMs": 1692,
+                "firstByteMs": 1692,
+                "receivedBytes": 524288
+              },
+              {
+                "start": 3093965715,
+                "requestedBytes": 1304,
+                "bytes": 1304,
+                "ms": 1250,
+                "outcome": "ok",
+                "phase": "open-header",
+                "headersMs": 1250,
+                "firstByteMs": 1250,
+                "receivedBytes": 1304
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 3861,
+                "outcome": "network_error",
+                "phase": "stream-info",
+                "headersMs": 825,
+                "firstByteMs": 825,
+                "receivedBytes": 577283
+              }
+            ],
+            "wasmMs": 43,
+            "probeMs": 9817,
+            "demuxHeaderMs": 1262
+          }
+        }
+      ],
+      "timings": null,
+      "finalTime": null
+    },
+    {
+      "receiptIndex": 6,
+      "copy": "Abduct — MAX OTT",
+      "firstFrameMs": 7107.7,
+      "position": 0,
+      "events": [
+        {
+          "name": "error",
+          "ms": 763.1000001430511,
+          "time": 0,
+          "error": 4
+        },
+        {
+          "name": "waiting",
+          "ms": 7104.200000047684,
+          "time": 0
+        },
+        {
+          "name": "playing",
+          "ms": 7105.400000095367,
+          "time": 0.000303
+        },
+        {
+          "name": "waiting",
+          "ms": 16127.5,
+          "time": 8.980253
+        },
+        {
+          "name": "playing",
+          "ms": 46418.40000009537,
+          "time": 9.025921
+        },
+        {
+          "name": "waiting",
+          "ms": 54296.90000009537,
+          "time": 16.864089
+        },
+        {
+          "name": "playing",
+          "ms": 65302.200000047684,
+          "time": 16.919062
+        },
+        {
+          "name": "error",
+          "ms": 65727.40000009537,
+          "time": 17.291997,
+          "error": 3
+        },
+        {
+          "name": "error",
+          "ms": 95421.70000004768,
+          "time": 0,
+          "error": 4
+        }
+      ],
+      "gaps": [
+        {
+          "ms": 7835.4,
+          "gap": 727.6999999999998,
+          "from": 0.656,
+          "to": 0.698,
+          "hidden": false
+        },
+        {
+          "ms": 46435,
+          "gap": 30339.3,
+          "from": 8.956,
+          "to": 8.998,
+          "hidden": false
+        },
+        {
+          "ms": 48513.8,
+          "gap": 793.9000000000015,
+          "from": 10.291,
+          "to": 11.083,
+          "hidden": false
+        },
+        {
+          "ms": 53556.2,
+          "gap": 1460.5999999999985,
+          "from": 14.67,
+          "to": 16.13,
+          "hidden": false
+        },
+        {
+          "ms": 65301.7,
+          "gap": 11036.399999999994,
+          "from": 16.839,
+          "to": 16.881,
+          "hidden": false
+        }
+      ],
+      "failures": [
+        {
+          "stage": "mediaerror",
+          "message": "code=3 MEDIA_ERR_3:PipelineStatus::PIPELINE_ERROR_DECODE: video decode error!",
+          "timings": {
+            "startupDeadlineMs": 15000,
+            "initialWindowKB": 512,
+            "startupWindowMaxKB": 1024,
+            "fetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 2478,
+                "outcome": "ok"
+              },
+              {
+                "start": 1253875749,
+                "requestedBytes": 7412,
+                "bytes": 7412,
+                "ms": 675,
+                "outcome": "ok"
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 3087,
+                "outcome": "ok"
+              },
+              {
+                "start": 1572864,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 5451,
+                "outcome": "ok"
+              },
+              {
+                "start": 2601291,
+                "requestedBytes": 4194304,
+                "bytes": 4194304,
+                "ms": 23905,
+                "outcome": "ok"
+              },
+              {
+                "start": 6783211,
+                "requestedBytes": 4194304,
+                "bytes": 4194304,
+                "ms": 9541,
+                "outcome": "ok"
+              },
+              {
+                "start": 10953069,
+                "requestedBytes": 4194304,
+                "bytes": 4194304,
+                "ms": 9118,
+                "outcome": "ok"
+              },
+              {
+                "start": 15118650,
+                "requestedBytes": 4194304,
+                "bytes": 4194304,
+                "ms": 9242,
+                "outcome": "ok"
+              },
+              {
+                "start": 19290101,
+                "requestedBytes": 4194304,
+                "bytes": 0,
+                "ms": 224,
+                "outcome": "network_error"
+              }
+            ],
+            "fetchAttempts": 9,
+            "startupFetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 2478,
+                "outcome": "ok"
+              },
+              {
+                "start": 1253875749,
+                "requestedBytes": 7412,
+                "bytes": 7412,
+                "ms": 675,
+                "outcome": "ok"
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 3087,
+                "outcome": "ok"
+              },
+              {
+                "start": 1572864,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 5451,
+                "outcome": "ok"
+              }
+            ],
+            "wasmMs": 35,
+            "probeMs": 2444,
+            "openInputMs": 705,
+            "detectMimeMs": 2,
+            "mediaSourceMs": 1,
+            "encoderMs": 0,
+            "firstAppendMs": 3189,
+            "muxerMs": 7,
+            "seekMs": 0,
+            "loadTotalMs": 3193,
+            "fetches": 2,
+            "fetchMB": 0.5,
+            "fetchMs": 3152,
+            "audio": "copy",
+            "video": "h264",
+            "engineVersion": 48,
+            "firstUsableAppendMs": 6340,
+            "firstMediaAppendMs": 6340,
+            "firstMediaAppendFetches": 4,
+            "firstMediaAppendSuccessfulFetches": 3,
+            "firstMediaAppendFetchKB": 1543
+          }
+        },
+        {
+          "stage": "startup:global",
+          "message": "ENGINE_STARTUP_TIMEOUT:global:15000",
+          "timings": {
+            "startupDeadlineMs": 15000,
+            "initialWindowKB": 512,
+            "startupWindowMaxKB": 1024,
+            "fetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 2023,
+                "outcome": "ok"
+              },
+              {
+                "start": 1253875749,
+                "requestedBytes": 7412,
+                "bytes": 7412,
+                "ms": 720,
+                "outcome": "ok"
+              },
+              {
+                "start": 1253168213,
+                "requestedBytes": 714948,
+                "bytes": 714948,
+                "ms": 1974,
+                "outcome": "ok"
+              },
+              {
+                "start": 1015498,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2769,
+                "outcome": "ok"
+              },
+              {
+                "start": 2064074,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2773,
+                "outcome": "ok"
+              },
+              {
+                "start": 3112650,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2805,
+                "outcome": "ok"
+              },
+              {
+                "start": 4161226,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 1774,
+                "outcome": "network_error"
+              }
+            ],
+            "fetchAttempts": 7,
+            "startupFetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 2023,
+                "outcome": "ok"
+              },
+              {
+                "start": 1253875749,
+                "requestedBytes": 7412,
+                "bytes": 7412,
+                "ms": 720,
+                "outcome": "ok"
+              },
+              {
+                "start": 1253168213,
+                "requestedBytes": 714948,
+                "bytes": 714948,
+                "ms": 1974,
+                "outcome": "ok"
+              },
+              {
+                "start": 1015498,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2769,
+                "outcome": "ok"
+              },
+              {
+                "start": 2064074,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2773,
+                "outcome": "ok"
+              },
+              {
+                "start": 3112650,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2805,
+                "outcome": "ok"
+              },
+              {
+                "start": 4161226,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 1774,
+                "outcome": "network_error"
+              }
+            ],
+            "wasmMs": 34,
+            "probeMs": 1989,
+            "openInputMs": 746,
+            "detectMimeMs": 1,
+            "mediaSourceMs": 2,
+            "encoderMs": 0,
+            "firstAppendMs": 2777,
+            "muxerMs": 12,
+            "seekMs": 1992,
+            "loadTotalMs": 4776,
+            "fetches": 3,
+            "fetchMB": 1.2,
+            "fetchMs": 4716,
+            "audio": "copy",
+            "video": "h264",
+            "engineVersion": 48
+          }
+        },
+        {
+          "stage": "load",
+          "message": "ENGINE_STARTUP_TIMEOUT:global:15000",
+          "timings": {
+            "startupDeadlineMs": 15000,
+            "initialWindowKB": 512,
+            "startupWindowMaxKB": 1024,
+            "fetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 2023,
+                "outcome": "ok"
+              },
+              {
+                "start": 1253875749,
+                "requestedBytes": 7412,
+                "bytes": 7412,
+                "ms": 720,
+                "outcome": "ok"
+              },
+              {
+                "start": 1253168213,
+                "requestedBytes": 714948,
+                "bytes": 714948,
+                "ms": 1974,
+                "outcome": "ok"
+              },
+              {
+                "start": 1015498,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2769,
+                "outcome": "ok"
+              },
+              {
+                "start": 2064074,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2773,
+                "outcome": "ok"
+              },
+              {
+                "start": 3112650,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2805,
+                "outcome": "ok"
+              },
+              {
+                "start": 4161226,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 1774,
+                "outcome": "network_error"
+              }
+            ],
+            "fetchAttempts": 7,
+            "startupFetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 2023,
+                "outcome": "ok"
+              },
+              {
+                "start": 1253875749,
+                "requestedBytes": 7412,
+                "bytes": 7412,
+                "ms": 720,
+                "outcome": "ok"
+              },
+              {
+                "start": 1253168213,
+                "requestedBytes": 714948,
+                "bytes": 714948,
+                "ms": 1974,
+                "outcome": "ok"
+              },
+              {
+                "start": 1015498,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2769,
+                "outcome": "ok"
+              },
+              {
+                "start": 2064074,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2773,
+                "outcome": "ok"
+              },
+              {
+                "start": 3112650,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2805,
+                "outcome": "ok"
+              },
+              {
+                "start": 4161226,
+                "requestedBytes": 1048576,
+                "bytes": 0,
+                "ms": 1774,
+                "outcome": "network_error"
+              }
+            ],
+            "wasmMs": 34,
+            "probeMs": 1989,
+            "openInputMs": 746,
+            "detectMimeMs": 1,
+            "mediaSourceMs": 2,
+            "encoderMs": 0,
+            "firstAppendMs": 2777,
+            "muxerMs": 12,
+            "seekMs": 1992,
+            "loadTotalMs": 4776,
+            "fetches": 3,
+            "fetchMB": 1.2,
+            "fetchMs": 4716,
+            "audio": "copy",
+            "video": "h264",
+            "engineVersion": 48
+          }
+        }
+      ],
+      "timings": null,
+      "finalTime": null
+    },
+    {
+      "receiptIndex": 8,
+      "copy": "Abduct — MAX OTT",
+      "firstFrameMs": 7471.199999904633,
+      "position": 0,
+      "events": [
+        {
+          "name": "error",
+          "ms": 791.7999999523163,
+          "time": 0,
+          "error": 4
+        },
+        {
+          "name": "waiting",
+          "ms": 7474.799999952316,
+          "time": 0
+        },
+        {
+          "name": "playing",
+          "ms": 7477.599999904633,
+          "time": 0.007338
+        },
+        {
+          "name": "waiting",
+          "ms": 16492.5,
+          "time": 8.980601
+        },
+        {
+          "name": "playing",
+          "ms": 44293.799999952316,
+          "time": 9.026777
+        },
+        {
+          "name": "waiting",
+          "ms": 52172.59999990463,
+          "time": 16.864213
+        },
+        {
+          "name": "playing",
+          "ms": 80369.40000009537,
+          "time": 16.92332
+        },
+        {
+          "name": "error",
+          "ms": 80777.20000004768,
+          "time": 17.288227,
+          "error": 3
+        },
+        {
+          "name": "error",
+          "ms": 80786.09999990463,
+          "time": 0,
+          "error": 4
+        }
+      ],
+      "gaps": [
+        {
+          "ms": 8204.599999904633,
+          "gap": 733.3999999999996,
+          "from": 0.656,
+          "to": 0.698,
+          "hidden": false
+        },
+        {
+          "ms": 44307.59999990463,
+          "gap": 27848.4,
+          "from": 8.956,
+          "to": 8.998,
+          "hidden": false
+        },
+        {
+          "ms": 46386.499999904634,
+          "gap": 794.0999999999985,
+          "from": 10.291,
+          "to": 11.083,
+          "hidden": false
+        },
+        {
+          "ms": 51428.899999904635,
+          "gap": 1454.5,
+          "from": 14.67,
+          "to": 16.13,
+          "hidden": false
+        },
+        {
+          "ms": 80374.29999990463,
+          "gap": 28236.299999999996,
+          "from": 16.839,
+          "to": 16.881,
+          "hidden": false
+        }
+      ],
+      "failures": [
+        {
+          "stage": "mediaerror",
+          "message": "code=3 MEDIA_ERR_3:PipelineStatus::PIPELINE_ERROR_DECODE: video decode error!",
+          "timings": {
+            "startupDeadlineMs": 15000,
+            "initialWindowKB": 512,
+            "startupWindowMaxKB": 1024,
+            "fetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 2682,
+                "outcome": "ok"
+              },
+              {
+                "start": 1253875749,
+                "requestedBytes": 7412,
+                "bytes": 7412,
+                "ms": 761,
+                "outcome": "ok"
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 3094,
+                "outcome": "ok"
+              },
+              {
+                "start": 1572864,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2990,
+                "outcome": "ok"
+              },
+              {
+                "start": 2601291,
+                "requestedBytes": 4194304,
+                "bytes": 4194304,
+                "ms": 24754,
+                "outcome": "ok"
+              },
+              {
+                "start": 6783211,
+                "requestedBytes": 4194304,
+                "bytes": 4194304,
+                "ms": 8558,
+                "outcome": "ok"
+              },
+              {
+                "start": 10953069,
+                "requestedBytes": 4194304,
+                "bytes": 4194304,
+                "ms": 22287,
+                "outcome": "ok"
+              },
+              {
+                "start": 15118650,
+                "requestedBytes": 4194304,
+                "bytes": 4194304,
+                "ms": 13302,
+                "outcome": "ok"
+              },
+              {
+                "start": 19290101,
+                "requestedBytes": 4194304,
+                "bytes": 0,
+                "ms": 188,
+                "outcome": "network_error"
+              }
+            ],
+            "fetchAttempts": 9,
+            "startupFetchWindows": [
+              {
+                "start": 0,
+                "requestedBytes": 524288,
+                "bytes": 524288,
+                "ms": 2682,
+                "outcome": "ok"
+              },
+              {
+                "start": 1253875749,
+                "requestedBytes": 7412,
+                "bytes": 7412,
+                "ms": 761,
+                "outcome": "ok"
+              },
+              {
+                "start": 524288,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 3094,
+                "outcome": "ok"
+              },
+              {
+                "start": 1572864,
+                "requestedBytes": 1048576,
+                "bytes": 1048576,
+                "ms": 2990,
+                "outcome": "ok"
+              }
+            ],
+            "wasmMs": 35,
+            "probeMs": 2650,
+            "openInputMs": 805,
+            "detectMimeMs": 3,
+            "mediaSourceMs": 1,
+            "encoderMs": 0,
+            "firstAppendMs": 3499,
+            "muxerMs": 9,
+            "seekMs": 0,
+            "loadTotalMs": 3503,
+            "fetches": 2,
+            "fetchMB": 0.5,
+            "fetchMs": 3443,
+            "audio": "copy",
+            "video": "h264",
+            "engineVersion": 48,
+            "firstUsableAppendMs": 6673,
+            "firstMediaAppendMs": 6673,
+            "firstMediaAppendFetches": 4,
+            "firstMediaAppendSuccessfulFetches": 3,
+            "firstMediaAppendFetchKB": 1543
+          }
+        }
+      ],
+      "timings": null,
+      "finalTime": null
+    }
+  ],
+  "syntheticFinal": {
+    "receiptIndex": 7,
+    "copy": "synthetic/replay",
+    "firstFrameMs": 380.3999999523163,
+    "position": 0,
+    "events": [
+      {
+        "event": "waiting",
+        "ms": 368,
+        "time": 0
+      },
+      {
+        "event": "playing",
+        "ms": 375,
+        "time": 0.000243
+      },
+      {
+        "event": "requested-seek",
+        "ms": 16364,
+        "time": 15.947778,
+        "target": 90,
+        "buffer": [
+          [
+            0,
+            52.005
+          ]
+        ]
+      },
+      {
+        "event": "waiting",
+        "ms": 16371,
+        "time": 90
+      },
+      {
+        "event": "seeked",
+        "ms": 16919,
+        "time": 90.002153
+      },
+      {
+        "event": "playing",
+        "ms": 16919,
+        "time": 90.002172
+      },
+      {
+        "event": "requested-seek",
+        "ms": 46557,
+        "time": 119.599208,
+        "target": 170,
+        "buffer": [
+          [
+            88,
+            142
+          ]
+        ]
+      },
+      {
+        "event": "waiting",
+        "ms": 46558,
+        "time": 170
+      },
+      {
+        "event": "seeked",
+        "ms": 46998,
+        "time": 170.000194
+      },
+      {
+        "event": "playing",
+        "ms": 46998,
+        "time": 170.000225
+      },
+      {
+        "event": "ended",
+        "ms": 57080,
+        "time": 180.009375
+      }
+    ],
+    "gaps": [],
+    "failures": [],
+    "timings": {
+      "startupDeadlineMs": 15000,
+      "initialWindowKB": 512,
+      "startupWindowMaxKB": 1024,
+      "fetchWindows": [
+        {
+          "start": 524288,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 7,
+          "outcome": "ok"
+        },
+        {
+          "start": 1572864,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 16,
+          "outcome": "ok"
+        },
+        {
+          "start": 5767168,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 13,
+          "outcome": "ok"
+        },
+        {
+          "start": 9961472,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 13,
+          "outcome": "ok"
+        },
+        {
+          "start": 0,
+          "requestedBytes": 2097152,
+          "bytes": 2097152,
+          "ms": 22,
+          "outcome": "ok"
+        },
+        {
+          "start": 44162898,
+          "requestedBytes": 2022,
+          "bytes": 2022,
+          "ms": 5,
+          "outcome": "ok"
+        },
+        {
+          "start": 21573460,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 20,
+          "outcome": "ok"
+        },
+        {
+          "start": 25767764,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 12,
+          "outcome": "ok"
+        },
+        {
+          "start": 29962068,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 15,
+          "outcome": "ok"
+        },
+        {
+          "start": 34156372,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 12,
+          "outcome": "ok"
+        },
+        {
+          "start": 41681463,
+          "requestedBytes": 2097152,
+          "bytes": 2097152,
+          "ms": 7,
+          "outcome": "ok"
+        },
+        {
+          "start": 43778615,
+          "requestedBytes": 386305,
+          "bytes": 386305,
+          "ms": 4,
+          "outcome": "ok"
+        }
+      ],
+      "fetchAttempts": 13,
+      "startupFetchWindows": [
+        {
+          "start": 0,
+          "requestedBytes": 524288,
+          "bytes": 524288,
+          "ms": 10,
+          "outcome": "ok"
+        },
+        {
+          "start": 524288,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 7,
+          "outcome": "ok"
+        }
+      ],
+      "wasmMs": 36,
+      "probeMs": 0,
+      "openInputMs": 26,
+      "detectMimeMs": 1,
+      "mediaSourceMs": 1,
+      "encoderMs": 3,
+      "firstAppendMs": 70,
+      "muxerMs": 7,
+      "seekMs": 0,
+      "loadTotalMs": 74,
+      "fetches": 1,
+      "fetchMB": 0.5,
+      "fetchMs": 10,
+      "audio": "aac",
+      "video": "h264",
+      "engineVersion": 48,
+      "firstUsableAppendMs": 367,
+      "firstMediaAppendMs": 367,
+      "firstMediaAppendFetches": 2,
+      "firstMediaAppendSuccessfulFetches": 2,
+      "firstMediaAppendFetchKB": 1536
+    },
+    "finalTime": 180.009375
+  },
+  "localReplayBaseline": {
+    "receiptIndex": 9,
+    "copy": "synthetic/replay",
+    "firstFrameMs": null,
+    "position": 0,
+    "events": [
+      {
+        "event": "decode-error",
+        "ms": 457,
+        "time": 0,
+        "message": "PipelineStatus::CHUNK_DEMUXER_ERROR_APPEND_FAILED: RunSegmentParserLoop: stream parsing failed. append_window_start=0 append_window_end=inf"
+      },
+      {
+        "event": "error",
+        "ms": 457,
+        "time": 0,
+        "error": 3
+      }
+    ],
+    "gaps": [],
+    "failures": [],
+    "timings": {
+      "startupDeadlineMs": 15000,
+      "initialWindowKB": 512,
+      "startupWindowMaxKB": 1024,
+      "fetchWindows": [
+        {
+          "start": 0,
+          "requestedBytes": 524288,
+          "bytes": 524288,
+          "ms": 10,
+          "outcome": "ok"
+        },
+        {
+          "start": 1253875749,
+          "requestedBytes": 7412,
+          "bytes": 7412,
+          "ms": 3,
+          "outcome": "ok"
+        },
+        {
+          "start": 524288,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 6,
+          "outcome": "ok"
+        },
+        {
+          "start": 1572864,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 14,
+          "outcome": "ok"
+        },
+        {
+          "start": 2621440,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 10,
+          "outcome": "ok"
+        },
+        {
+          "start": 3670016,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 6,
+          "outcome": "ok"
+        },
+        {
+          "start": 4718592,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 5,
+          "outcome": "ok"
+        },
+        {
+          "start": 5767168,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 7,
+          "outcome": "ok"
+        },
+        {
+          "start": 6815744,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 15,
+          "outcome": "ok"
+        },
+        {
+          "start": 7864320,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 8,
+          "outcome": "ok"
+        },
+        {
+          "start": 8912896,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 5,
+          "outcome": "ok"
+        }
+      ],
+      "fetchAttempts": 11,
+      "startupFetchWindows": [
+        {
+          "start": 0,
+          "requestedBytes": 524288,
+          "bytes": 524288,
+          "ms": 10,
+          "outcome": "ok"
+        },
+        {
+          "start": 1253875749,
+          "requestedBytes": 7412,
+          "bytes": 7412,
+          "ms": 3,
+          "outcome": "ok"
+        },
+        {
+          "start": 524288,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 6,
+          "outcome": "ok"
+        },
+        {
+          "start": 1572864,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 14,
+          "outcome": "ok"
+        },
+        {
+          "start": 2621440,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 10,
+          "outcome": "ok"
+        },
+        {
+          "start": 3670016,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 6,
+          "outcome": "ok"
+        },
+        {
+          "start": 4718592,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 5,
+          "outcome": "ok"
+        },
+        {
+          "start": 5767168,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 7,
+          "outcome": "ok"
+        },
+        {
+          "start": 6815744,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 15,
+          "outcome": "ok"
+        },
+        {
+          "start": 7864320,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 8,
+          "outcome": "ok"
+        },
+        {
+          "start": 8912896,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 5,
+          "outcome": "ok"
+        }
+      ],
+      "wasmMs": 35,
+      "probeMs": 0,
+      "openInputMs": 24,
+      "detectMimeMs": 2,
+      "mediaSourceMs": 3,
+      "encoderMs": 0,
+      "firstAppendMs": 67,
+      "muxerMs": 7,
+      "seekMs": 0,
+      "loadTotalMs": 71,
+      "fetches": 2,
+      "fetchMB": 0.5,
+      "fetchMs": 13,
+      "audio": "copy",
+      "video": "h264",
+      "engineVersion": 47
+    },
+    "finalTime": 0
+  },
+  "localReplayCandidate": {
+    "receiptIndex": 10,
+    "copy": "synthetic/replay",
+    "firstFrameMs": 294.5999998092651,
+    "position": 0,
+    "events": [
+      {
+        "event": "waiting",
+        "ms": 158,
+        "time": 0
+      },
+      {
+        "event": "playing",
+        "ms": 295,
+        "time": 0.001119
+      },
+      {
+        "event": "decode-error",
+        "ms": 17624,
+        "time": 17.287187,
+        "message": "PipelineStatus::PIPELINE_ERROR_DECODE: video decode error!"
+      },
+      {
+        "event": "error",
+        "ms": 17624,
+        "time": 17.287187,
+        "error": 3
+      }
+    ],
+    "gaps": [
+      {
+        "ms": 1034,
+        "gapMs": 739.4,
+        "mediaFrom": 0.656,
+        "mediaTo": 0.698,
+        "sinceSeek": 1264.3,
+        "hidden": false
+      },
+      {
+        "ms": 11410,
+        "gapMs": 787.6999999999989,
+        "mediaFrom": 10.291,
+        "mediaTo": 11.083,
+        "sinceSeek": 11639.9,
+        "hidden": false
+      },
+      {
+        "ms": 16458,
+        "gapMs": 1460.6000000000004,
+        "mediaFrom": 14.67,
+        "mediaTo": 16.13,
+        "sinceSeek": 16688.5,
+        "hidden": false
+      }
+    ],
+    "failures": [],
+    "timings": {
+      "startupDeadlineMs": 15000,
+      "initialWindowKB": 512,
+      "startupWindowMaxKB": 1024,
+      "fetchWindows": [
+        {
+          "start": 0,
+          "requestedBytes": 524288,
+          "bytes": 524288,
+          "ms": 6,
+          "outcome": "ok"
+        },
+        {
+          "start": 1253875749,
+          "requestedBytes": 7412,
+          "bytes": 7412,
+          "ms": 2,
+          "outcome": "ok"
+        },
+        {
+          "start": 524288,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 8,
+          "outcome": "ok"
+        },
+        {
+          "start": 1568985,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 17,
+          "outcome": "ok"
+        },
+        {
+          "start": 5735256,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 14,
+          "outcome": "ok"
+        },
+        {
+          "start": 9924992,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 25,
+          "outcome": "ok"
+        },
+        {
+          "start": 9904493,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 21,
+          "outcome": "ok"
+        },
+        {
+          "start": 14056508,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 29,
+          "outcome": "ok"
+        },
+        {
+          "start": 18237881,
+          "requestedBytes": 4194304,
+          "bytes": 0,
+          "ms": 3,
+          "outcome": "http_416"
+        }
+      ],
+      "fetchAttempts": 9,
+      "startupFetchWindows": [
+        {
+          "start": 0,
+          "requestedBytes": 524288,
+          "bytes": 524288,
+          "ms": 6,
+          "outcome": "ok"
+        },
+        {
+          "start": 1253875749,
+          "requestedBytes": 7412,
+          "bytes": 7412,
+          "ms": 2,
+          "outcome": "ok"
+        },
+        {
+          "start": 524288,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 8,
+          "outcome": "ok"
+        }
+      ],
+      "wasmMs": 30,
+      "probeMs": 0,
+      "openInputMs": 22,
+      "detectMimeMs": 3,
+      "mediaSourceMs": 1,
+      "encoderMs": 0,
+      "firstAppendMs": 64,
+      "muxerMs": 15,
+      "seekMs": 0,
+      "loadTotalMs": 71,
+      "fetches": 2,
+      "fetchMB": 0.5,
+      "fetchMs": 9,
+      "audio": "copy",
+      "video": "h264",
+      "engineVersion": 48,
+      "firstUsableAppendMs": 157,
+      "firstMediaAppendMs": 157,
+      "firstMediaAppendFetches": 3,
+      "firstMediaAppendSuccessfulFetches": 3,
+      "firstMediaAppendFetchKB": 1543
+    },
+    "finalTime": 17.287187
+  },
+  "decode": {
+    "sourceRanges": [
+      {
+        "position": 0,
+        "bytes": 524288,
+        "sha256": "e9d8dc8e273996c3d97d4a66a9a985fdb0f9c338c58b446e03879b13adce7bba"
+      },
+      {
+        "position": 524288,
+        "bytes": 1048576,
+        "sha256": "969921bda77c235daca22b75f7875b3cbb71f62db5b37a87b67037d7def173a2"
+      },
+      {
+        "position": 1572864,
+        "bytes": 1048576,
+        "sha256": "9c63d26dfceb32e22c378ffc20b635b71c9eb647779983d3fb68afd2426df871"
+      },
+      {
+        "position": 2601291,
+        "bytes": 4194304,
+        "sha256": "c553f8f9b1fc145dd06a18b551a9a0fd5c348f89d4a2bc9d93222429237bfd4a"
+      },
+      {
+        "position": 6783211,
+        "bytes": 4194304,
+        "sha256": "7ec684994cdb35a882329f4c2780e87a4fe978000828d8fe93f78c2fb87a595c"
+      },
+      {
+        "position": 10953069,
+        "bytes": 4194304,
+        "sha256": "de7b66f75d5b103d3afafb6df1f5af9b64dfa05c0dc640932092f289a336b3ae"
+      },
+      {
+        "position": 15118650,
+        "bytes": 4194304,
+        "sha256": "26abc07801aecfa3e033b1d156c2fb567da9ce854d2c1a7489b015c1d747133a"
+      },
+      {
+        "position": 1253875749,
+        "bytes": 7412,
+        "sha256": "fc2e9baba6a3bea370d6481e97c0d43060d58531559e65c0d368ac5ae9b40d39"
+      }
+    ],
+    "muxWrites": [
+      {
+        "position": 0,
+        "bytes": 28,
+        "sha256": "c1e9f6829f6e8e490b28221ba03ea2acd13e604a430103a3984c31528726f50e"
+      },
+      {
+        "position": 28,
+        "bytes": 1216,
+        "sha256": "0bb69f727df0037c42d54784680e317944e275a76bb83e6d6824a9833534607b"
+      },
+      {
+        "position": 1244,
+        "bytes": 262144,
+        "sha256": "ab76e5b5e8d56c2f9f110939280920397a4dcbb680860058d7aa9df2b28569e3"
+      },
+      {
+        "position": 263388,
+        "bytes": 257814,
+        "sha256": "38ce5768ba06f9ad2927ad7d1a281652321b8488a60c140a56a7c7403b7c372e"
+      },
+      {
+        "position": 521202,
+        "bytes": 262144,
+        "sha256": "a7f1e7c69fdbcc5eb35856f3d4f0142feae54ac80ba862676a781c90c88c031d"
+      },
+      {
+        "position": 783346,
+        "bytes": 262144,
+        "sha256": "f32bf4f60832baae218baa4b79cf54148ef578f619094f717e42ea688654bea1"
+      },
+      {
+        "position": 1045490,
+        "bytes": 262144,
+        "sha256": "73ec64134a315eebd015eec04e372d125fb64f4a0bb426e50a8ac5828030cbfb"
+      },
+      {
+        "position": 1307634,
+        "bytes": 262144,
+        "sha256": "ebe8084880a272efea71af251d301f28791992a759d67824ad6c93b4d55e2597"
+      },
+      {
+        "position": 1569778,
+        "bytes": 262144,
+        "sha256": "370583d5874d7952ed19cb00e83cc6e4fa25e1f6678acba2fbf18745be4d6fbc"
+      },
+      {
+        "position": 1831922,
+        "bytes": 262144,
+        "sha256": "73e1f1b0793dc4cb3628e0ec8ae14ae3e800cf13304ef07b9962182a4784241b"
+      },
+      {
+        "position": 2094066,
+        "bytes": 262144,
+        "sha256": "7482f55d9505205039b297c8fe7c4927d73446e72dfe0d3fa13a259d052dc4db"
+      },
+      {
+        "position": 2356210,
+        "bytes": 262144,
+        "sha256": "0854cd7b44546a02ddf79b511ced028c2db35d4a1ee110cd7c1e16ac150a7b73"
+      },
+      {
+        "position": 2618354,
+        "bytes": 262144,
+        "sha256": "fd2726979d82aec7267e17e11906d18383c937459b82dcd1855fad0d1ef1edb3"
+      },
+      {
+        "position": 2880498,
+        "bytes": 262144,
+        "sha256": "159d07dbfec93028d928498924dbf465f6b5a9e20f421199b73d3f7bc99044fc"
+      },
+      {
+        "position": 3142642,
+        "bytes": 262144,
+        "sha256": "58e574743702c11bb3822d31a36fca66e23b9f8443cd7834ac0ee2787b0cfa3c"
+      },
+      {
+        "position": 3404786,
+        "bytes": 262144,
+        "sha256": "ae40e6cfd49b6d18c73bf22eddd726b58e3ecc7d55ec2a4b73f4ef74817eb56e"
+      },
+      {
+        "position": 3666930,
+        "bytes": 262144,
+        "sha256": "5c781d3c6e9c7d3a1055e049c1dc708060fe4af8714af46f13ee2aac804518e3"
+      },
+      {
+        "position": 3929074,
+        "bytes": 262144,
+        "sha256": "5c8e19e6eb654ad73014d3328fff8ce83e11014274cfebd2aad236e02ca0b16d"
+      },
+      {
+        "position": 4191218,
+        "bytes": 262144,
+        "sha256": "f0c706332948b6af731d56de440ed1e2b0ba92b45ce6348ec4efc62b0cd1dfd0"
+      },
+      {
+        "position": 4453362,
+        "bytes": 262144,
+        "sha256": "079a2ab2910b5bf7064526834ccffbc33b1e54976c93f22d65772ff18ad703e8"
+      },
+      {
+        "position": 4715506,
+        "bytes": 262144,
+        "sha256": "97c4bcfa8fb1c70b3afd0e17e481c2e11fff4dfcb2d1a588810ad235debc2961"
+      },
+      {
+        "position": 4977650,
+        "bytes": 262144,
+        "sha256": "1eeaee75d75ca125dc7a77ece0f6a849a55d3c7754afbf4b5bbc3a4b8ada4219"
+      },
+      {
+        "position": 5239794,
+        "bytes": 262144,
+        "sha256": "d9dea51bf133c7ab5208eeb0ace06ccf7c1117ef6bc86e0597b7c411f5d1bcee"
+      },
+      {
+        "position": 5501938,
+        "bytes": 210366,
+        "sha256": "46dc088ec786e2a0ec6c3931fa9650696ec7f2bc3d0369978f8b9ba3b4c99f90"
+      },
+      {
+        "position": 5712304,
+        "bytes": 262144,
+        "sha256": "8f58cb704b0f5d89f4f33234a3f06827ccc15902bc622e177a5099888bf74dab"
+      },
+      {
+        "position": 5974448,
+        "bytes": 262144,
+        "sha256": "bde2f264b6e1e27dd6f2a4424cbed10db1f0d976a01e3fac2df6bf7e17ecd75b"
+      },
+      {
+        "position": 6236592,
+        "bytes": 262144,
+        "sha256": "e212d7347c438c2f3b4edaf0a9441a7f2bbf1ee0e6d367384a1185aa364f3e54"
+      },
+      {
+        "position": 6498736,
+        "bytes": 262144,
+        "sha256": "b4b86f71afd5218b56238c3876097096783e7bfda8e8ddef39aeb9812156b636"
+      },
+      {
+        "position": 6760880,
+        "bytes": 262144,
+        "sha256": "6efcd6c370f6b29b10e4053ebbd5afcf919ebde1e2dce5a2e3eb180c106b0430"
+      },
+      {
+        "position": 7023024,
+        "bytes": 262144,
+        "sha256": "f4cf38a3b42d0b8dd2aa804b8b4e757cfafbbf3552d1107700e1dd937a320600"
+      },
+      {
+        "position": 7285168,
+        "bytes": 262144,
+        "sha256": "324f1e91cd863083ad5b551fb9a5cd546c6d0a80f9121742bd727842945852ef"
+      },
+      {
+        "position": 7547312,
+        "bytes": 262144,
+        "sha256": "a09bc0ceb2c6fe5b029db336a266503e1ed8bdca3a4074d9ef0403f90e8bcff0"
+      },
+      {
+        "position": 7809456,
+        "bytes": 262144,
+        "sha256": "e9ffccbccfbc71c8b14bbf4b151747347151024e0cc7226b1895d890dba125a8"
+      },
+      {
+        "position": 8071600,
+        "bytes": 262144,
+        "sha256": "412526501a7def12073779d67b6e08737f750503715f5e9e7b3454bf3fb98d4c"
+      },
+      {
+        "position": 8333744,
+        "bytes": 262144,
+        "sha256": "12726825693d19919bb2916f0ab68b76c37d3aaa6662ca262c9e1d01711485cd"
+      },
+      {
+        "position": 8595888,
+        "bytes": 262144,
+        "sha256": "20f588607b0e79192e6790d862d9c86fef4fceb2f1a09fa909e6107da72aefbb"
+      },
+      {
+        "position": 8858032,
+        "bytes": 262144,
+        "sha256": "594f2445a27a25515a01409dfeaa961055dbf8258ac884ea04f60a25d7530504"
+      },
+      {
+        "position": 9120176,
+        "bytes": 262144,
+        "sha256": "e7a4707f7fcf4c95279bd8ce7632e428482c337bec0e0863060de67a859bf956"
+      },
+      {
+        "position": 9382320,
+        "bytes": 262144,
+        "sha256": "762d18a29e2ee2ab089d52bd7279f227495a3bb69fed04c1b66c49682da855db"
+      },
+      {
+        "position": 9644464,
+        "bytes": 262144,
+        "sha256": "699dde6c2e10350452ab2ce8c2d003281c7fb25a78a08a4efcd3ef1c8fc4ba3d"
+      },
+      {
+        "position": 9906608,
+        "bytes": 262144,
+        "sha256": "3a63bc9c77d6a733ec29ba884c63b43696b9934e39d8f15075dd6cb20055f925"
+      },
+      {
+        "position": 10168752,
+        "bytes": 262144,
+        "sha256": "1d69270cd5082bc158def4ae6b614fe6bdfcd481c8fa79f9415ea981d0b5dbda"
+      },
+      {
+        "position": 10430896,
+        "bytes": 262144,
+        "sha256": "aab858ec3b2972c3e5175966997b6b9e55dea09902904fd0f6c3733a20872846"
+      },
+      {
+        "position": 10693040,
+        "bytes": 262144,
+        "sha256": "f200672526f8a19ec6f7e7e765415e552838a63d20089ef4acb9b84297c2b26d"
+      },
+      {
+        "position": 10955184,
+        "bytes": 262144,
+        "sha256": "b6b4d6ccb9712facb95434dbc89db873cd5dd54249126fd9ed99355595b16b60"
+      },
+      {
+        "position": 11217328,
+        "bytes": 115562,
+        "sha256": "dd2df8aa55b4aa00c201cfb62dff4f4a69a09a9466802c412d99bb3a6c2027c6"
+      }
+    ],
+    "source": {
+      "bytes": 19312954,
+      "sha256": "b2edc5db940e3f9675283e1b84e275de8541a4df79f7f7c2d28178a736cb0c94",
+      "matchedOverlapBytes": 85702,
+      "holesAfterPrefix": [
+        {
+          "start": 19312954,
+          "end": 1253875749
+        }
+      ],
+      "decode": {
+        "exit": 0,
+        "diagnosticLines": [
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 20 >= 20",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 44 >= 44",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 68 >= 68",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 92 >= 92",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 116 >= 116",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 140 >= 140",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 164 >= 164",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 188 >= 188",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 212 >= 212",
+          "[matroska,webm @ [process]] 0x00 at pos 535244 (0x82acc) invalid as first byte of an EBML number",
+          "[h264 @ [process]] error while decoding MB 68 5, bytestream -6",
+          "[vist#0:0/h264 @ [process]] corrupt decoded frame",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 260 >= 260",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 284 >= 284",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 308 >= 308",
+          "[matroska,webm @ [process]] 0x00 at pos 2970958 (0x2d554e) invalid as first byte of an EBML number",
+          "[h264 @ [process]] error while decoding MB 70 26, bytestream -6",
+          "[h264 @ [process]] co located POCs unavailable",
+          "[h264 @ [process]] co located POCs unavailable",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 332 >= 332",
+          "[vist#0:0/h264 @ [process]] corrupt decoded frame",
+          "[matroska,webm @ [process]] 0x00 at pos 5256811 (0x50366b) invalid as first byte of an EBML number",
+          "[h264 @ [process]] error while decoding MB 21 63, bytestream -6",
+          "[h264 @ [process]] mmco: unref short failure",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 404 >= 404",
+          "[vist#0:0/h264 @ [process]] corrupt decoded frame",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 428 >= 428",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 452 >= 452",
+          "[matroska,webm @ [process]] 0x00 at pos 7652142 (0x74c32e) invalid as first byte of an EBML number",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 476 >= 476",
+          "[h264 @ [process]] error while decoding MB 24 42, bytestream -11",
+          "[vist#0:0/h264 @ [process]] corrupt decoded frame",
+          "[matroska,webm @ [process]] 0x00 at pos 10004922 (0x98a9ba) invalid as first byte of an EBML number",
+          "[h264 @ [process]] error while decoding MB 42 33, bytestream -10",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 524 >= 524",
+          "[vist#0:0/h264 @ [process]] corrupt decoded frame",
+          "[matroska,webm @ [process]] 0x00 at pos 12373548 (0xbcce2c) invalid as first byte of an EBML number",
+          "[h264 @ [process]] error while decoding MB 18 18, bytestream -7",
+          "[h264 @ [process]] co located POCs unavailable",
+          "[h264 @ [process]] mmco: unref short failure",
+          "[h264 @ [process]] co located POCs unavailable",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 596 >= 596",
+          "[vist#0:0/h264 @ [process]] corrupt decoded frame",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 644 >= 644",
+          "[null @ [process]] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 668 >= 668",
+          "[matroska,webm @ [process]] 0x00 at pos 14682689 (0xe00a41) invalid as first byte of an EBML number",
+          "[h264 @ [process]] error while decoding MB 11 49, bytestream -5",
+          "[h264 @ [process]] reference picture missing during reorder",
+          "[h264 @ [process]] Missing reference picture, default is 65852",
+          "[h264 @ [process]] mmco: unref short failure",
+          "[h264 @ [process]] number of reference frames (0+5) exceeds max (4; probably corrupt input), discarding one",
+          "[vist#0:0/h264 @ [process]] corrupt decoded frame"
+        ]
+      },
+      "packets": 1958
+    },
+    "mux": {
+      "bytes": 11332890,
+      "sha256": "fab0ba6bba6c545fb91d29dd46b14fc082327ac9b583facbde126f8ed97f8bfc",
+      "matchedOverlapBytes": 0,
+      "holesAfterPrefix": [],
+      "decode": {
+        "exit": 0,
+        "diagnosticLines": [
+          "[h264 @ [process]] error while decoding MB 68 5, bytestream -6",
+          "[vist#0:0/h264 @ [process]] corrupt decoded frame",
+          "[h264 @ [process]] error while decoding MB 70 26, bytestream -6",
+          "[h264 @ [process]] co located POCs unavailable",
+          "[h264 @ [process]] co located POCs unavailable",
+          "[vist#0:0/h264 @ [process]] corrupt decoded frame",
+          "[h264 @ [process]] error while decoding MB 21 63, bytestream -6",
+          "[h264 @ [process]] mmco: unref short failure",
+          "[vist#0:0/h264 @ [process]] corrupt decoded frame",
+          "[h264 @ [process]] error while decoding MB 24 42, bytestream -11",
+          "[vist#0:0/h264 @ [process]] corrupt decoded frame",
+          "[h264 @ [process]] error while decoding MB 42 33, bytestream -10",
+          "[vist#0:0/h264 @ [process]] corrupt decoded frame",
+          "[h264 @ [process]] error while decoding MB 18 18, bytestream -7",
+          "[h264 @ [process]] co located POCs unavailable",
+          "[h264 @ [process]] mmco: unref short failure",
+          "[h264 @ [process]] co located POCs unavailable",
+          "[vist#0:0/h264 @ [process]] corrupt decoded frame",
+          "[h264 @ [process]] error while decoding MB 11 49, bytestream -5",
+          "[h264 @ [process]] reference picture missing during reorder",
+          "[h264 @ [process]] Missing reference picture, default is 65852",
+          "[h264 @ [process]] mmco: unref short failure",
+          "[h264 @ [process]] number of reference frames (0+5) exceeds max (4; probably corrupt input), discarding one",
+          "[vist#0:0/h264 @ [process]] corrupt decoded frame"
+        ]
+      },
+      "packets": 1716
+    },
+    "video": {
+      "sourcePackets": 645,
+      "muxPackets": 579,
+      "muxPayloadsPresentInSource": 579,
+      "sourceHead": [
+        {
+          "stream_index": 0,
+          "pts_time": "0.021000",
+          "duration_time": "0.041000",
+          "size": "1210",
+          "flags": "K__",
+          "data_hash": "SHA256:0f88db72465e22afd2538b53fd8345d14b89fa1ffb2a50a206b479286a499cc1"
+        },
+        {
+          "stream_index": 0,
+          "pts_time": "0.188000",
+          "duration_time": "0.041000",
+          "size": "72",
+          "flags": "___",
+          "data_hash": "SHA256:b0daadf7ce1586df007f2a8f5d557c8477d7eaea8dac49884adb275441e0eec4"
+        },
+        {
+          "stream_index": 0,
+          "pts_time": "0.105000",
+          "dts_time": "0.021000",
+          "duration_time": "0.041000",
+          "size": "69",
+          "flags": "___",
+          "data_hash": "SHA256:5ade9be38bfeb416dbb96efb7581442addfeed290b27635a01f896df80a22fb1"
+        }
+      ],
+      "muxHead": [
+        {
+          "stream_index": 0,
+          "pts_time": "0.656000",
+          "dts_time": "0.000000",
+          "duration_time": "0.041688",
+          "size": "1210",
+          "flags": "K__",
+          "data_hash": "SHA256:0f88db72465e22afd2538b53fd8345d14b89fa1ffb2a50a206b479286a499cc1"
+        },
+        {
+          "stream_index": 0,
+          "pts_time": "0.823000",
+          "dts_time": "0.041000",
+          "duration_time": "0.041688",
+          "size": "72",
+          "flags": "___",
+          "data_hash": "SHA256:b0daadf7ce1586df007f2a8f5d557c8477d7eaea8dac49884adb275441e0eec4"
+        },
+        {
+          "stream_index": 0,
+          "pts_time": "0.740000",
+          "dts_time": "0.082000",
+          "duration_time": "0.041688",
+          "size": "69",
+          "flags": "___",
+          "data_hash": "SHA256:5ade9be38bfeb416dbb96efb7581442addfeed290b27635a01f896df80a22fb1"
+        }
+      ]
+    },
+    "audio": {
+      "sourcePackets": 1313,
+      "muxPackets": 1137,
+      "muxPayloadsPresentInSource": 1137,
+      "sourceHead": [
+        {
+          "stream_index": 1,
+          "pts_time": "0.000000",
+          "dts_time": "0.000000",
+          "duration_time": "0.021000",
+          "size": "57",
+          "flags": "K__",
+          "data_hash": "SHA256:6c2a2160fb186355f01d8ef0a6fab89794fd8a0ba4b86cab37c96a74e0a977ef"
+        },
+        {
+          "stream_index": 1,
+          "pts_time": "0.021000",
+          "dts_time": "0.021000",
+          "duration_time": "0.021000",
+          "size": "58",
+          "flags": "K__",
+          "data_hash": "SHA256:2ec69f60a4ba82783bcf603e34f4e11ee9444badcda1c7c79e0ed2f871a7cafb"
+        },
+        {
+          "stream_index": 1,
+          "pts_time": "0.042000",
+          "dts_time": "0.042000",
+          "duration_time": "0.021000",
+          "size": "59",
+          "flags": "K__",
+          "data_hash": "SHA256:cefea16034254a5c25755fa678a962b971a878e5cf7e908572eecf4c85897361"
+        }
+      ],
+      "muxHead": [
+        {
+          "stream_index": 1,
+          "pts_time": "0.000000",
+          "dts_time": "0.000000",
+          "size": "58",
+          "flags": "K__",
+          "data_hash": "SHA256:2ec69f60a4ba82783bcf603e34f4e11ee9444badcda1c7c79e0ed2f871a7cafb"
+        },
+        {
+          "stream_index": 1,
+          "pts_time": "0.677000",
+          "dts_time": "0.677000",
+          "duration_time": "0.021333",
+          "size": "59",
+          "flags": "K__",
+          "data_hash": "SHA256:cefea16034254a5c25755fa678a962b971a878e5cf7e908572eecf4c85897361"
+        },
+        {
+          "stream_index": 1,
+          "pts_time": "0.698000",
+          "dts_time": "0.698000",
+          "duration_time": "0.021333",
+          "size": "63",
+          "flags": "K__",
+          "data_hash": "SHA256:240d50a5a42e5f38bf84eb2d09ecea5afa2dbe95e8741d725740b3ec7f89327b"
+        }
+      ]
+    }
+  },
+  "health": {
+    "atUtc": "2026-10-09T20:52:03.577710+00:00",
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "ok": true,
+        "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815",
+        "activeSessions": 0,
+        "rawPumpCount": 0
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "ok": true,
+        "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815",
+        "activeSessions": 0,
+        "rawPumpCount": 0
+      }
+    ],
+    "sessions": [
+      {
+        "case": "4-engine-instrumented-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:35:24.366995+00:00",
+            "expiresAt": "2026-10-09T20:36:05.196+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      },
+      {
+        "case": "0-engine-serial-flush-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:43:42.388962+00:00",
+            "expiresAt": "2026-10-09T20:45:17.898+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      },
+      {
+        "case": "4-engine-candidate-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:40:25.022227+00:00",
+            "expiresAt": "2026-10-09T20:41:10.191+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      },
+      {
+        "case": "0-engine-candidate-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:38:59.350544+00:00",
+            "expiresAt": "2026-10-09T20:39:52.013+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      },
+      {
+        "case": "0-engine-decode-capture-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:49:27.679735+00:00",
+            "expiresAt": "2026-10-09T20:50:48.524+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      },
+      {
+        "case": "0-engine-instrumented-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:36:16.967707+00:00",
+            "expiresAt": "2026-10-09T20:36:48.194+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      }
+    ],
+    "ownerLiveClaims": [
+      {
+        "count": 0
+      }
+    ]
+  },
+  "limits": [
+    "No global Gateway replacement",
+    "Source corruption found before media remux, upstream delivery versus relay not distinguished",
+    "Conclave still exceeds 15 seconds",
+    "Abduct starts but stalls and fails decode",
+    "No human listening acceptance"
+  ]
+}
