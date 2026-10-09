@@ -74,6 +74,7 @@ collect_captures() {
   record_diagnostic emulator-process pgrep -af 'qemu-system|emulator.*-avd'
   record_diagnostic host-memory free -m
   record_diagnostic host-process-memory ps -eo pid,comm,rss,vsz --sort=-rss
+  record_diagnostic guest-memory adb shell cat /proc/meminfo
   record_diagnostic capture-pull adb pull "/sdcard/Android/data/tv.norva.${platform}/files/." app/build/outputs/androidTest-results/connected/captures/
 }
 # UTP can remove the test application and its external files at teardown.
