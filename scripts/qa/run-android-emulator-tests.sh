@@ -91,6 +91,13 @@ finish_captures() {
   collect_captures
   record_diagnostic process-exit-info adb shell dumpsys activity exit-info "tv.norva.${platform}"
   record_diagnostic host-kernel sudo dmesg --ctime
+  # Preserve the emulator's own Crashpad evidence; adb logs cannot explain a
+  # host QEMU exit. This isolated fixture has no accounts or provider traffic.
+  local crash_dir="/tmp/android-$(id -un)"
+  if [[ -d "$crash_dir" ]]; then
+    find "$crash_dir" -maxdepth 3 -type f -printf '%P %s bytes\n' > "$diagnostic_dir/emulator-crash-files.txt"
+    timeout 15s tar -czf "$diagnostic_dir/emulator-crashdata.tgz" -C "$crash_dir" . || true
+  fi
   local logcat_stopped_by_harness=0 logcat_status=0
   if kill -0 "$logcat_pid" 2>/dev/null; then
     logcat_stopped_by_harness=1

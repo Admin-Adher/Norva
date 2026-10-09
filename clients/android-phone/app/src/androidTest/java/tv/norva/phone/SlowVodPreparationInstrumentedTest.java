@@ -18,7 +18,9 @@ public class SlowVodPreparationInstrumentedTest {
  }
  @Test public void portraitRecovery() throws Exception { verify(360,800); }
  @Test public void landscapeRecovery() throws Exception { verify(844,390); }
- private void verify(int width,int height) throws Exception {
+ @Test public void steadyPreparation() throws Exception { verify(360,800,true); }
+ private void verify(int width,int height) throws Exception { verify(width,height,false); }
+ private void verify(int width,int height,boolean steady) throws Exception {
   android.app.Instrumentation i=InstrumentationRegistry.getInstrumentation();
   android.content.Context context=i.getTargetContext();
   android.app.Activity activity=i.startActivitySync(new android.content.Intent(context,RecoveryWebViewFixtureActivity.class)
@@ -50,6 +52,19 @@ public class SlowVodPreparationInstrumentedTest {
   });
   try{
    assertTrue("Fixture loaded",loaded.await(45,TimeUnit.SECONDS));
+   if(steady){
+    evaluate(i,holder.get(),"document.getElementById('qa-controls').style.display='none';window.qaResult='pending';(async()=>{try{await NorvaI18n.setPreference('fr');await SlowPreparationQA.mount({advance:false});window.qaResult='mounted';}catch(e){window.qaResult=String(e);}})();");
+    Thread.sleep(2000);
+    assertEquals("Steady preparation mounted","\"mounted\"",evaluate(i,holder.get(),"window.qaResult"));
+    assertEquals("No early notice","true",evaluate(i,holder.get(),"document.getElementById('watch-slow-preparation').classList.contains('hidden')"));
+    Thread.sleep(46000);
+    assertEquals("Real 45-second notice","\"ok\"",evaluate(i,holder.get(),"SlowPreparationQA.layout();'ok'"));
+    evaluate(i,holder.get(),"document.getElementById('watch-slow-continue').click()");
+    assertEquals("Continue preserves preparation without closing","true",evaluate(i,holder.get(),"document.getElementById('watch-slow-preparation').classList.contains('hidden')&&document.getElementById('watch-loading').classList.contains('show')&&SlowPreparationQA.events().length===0"));
+    evaluate(i,holder.get(),"SlowPreparationQA.ready()");
+    android.util.Log.i("SlowVodQA","steady 45-second preparation passed");
+    return;
+   }
    for(int zoom:new int[]{100,130}){
     i.runOnMainSync(()->holder.get().getSettings().setTextZoom(zoom));
     for(String locale:new String[]{"fr","ar"}){
