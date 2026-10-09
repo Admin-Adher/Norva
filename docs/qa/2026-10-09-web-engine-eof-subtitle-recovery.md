@@ -26,6 +26,7 @@ Référence primaire : [Matroska, CueTrackPositions et CueDuration](https://www.
 - MKV synthétique H.264/AC-3/SRT de 180 secondes : départ à zéro en 0,567 seconde ; saut hors réserve depuis 12,087 vers 90 secondes, reprise en 0,633 seconde.
 - La réplique 89–95 est réellement active dans la piste texte du navigateur entre 90,277 et 94,275 secondes. La réplique 120–125 apparaît ensuite, sans doublon. Plus de 71 secondes parcourues après saut ; aucun intervalle d'image supérieur à 250 ms hors saut demandé.
 - Reprise indépendante à 170 secondes : première image à 0,752 seconde ; fin naturelle à 180,009375 secondes, contre 176,016 dans le témoin PR750. Aucun gel ou erreur média mesuré sur cette fin.
+- Contrôle supplémentaire H.264/AAC/SRT avec deux pistes audio : reprise à froid à 23 s en 0,392 s, sous-titre 22,021–25,021 conservé, fin naturelle 60,031 s, aucun gel >250 ms ou erreur média.
 - Audio synthétique transcodé vers AAC-LC par le moteur existant. Navigateur muet pendant ces essais : aucune validation à l'écoute revendiquée.
 
 Les fichiers de preuve et le banc local sont sous `.codex-artifacts/web-engine-recovery-20261009/`. Les mesures sûres sont dans le [JSON associé](2026-10-09-web-engine-eof-subtitle-recovery.json).
@@ -54,3 +55,7 @@ Une variante `flush_packets=1` a été comparée uniquement sur un fichier synth
 À 22:12:39 Paris : les deux sessions sont expirées normalement, zéro claim actif du propriétaire testé, zéro session et zéro raw pump sur chacun des deux Gateways. Les deux sont sains, image `e7520bec…` inchangée. Le contrôleur et le tunnel temporaires sont arrêtés. Aucune garde, limite, quarantaine ou tâche de maintenance modifiée.
 
 Les corrections de cette PR concernent le moteur web. Le lecteur natif Windows publié et la lecture native Android ne sont pas remplacés. Le déploiement web et son contrôle d'empreinte sont à consigner après CI.
+
+## Intégration
+
+PR752. Le premier contrôle CI a arrêté le parcours sur le manifeste i18n généré devenu obsolète, après 40 assertions SQL réussies. Manifeste régénéré par la commande habituelle et référence HTML calculée sur les octets Git LF ; le code moteur reste identique. Aucun déploiement issu du contrôle échoué.

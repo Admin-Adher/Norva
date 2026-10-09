@@ -1567,5 +1567,104 @@
     "Synthetic browser audio was muted; no listening acceptance claimed.",
     "Native Android VOD uses its native player; this change does not modify its UI or playback.",
     "The rejected byte-seek experiment recovered the cue but resumed demuxing too early; the final code uses backward timestamp seek instead."
-  ]
+  ],
+  "additionalAACCopyCheck": {
+    "firstFrameMs": 391.99999990463255,
+    "events": [
+      {
+        "event": "seeking",
+        "ms": 121,
+        "time": 23
+      },
+      {
+        "event": "waiting",
+        "ms": 157,
+        "time": 23
+      },
+      {
+        "event": "seeked",
+        "ms": 392,
+        "time": 23.00038
+      },
+      {
+        "event": "playing",
+        "ms": 392,
+        "time": 23.00041
+      },
+      {
+        "event": "ended",
+        "ms": 37473,
+        "time": 60.031
+      },
+      {
+        "event": "operator-stop",
+        "ms": 69207,
+        "time": 60.031
+      }
+    ],
+    "errors": [],
+    "gaps": [],
+    "finalTime": 60.031,
+    "finalDuration": 60.031,
+    "subtitles": [
+      {
+        "index": 3,
+        "codec": "subrip",
+        "text": true,
+        "cues": [
+          {
+            "start": 22.021,
+            "end": 25.021,
+            "text": "After seek"
+          }
+        ]
+      }
+    ],
+    "activeSubtitleSamples": [
+      {
+        "ms": 578,
+        "time": 23.145972,
+        "paused": false,
+        "ready": 4,
+        "hidden": false,
+        "activeSubtitles": [
+          {
+            "start": 22.021,
+            "end": 25.021,
+            "text": "After seek"
+          }
+        ],
+        "buffer": [
+          [
+            22.021,
+            40.021
+          ]
+        ]
+      },
+      {
+        "ms": 1578,
+        "time": 24.144555,
+        "paused": false,
+        "ready": 4,
+        "hidden": false,
+        "activeSubtitles": [
+          {
+            "start": 22.021,
+            "end": 25.021,
+            "text": "After seek"
+          }
+        ],
+        "buffer": [
+          [
+            22.021,
+            60.031
+          ]
+        ]
+      }
+    ]
+  },
+  "initialCIFailure": {
+    "run": 37985687127,
+    "cause": "Stale generated i18n/asset-manifest.json; corrected by normal i18n build. SQL tests passed 40/40 before this failure."
+  }
 }
