@@ -16,7 +16,7 @@ test('bundled server resolves account return /app to the catalogue, preserving t
   if(name==='../package.json')return require('../package.json');
   return require(name);
  };
- vm.runInNewContext(fs.readFileSync(path.join(directory,'index.js'),'utf8'),{require:resolve,__dirname:directory,process:{env:{},on(){}},console:{log(){},warn(){},error(){}});
+ vm.runInNewContext(fs.readFileSync(path.join(directory,'index.js'),'utf8'),{require:resolve,__dirname:directory,process:{env:{},on(){}},console:{log(){},warn(){},error(){}}});
  const server=listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
  try {
   const origin=`http://127.0.0.1:${server.address().port}`;
