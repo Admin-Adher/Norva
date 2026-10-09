@@ -135,7 +135,7 @@ const { privateResumeProfile, canonicalResumeProfile } = require('./private-resu
 const { SOURCE_CLOCK, retainedSubtitleClock, retainedSubtitleClockArgs } = require('./retained-subtitle-clock');
 const { committedSubtitleOutputArgs, readCommittedSubtitle } = require('./committed-subtitle-delivery');
 const { captureSamples, sampleProof, samplesMatch, SAMPLE_BYTES, captureInputWindows, RECENT_INPUT_MAX_BYTES,
-    RECENT_HEADER_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES } = require('./recent-resume-samples');
+    RECENT_HEADER_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES, LinearResumeSamples } = require('./recent-resume-samples');
 const { validateRecentResume, recentResumeTargetParts, compareRecentResumeTargetParts } = require('./recent-resume-validation');
 const { PrivateResumeHlsCache, parseResumeMediaPlaylist } = require('./private-resume-hls-cache');
 const { captureSubtitleWindow, parseSubtitlePlaylist } = require('./private-resume-subtitles');
@@ -17131,6 +17131,8 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
     session.vodInputProgress = progress;
     let completed = false;
     let playbackSpool = session.weakPlaybackSpool || null;
+    let linearSamples = null;
+    let openedOnce = false;
     try {
     while (unknownLengthFullBody ? !unknownLengthFullBodyEof : offset < fileSizeBytes) {
         if (signal.aborted) throw abortedVodInputPumpError();
@@ -17158,6 +17160,19 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
             progress.phase('local');
             attempt = opened.attempt;
             range = opened.range;
+            // The linear producer bypasses the seek broker, which normally
+            // collects recent samples. Observe this same response passively;
+            // never reopen it to manufacture completed input-cache windows.
+            if (!openedOnce && range.start === 0 && range.total === fileSizeBytes
+                && range.end === fileSizeBytes - 1 && !unknownLengthFullBody
+                && canUsePrivateResumeCache(session.ownerKey) && canUseRecentResumeSamples(session.ownerKey)) {
+                linearSamples = new LinearResumeSamples(fileSizeBytes, session.vodInputEffectiveUrlSha256);
+                const targetUrl = String(attempt.response?.url || session.sourceUrl || '');
+                session.linearResumeEvidence = { samples: linearSamples, targetUrl,
+                    routeKey: recentDeliveryRouteKey(session) };
+                session.vodInputTargetParts = recentResumeTargetParts(targetUrl);
+            } else linearSamples?.invalidate();
+            openedOnce = true;
             while (offset <= range.end) {
                 const preloaded = Array.isArray(attempt.preloadedChunks) && attempt.preloadedChunks.length;
                 progress.phase(preloaded ? 'local' : 'provider-read');
@@ -17170,7 +17185,16 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                     }
                     : await readRawPrefixChunk(attempt.reader, signal, VOD_INPUT_IDLE_TIMEOUT_MS);
                 progress.phase('local');
-                if (next.aborted || signal.aborted) throw abortedVodInputPumpError();
+                // A retained preopen belongs to startup's controller. Normal
+                // teardown aborts it just before the pump's own controller.
+                // Recognize that explicit cancellation without accepting a real
+                // read failure (even one racing the viewer's close).
+                const controlledAbort = signal.aborted || (session.status === 'stopping'
+                    && session.startupAbortController?.signal?.aborted === true);
+                if (next.timedOut || (next.error && (!controlledAbort || next.error.name !== 'AbortError'))) {
+                    linearSamples?.invalidate();
+                }
+                if (next.aborted || controlledAbort) throw abortedVodInputPumpError();
                 if (next.timedOut) {
                     try { attempt.controller.abort(); } catch (_) {}
                     throw classifyVodInputFetchError(new Error('Finite MKV provider read timed out'), true);
@@ -17221,6 +17245,7 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                     await writeVodInputChunk(writable, prefixBuffer, signal);
                     progress.phase('local');
                     contentDigest.update(prefixBuffer);
+                    linearSamples?.append(forwardedBytes, prefixBuffer);
                     writeMkvH264FullFileAnalyzerChunk(fullFileAnalyzer, prefixBuffer);
                     forwardedBytes += prefixBuffer.length;
                     progress.add('forwardedBytes', prefixBuffer.length);
@@ -17233,6 +17258,7 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                     await writeVodInputChunk(writable, chunk, signal);
                     progress.phase('local');
                     contentDigest.update(chunk);
+                    linearSamples?.append(forwardedBytes, chunk);
                     writeMkvH264FullFileAnalyzerChunk(fullFileAnalyzer, chunk);
                     offset += chunk.length;
                     forwardedBytes += chunk.length;
@@ -17277,6 +17303,7 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
                 progress.phase('local');
             }
         } catch (error) {
+            if (error?.code !== 'VOD_INPUT_ABORTED') linearSamples?.invalidate();
             failure = error;
         } finally {
             progress.phase('provider-close');
@@ -17284,6 +17311,7 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
             progress.phase('local');
         }
 
+        if (failure && failure.code !== 'VOD_INPUT_ABORTED') linearSamples?.invalidate();
         if (signal.aborted || failure?.code === 'VOD_INPUT_ABORTED') throw abortedVodInputPumpError();
         // Exact-EOF validation happens after the final expected byte. Never let
         // the size-complete branch swallow an overrun, timeout, or read error.
@@ -17294,6 +17322,10 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
         }
         if (fileSizeBytes && offset >= fileSizeBytes) break;
         if (failure && failure.retryable !== true) throw failure;
+
+        // Any second response (including a short successful range) loses this
+        // uninterrupted-prefix evidence. Playback's retry rules stay unchanged.
+        linearSamples?.invalidate();
 
         // Only one uninterrupted response can attest a weak object. Playback
         // retries retain their existing guards but lose cache authority.
@@ -17406,6 +17438,9 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
         contentSha256,
         fullFilePacketProof: Boolean(session.mkvH264FastStartProofFinalized),
     };
+    } catch (error) {
+        if (error?.code !== 'VOD_INPUT_ABORTED') linearSamples?.invalidate();
+        throw error;
     } finally {
         progress.phase('cleanup');
         if (playbackSpool) {
@@ -17641,6 +17676,32 @@ async function stopBoundedMkvInputPump(session) {
     if (!pump) return;
     try { pump.controller.abort(); } catch (_) {}
     if (pump.promise && typeof pump.promise.catch === 'function') await pump.promise.catch(() => {});
+    const evidence = session.linearResumeEvidence;
+    session.linearResumeEvidence = null;
+    if (evidence) {
+        const observedBytes = evidence.samples.offset;
+        const eligible = evidence.samples.valid;
+        const samples = evidence.samples.finish({
+            graceful: session.status === 'stopping' && session.privateResumeStopPosition > 0
+                && !session.lastError && !session.inputFailure
+                && (!pump.error || pump.error.code === 'VOD_INPUT_ABORTED')
+                && canUsePrivateResumeCache(session.ownerKey) && canUseRecentResumeSamples(session.ownerKey)
+                && evidence.routeKey === recentDeliveryRouteKey(session),
+            fileSizeBytes: fileSizeBytesForSession(session), target: session.vodInputEffectiveUrlSha256,
+        });
+        console.info(JSON.stringify({ event: 'private_resume_linear_samples', observedBytes,
+            uninterrupted: eligible, samples: samples?.length || 0 }));
+        if (samples) {
+            session.privateResumeSamples = samples;
+            session.privateResumeDeliveryTarget = retainRecentDeliveryTarget({
+                ownerKey: session.ownerKey, sourceUrl: session.sourceUrl,
+                userAgent: session.userAgent || FFMPEG_USER_AGENT,
+                fileSizeBytes: fileSizeBytesForSession(session), routeKey: evidence.routeKey,
+                targetUrl: evidence.targetUrl, targetHash: session.vodInputEffectiveUrlSha256,
+                targetIdentity: session.vodInputEffectiveUrlIdentitySha256,
+            });
+        }
+    }
     if (session.inputPump === pump) session.inputPump = null;
 }
 

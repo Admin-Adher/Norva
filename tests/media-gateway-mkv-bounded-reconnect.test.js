@@ -81,6 +81,7 @@ function pumpHarness(overrides = {}) {
         '\nasync function probeFromHeaderBytes(',
     );
     const globals = {
+        canUsePrivateResumeCache: () => false,
         ...require('../services/media-gateway/src/public-vod-route'),
         useProviderHttpForward,
         providerHttpForwardAccounts: new Set(),
@@ -3078,6 +3079,7 @@ function metadataHarness(overrides = {}) {
         return null;
     };
     const globals = {
+        canUsePrivateResumeCache: () => false,
         Buffer,
         path,
         Date,
@@ -4252,4 +4254,64 @@ test('production finite MKV resume uses continuous indexed windows and keeps lin
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?identityPreflightRange:[\s\S]+?'bounded-header-prefix'/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?identityPreflightMaxBytes:[\s\S]+?INBAND_HEADER_BYTES/);
     assert.match(source, /finiteMkvSeekBroker:\s*\{[\s\S]+?resumeHeaderPrefetch:[\s\S]+?BOUNDED_MKV_HEADER_PARSE/);
+});
+
+
+for (const failure of ['premature-eof', 'transport-error']) test(`linear sampling discards evidence after ${failure}, even when playback recovers`, async () => {
+    const { LinearResumeSamples } = require('../services/media-gateway/src/recent-resume-samples');
+    const { recentResumeTargetParts } = require('../services/media-gateway/src/recent-resume-validation');
+    const cut = 2 * 1024 * 1024, fixture = mkvFixture(cut + 65536), tracker = makeTracker();
+    let calls = 0;
+    const h = pumpHarness({ LinearResumeSamples, recentResumeTargetParts,
+        canUsePrivateResumeCache: () => true, canUseRecentResumeSamples: () => true,
+        fetch: async () => {
+            const at = calls++ ? cut : 0;
+            return trackedResponse(tracker, { chunks: [fixture.subarray(at, at === 0 ? cut : fixture.length)],
+                ...(at === 0 && failure === 'transport-error' ? { readErrorAt: 1 } : {}),
+                headers: { 'Content-Range': `bytes ${at}-${fixture.length - 1}/${fixture.length}`,
+                    'Content-Length': String(fixture.length - at), ETag: '"same"' } });
+        },
+    });
+    const session = mkvSession(fixture.length);
+    session.vodInputEffectiveUrlSha256 = crypto.createHash('sha256').update(session.sourceUrl).digest('hex');
+    const sink = new CapturingWritable();
+    const result = await h.runBoundedMkvInputPump(session, sink, new AbortController().signal, null);
+    assert.equal(result.reconnects, 1);
+    assert.deepEqual(sink.bytes(), fixture);
+    assert.equal(tracker.maxActive, 1); assert.equal(tracker.active, 0);
+    assert.equal(session.linearResumeEvidence.samples.finish({ graceful: true,
+        fileSizeBytes: fixture.length, target: session.vodInputEffectiveUrlSha256 }), null);
+});
+
+
+for (const errorName of ['AbortError', 'TypeError']) test(`linear preopen close distinguishes viewer cancellation from ${errorName}`, async () => {
+    const { LinearResumeSamples } = require('../services/media-gateway/src/recent-resume-samples');
+    const { recentResumeTargetParts } = require('../services/media-gateway/src/recent-resume-validation');
+    const cut = 2 * 1024 * 1024, fixture = mkvFixture(cut + 65536), tracker = makeTracker();
+    const session = mkvSession(2 * fixture.length); session.startupAbortController = new AbortController();
+    session.vodInputEffectiveUrlSha256 = crypto.createHash('sha256').update(session.sourceUrl).digest('hex');
+    const h = pumpHarness({ LinearResumeSamples, recentResumeTargetParts,
+        canUsePrivateResumeCache: () => true, canUseRecentResumeSamples: () => true,
+        retainRecentDeliveryTarget: () => ({}),
+        fetch: async () => {
+            const response = trackedResponse(tracker, { chunks: [fixture], headers: {
+                'Content-Range': `bytes 0-${session.fileSizeBytes - 1}/${session.fileSizeBytes}`,
+                'Content-Length': String(session.fileSizeBytes) } });
+            const reader = response.body.getReader(), read = reader.read.bind(reader);
+            reader.read = async () => {
+                const next = await read();
+                if (!next.done) return next;
+                session.status = 'stopping'; session.privateResumeStopPosition = 4;
+                session.startupAbortController.abort();
+                throw Object.assign(new Error('synthetic close'), { name: errorName });
+            };
+            return response;
+        },
+    });
+    const pump = h.startBoundedMkvInputPump(session, new CapturingWritable());
+    await assert.rejects(pump.promise, { code: 'VOD_INPUT_ABORTED' });
+    await h.stopBoundedMkvInputPump(session);
+    assert.equal(session.privateResumeSamples?.length || 0, errorName === 'AbortError' ? 4 : 0);
+    assert.equal(session.privateResumeInputWindows, undefined);
+    assert.equal(session.linearResumeEvidence, null); assert.equal(tracker.active, 0);
 });
