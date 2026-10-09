@@ -1,0 +1,219 @@
+{
+  "date": "2026-10-09",
+  "scope": "slow-preparation explicit recovery, no new optimization service",
+  "uiPr": 741,
+  "uiMerge": "b83889f15a27d45f6855588bf5c48d37961c2f88",
+  "anchorPr": 742,
+  "anchorCode": "19fde8ab8c3582caaa377e1cdafb562947fd106e",
+  "anchorMerge": "f29d8f42b23c8b465e4e9161943b92de5353542f",
+  "tests": {
+    "local": 21,
+    "cloud": {
+      "total": 6221,
+      "passed": 6190,
+      "skipped": 31,
+      "failed": 0
+    },
+    "androidUiMatrix": 37947814464,
+    "androidConfigurationsPassed": 6,
+    "tvScope": "consent D-pad, not decoder"
+  },
+  "before": {
+    "atUtc": "2026-10-09T15:22:37.470197Z",
+    "visibleExactRows": 1,
+    "titleVariantCount": 27,
+    "anchorRankBeforeSourceHealth": 27,
+    "apiBothEdgeStatus": 200,
+    "apiBothEdgeItems": 0
+  },
+  "canary": {
+    "at": "2026-10-09T15:26:36.978923+00:00",
+    "providerMediaRequests": 0,
+    "replicas": [
+      {
+        "name": "norva-recovery-anchor-edge-canary-20261009",
+        "status": 200,
+        "ms": 425,
+        "titleCount": 1,
+        "variantCount": 10,
+        "exactPresent": true,
+        "errorCode": null
+      }
+    ],
+    "visible": [
+      {
+        "rows": 1,
+        "titles": 1,
+        "generations": 1
+      }
+    ],
+    "titleVariants": [
+      {
+        "rows": 27,
+        "sources": 3
+      }
+    ],
+    "anchorRank": [
+      {
+        "rankBeforeSourceHealth": 27
+      }
+    ],
+    "hydration": [
+      {
+        "items": 1
+      }
+    ]
+  },
+  "deployment": {
+    "revision": "19fde8ab8c3582caaa377e1cdafb562947fd106e",
+    "startedAt": "2026-10-09T15:27:58.130683+00:00",
+    "leasesForced": false,
+    "changedFiles": 1,
+    "preservedFiles": 193,
+    "pausedAt": "2026-10-09T15:27:58.200502+00:00",
+    "replicas": [
+      {
+        "name": "norva-edge-functions",
+        "healthy": true,
+        "catalogSha256": "03f697a9b40c92d9dc4d44790b2d0605b47c526fe9c5af99f25f8a6a30805cba"
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "healthy": true,
+        "catalogSha256": "03f697a9b40c92d9dc4d44790b2d0605b47c526fe9c5af99f25f8a6a30805cba"
+      }
+    ],
+    "gatewaysUnchanged": true,
+    "completedAt": "2026-10-09T15:28:21.876482+00:00",
+    "restoredAt": "2026-10-09T15:28:22.157010+00:00",
+    "admissionsRestored": true,
+    "workerRestored": true,
+    "dispatcherPreserved": true
+  },
+  "after": {
+    "at": "2026-10-09T15:28:29.387847+00:00",
+    "providerMediaRequests": 0,
+    "replicas": [
+      {
+        "name": "norva-edge-functions",
+        "status": 200,
+        "ms": 375,
+        "titleCount": 1,
+        "variantCount": 10,
+        "exactPresent": true,
+        "errorCode": null
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "status": 200,
+        "ms": 385,
+        "titleCount": 1,
+        "variantCount": 10,
+        "exactPresent": true,
+        "errorCode": null
+      }
+    ],
+    "visible": [
+      {
+        "rows": 1,
+        "titles": 1,
+        "generations": 1
+      }
+    ],
+    "titleVariants": [
+      {
+        "rows": 27,
+        "sources": 3
+      }
+    ],
+    "anchorRank": [
+      {
+        "rankBeforeSourceHealth": 27
+      }
+    ],
+    "hydration": [
+      {
+        "items": 1
+      }
+    ]
+  },
+  "health": {
+    "atUtc": "2026-10-09T15:29:46.971575+00:00",
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "healthy": true,
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+        "startedAt": "2026-10-09T11:44:57.29458119Z",
+        "onlyStartupObservationEnvAdded": true,
+        "sharedVideoEncoderCapacity": {
+          "limit": 8,
+          "occupied": 0
+        }
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "healthy": true,
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+        "startedAt": "2026-10-09T11:44:59.842646692Z",
+        "onlyStartupObservationEnvAdded": true,
+        "sharedVideoEncoderCapacity": {
+          "limit": 8,
+          "occupied": 0
+        }
+      }
+    ],
+    "pilotOwnerCount": 1,
+    "audibleAcceptance": false,
+    "ownerLiveClaims": 0,
+    "admissions": {
+      "paused": false,
+      "cron": true
+    },
+    "dispatcherRunning": true,
+    "workerRunning": true,
+    "canaryAbsent": true,
+    "diagnosticTemporaryFilesRemaining": 0
+  },
+  "publicBrowser": {
+    "mediaAttempts": 2,
+    "initialNoticeObservedSecondsFromClick": 51.416,
+    "initialPreparationFailed": true,
+    "secondOtherVersionsInitiallyFailed": true,
+    "afterPatchSameRecoveryOpened": true,
+    "displayedVersions": 10,
+    "explicitStartOrResumeDisplayed": true,
+    "alternativeLaunched": false,
+    "returnedToMovies": true,
+    "viewportOverrideReset": true
+  },
+  "cloudflare": {
+    "initialFailedRun": 37949156645,
+    "failedAttempts": [
+      1,
+      2
+    ],
+    "failure": "provider-access-config byte mismatch; cause unassigned",
+    "successfulRun": 37951915275,
+    "publishedAtUtc": "2026-10-09T15:29:54.8937519Z",
+    "verifiedAtUtc": "2026-10-09T15:29:56.6867657Z",
+    "verifiedAssets": 59
+  },
+  "screenshots": {
+    "normal-notice-production.png": "c29b7017c8737dab4ea731e984d8b1e184faaf0dfa1132e1da218a171ade8dce",
+    "normal-choices-production.png": "d5d17382dc434b0ce7195ea56bd1139c5a7a00ffe0f937c01ce9f86a154a73d7",
+    "normal-recovery-choice-production.png": "2448fa8f612217d15684416379627a5eb10cc9dab278cfb4b5bd6268b14f02c1"
+  },
+  "limits": [
+    "First screenshot is terminal error, not notice proof",
+    "No new network or media-speed gain",
+    "No new compression or shared preparation service enabled",
+    "Acquisition requires provider capacity and confirmed drainage before handoff",
+    "Current true file authorization required across owners",
+    "Package jobs may finish after contract-approved merge"
+  ]
+}
