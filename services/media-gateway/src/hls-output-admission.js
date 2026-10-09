@@ -123,7 +123,12 @@ async function createHlsOutputAdmission({ root, targetSeconds = 4, aheadSeconds 
                 await pipeline(completedRequestBody(req), bounded, fs.createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
                 if (stopped) return;
                 await io.rename(temporary, target);
-                if (clockChunks) resumePlaylistClock.observe(name, Buffer.concat(clockChunks).toString('utf8'));
+                if (clockChunks) {
+                    const observed = resumePlaylistClock.observe(name, Buffer.concat(clockChunks).toString('utf8'));
+                    // Loss of clock evidence disables reuse for this producer.
+                    // Do not let an obsolete rendered credit stall ordinary output.
+                    if (name === 'video.m3u8' && !observed) renderedSequence = null;
+                }
                 bytes += received - (sizes.get(name) || 0); sizes.set(name, received);
                 if (clockChunks && retained.size) await evictRetained();
                 peakBytes = Math.max(peakBytes, bytes);

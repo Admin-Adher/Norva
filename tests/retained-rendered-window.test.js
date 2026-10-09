@@ -50,6 +50,19 @@ test('unreported and disabled clients retain the ordinary writer behavior',async
  for(const enabled of [true,false]){const {a}=await setup(t,enabled);for(let i=0;i<75;i++)await publish(a,i);assert.equal(a.snapshot().renderedSequence,null);}
 });
 
+test('a broken playlist clock disables retention credit without blocking ordinary output',async t=>{
+ const {a}=await setup(t);await publish(a,0);assert.equal(a.reportPlaybackPosition('video.m3u8',0),true);
+ for(let i=1;i<62;i++)await publish(a,i);
+ let done=false;const pending=put(a.urlFor('video-00062.ts')).then(s=>{done=true;return s;});
+ await settle();assert.equal(done,false);
+ const broken=playlist(61).replace('#EXT-X-INDEPENDENT-SEGMENTS','#EXT-X-DISCONTINUITY');
+ assert.equal(await put(a.urlFor('video.m3u8'),broken),200);
+ await settle();assert.equal(done,true);assert.equal(await pending,200);
+ assert.equal(a.snapshot().renderedSequence,null);
+ assert.equal(a.reportPlaybackPosition('video.m3u8',100),false);
+ assert.equal(a.resumePlaylistClock.originFor('video.m3u8',broken),null);
+});
+
 test('invalid or undelivered positions cannot advance the output; a stale position grants no forward credit',async t=>{
  const {a}=await setup(t);await publish(a,0);assert.equal(a.reportPlaybackPosition('video.m3u8',0),true);
  for(let i=1;i<12;i++)await publish(a,i);
