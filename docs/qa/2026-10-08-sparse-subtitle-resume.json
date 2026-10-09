@@ -10779,5 +10779,212 @@
       "fix": "await explicit first remote close event; require second local reader actually queued",
       "productionCodeChangedForFix": false
     }
+  },
+  "realDrainedTarget20261009": {
+    "atUtc": "2026-10-09T05:04:50.872097+00:00",
+    "productionChanged": false,
+    "gatewayDeployed": false,
+    "activated": false,
+    "code": "e6d6d5a3022bd1fe8f45b058f07e2d09fb80ae0a",
+    "pullRequest": 726,
+    "scope": "Temporary Gateway with current source, actual GPU and shared encoder/disk ledgers; ordinary authenticated direct claims; current WatchPage and HLS.js 1.7.3; not production Edge-to-Gateway routing",
+    "tests": {
+      "targetedPassed": 217,
+      "targetedSkipped": 5,
+      "regressionsFailingBeforeFix": 6,
+      "ciPassed": 6155,
+      "ciSkipped": 31,
+      "ciFailed": 0,
+      "ciJob": 113678148440,
+      "groupsOverlap": true
+    },
+    "normalBefore": {
+      "firstFrameMs": 49786.299999952316,
+      "playingObserved": false,
+      "parkMs": 2506,
+      "sameProcessAtPark": true,
+      "sourceSocketsWhileParked": 0,
+      "coldFallbackFailedAfterMs": 60000,
+      "fallbackReasonEstablished": false
+    },
+    "abductBefore": {
+      "firstFrameMs": 45540.99999995231,
+      "coldFallbackFirstFrameMs": 57082.00000004767,
+      "playingObserved": false,
+      "decoderTransferred": false,
+      "retainedAgeAtRejectionMs": 9606,
+      "validationMs": 5845,
+      "fourFreshSamplesReturned": true,
+      "sameExactTarget": false,
+      "sameValidator": true,
+      "sameRouteSizePosition": true,
+      "allSampleDigestEqualityRecorded": false
+    },
+    "implementation": {
+      "reusesExistingOpaqueOneUseTarget": true,
+      "requiresPrivateParkedScopeAndZeroActiveWindowAndDestroyedDispatcher": true,
+      "fourFreshSamplesStillRequired": true,
+      "exactTargetValidatorStillRequired": true,
+      "retainedTtlMs": 10000,
+      "reserveOrConcurrencyChanged": false,
+      "publicDiagnosticChanges": false
+    },
+    "abductAfter": {
+      "firstFrameMs": 33571.19999995232,
+      "playingMs": 39764.799999952316,
+      "parkStatus": "closed",
+      "resumeNotAdmitted": true,
+      "nearAvailableMediaEnd": true,
+      "exactParkRejectionPredicateNotCaptured": true,
+      "initialStallsObserved": true,
+      "inputEbmlDiagnosticsObserved": true,
+      "inputDamageOriginEstablished": false
+    },
+    "normalAfter": {
+      "firstFrameObserved": false,
+      "startupHttp": 502,
+      "startupTimeoutMs": 60000,
+      "decoderTransferNotReached": true
+    },
+    "mp4Retested": false,
+    "mp4Reason": "Retained decoder path remains Matroska-only; previous MP4 preparation failure not resolved by this change",
+    "audio": {
+      "atUtc": "2026-10-09T04:57:27.979Z",
+      "outputs": [
+        {
+          "segments": [
+            "video-00003.ts",
+            "video-00004.ts",
+            "video-00005.ts"
+          ],
+          "streams": [
+            {
+              "type": "video",
+              "codec": "h264",
+              "profile": "High"
+            },
+            {
+              "type": "audio",
+              "codec": "aac",
+              "profile": "LC",
+              "sampleRate": "48000",
+              "channels": 2
+            }
+          ],
+          "packets": {
+            "audio": {
+              "count": 281,
+              "first": 9.088,
+              "last": 15.061333,
+              "maxGap": 0.021334000000001296,
+              "gapsOver100ms": 0
+            },
+            "video": {
+              "count": 115,
+              "first": 9.067,
+              "last": 15.031,
+              "maxGap": 1.2089999999999996,
+              "gapsOver100ms": 1
+            }
+          },
+          "probeExit": 0,
+          "probeErrorLines": 0,
+          "decodeExit": 0,
+          "decodeErrorLines": 0,
+          "mediaDeleted": true
+        }
+      ],
+      "providerRequests": 0,
+      "audibleAcceptance": false
+    },
+    "cleanup": {
+      "atUtc": "2026-10-09T05:04:50.872097+00:00",
+      "productionChanged": false,
+      "claims": [
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T04:47:17.859979+00:00",
+          "expiresAt": "2026-10-09T04:49:12.815+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T04:49:13.015483+00:00",
+          "expiresAt": "2026-10-09T04:50:18.927+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T04:55:02.037841+00:00",
+          "expiresAt": "2026-10-09T04:56:15.147+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T04:56:15.364411+00:00",
+          "expiresAt": "2026-10-09T04:57:37.157+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T05:00:05.046787+00:00",
+          "expiresAt": "2026-10-09T05:01:58.36+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T05:03:03.028641+00:00",
+          "expiresAt": "2026-10-09T05:04:09.132+00:00"
+        }
+      ],
+      "testClaimsOrdinarilyClosed": true,
+      "candidateRemoved": true,
+      "controlStopped": true,
+      "removedTemporaryData": [
+        "output",
+        "candidate.private.env",
+        "candidate.private.json",
+        "control.pid"
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "activeSessions": 0,
+          "retainedEnabled": false,
+          "recentOwnerScope": "owner-allowlist",
+          "sharedVideoEncoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "activeSessions": 0,
+          "retainedEnabled": false,
+          "recentOwnerScope": "owner-allowlist",
+          "sharedVideoEncoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          }
+        }
+      ],
+      "dispatcherActive": true,
+      "freeDiskBytes": 161517834240,
+      "offlineContainerAbsent": true
+    },
+    "remaining": [
+      "Real corrected decoder transfer and continuous playback not validated",
+      "Normal cold startup remains unreliable",
+      "Abduct input diagnostics/stalls remain open",
+      "Audible quality and diverse real sources remain unvalidated"
+    ],
+    "prAttachment": "Refused at 100 attachments; none removed"
   }
 }
