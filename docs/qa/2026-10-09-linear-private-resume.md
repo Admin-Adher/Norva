@@ -44,3 +44,21 @@ Banc Gateway/FFmpeg isolé, réseau extérieur absent : 211 tests réussis, un i
 Les contrôles audio de 55 secondes neutralisent les timestamps du sink PCM pour distinguer erreurs de décodage et horloges ; ils ne prouvent pas la continuité sonore. Les tests navigateur précédents traversaient le cache, mais avaient des intervalles de frames d'environ 1,08 à 1,29 seconde. Aucun gel nul, écoute parfaite ou nouveau gain réel n'est annoncé.
 
 Le deuxième correctif reste à déployer et à relire sur la copie réelle. Reçus locaux : `.codex-artifacts/linear-private-resume-20261009/`, notamment `input-eof-subtitles.safe.json`, `coverage-running.safe.json`, `coverage-later.safe.json`, `second-closed.safe.json`.
+
+## Deuxième déploiement et reprise réelle — 9 octobre, 20:05 Paris
+
+PR748 est intégrée, code `5f77d7271ce9a5bc0bc7c9012dcf20c9118e66d0`, fusion `7689b8b4d8476131b4d2a81aaeaa77a4e5710a4c`. Les cinq contrôles observés passent, paquets Android Phone/TV et Windows compris. Image Gateway `sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815`, arbre `d024c736e1c22ccd1d5a33c9f6e1c46ee21f586da41e99db3e057f292ffc93ca`. Deux fichiers modifiés sur 94, 92 préservés. Canary UID1000/GPU, réseau isolé et stockage séparé réussi ; arrêté ensuite.
+
+Admissions suspendues de 17:53:45.380518 à 17:55:28.449578 UTC, soit 103,069 secondes incluant le drainage ordinaire. Gateways remplacés à 17:55:25.541351 et 17:55:28.074532. Aucun bail forcé, aucun Edge remplacé, dispatcher conservé. Vérification à 17:59:35 : empreintes concordantes, Gateways sains, admission/cron/worker restaurés. Le pilote de reprise privée reste borné au propriétaire ; aucune extension générale.
+
+La même copie Severance S1E1 anglais Strng est réellement relue depuis le début. Le fichier courant est Matroska malgré le libellé MP4 : 475 790 063 octets, 3 434,773 secondes, une piste audio et une piste de sous-titres.
+
+- Demande de lecture à 18:03:11.614711 UTC, première image à 18:03:16.807393, lecture à 18:03:23.345177 : **11,730 secondes entre l'événement de demande et la lecture**. La progression est observée jusqu'à environ 72 secondes, puis pause volontaire et Retour.
+- Après fermeture et drainage : **une entrée privée de 10 Mio**, aucun claim propriétaire actif. Le cache HLS reste refusé pour couverture de sous-titres non certifiée ; cette garde est conservée.
+- Reprise demandée à 18:04:58.382539 UTC, première image à 18:05:06.973683, lecture à 18:05:13.207528 : **14,825 secondes entre la demande et la lecture**. La validation de quatre plages fraîches est acceptée, taille et cible concordantes ; les compteurs `inputHits` et `hits` passent à un. Le mode observé est `subtitle-window-fallback`.
+- Le décodeur est prêt en 1 512 ms ; cette mesure serveur n'est pas le délai total de lecture. La qualification de débit trop courte reste refusée : aucun abaissement de réserve pour obtenir le résultat.
+- La progression relative est observée de 22,512 à 187,607 secondes, `paused=false`, `readyState=4`, aucune erreur DOM à ces observations. Il n'existe pas de trace continue des frames pour cet essai : **absence de gel mesuré non revendiquée**, écoute non validée.
+
+Le cache d'entrée est donc réellement conservé, retrouvé et validé après une fermeture ordinaire. Cet essai ne prouve ni une reprise instantanée, ni un gain A/B à position constante, ni la fluidité de toutes les copies. Les deux lectures sont arrêtées normalement, navigateur revenu aux séries. Contrôle final à 20:12 Paris : deux Gateways sains, zéro session Gateway, zéro claim actif du propriétaire.
+
+Reçus : `.codex-artifacts/linear-private-input-20261009/{deployment-reference,closed,resumed,final}.safe.json`, logs de déploiement, `resume-production.png`. Les horodatages de cette section distinguent UTC et Paris ; les anciens échecs restent conservés ci-dessus.
