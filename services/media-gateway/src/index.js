@@ -6162,6 +6162,9 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
 
     const controller = new AbortController();
     const attempt = {
+        requestId,
+        waitingProviderRange: null,
+        yieldToNewRange: null,
         controller,
         upstreamController: null,
         response: null,
@@ -6223,6 +6226,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
         let settledCueRequestId = requestId;
         while (forwarded < requestedLength) {
             if (attempt.localClosed) break;
+            if (context.terminalError) throw context.terminalError;
             if (context.finiteResumeRanges && !finiteWindowRange) {
                 const cached = context.finiteResumeRanges.read(range.start + forwarded, range.end);
                 if (cached) {
@@ -6319,6 +6323,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             }
             let releaseFiniteProviderSlot = null;
             const retainedPause = context.retainedInputBarrier ? new AbortController() : null;
+            const rangeYield = context.finiteYieldToNewRange ? new AbortController() : null;
             try {
             if (finiteSeek) {
                 // Let libav's next cue/close settle before speculative TS
@@ -6331,10 +6336,14 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     await new Promise(resolve => setTimeout(resolve, continuationGraceMs));
                     if (attempt.localClosed || controller.signal.aborted) break;
                 }
+                attempt.waitingProviderRange = { ...finiteProviderRange,
+                    start: finiteProviderRange.start + finiteBufferedBytes };
+                for (const other of context.activeFiniteAttempts) other.yieldToNewRange?.(attempt);
                 releaseFiniteProviderSlot = await acquireFiniteMkvSeekProviderSlot(context, controller.signal, retainedPause ? () => {
                     retainedPause.abort(new Error('RETAINED_INPUT_PAUSE'));
                     attempt.upstreamController?.abort(retainedPause.signal.reason);
                 } : null);
+                attempt.waitingProviderRange = null;
                 // The pre-queue grace may have elapsed while a newer cue was
                 // still fetching. Libav cannot close its old socket until that
                 // cue is delivered. Give only an older continuation the same
@@ -6374,6 +6383,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             }
             await waitForStrictLidBrokerSlot(context, controller.signal);
             if (finiteSeek && finiteSeekDemandClosed(context, attempt, res)) break;
+            if (context.terminalError) throw context.terminalError;
             // Pause may have raced with the queue or the ordinary release grace.
             // No upstream request has opened yet, so release this slot and wait.
             if (retainedPause?.signal.aborted) continue;
@@ -6653,6 +6663,24 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 }
                 diagnosticStage = 'body';
                 attempt.reader = attempt.response.body.getReader();
+                // Libav opens its indexed cue before closing the old broad
+                // response. A slow speculative continuation must not hold that
+                // cue behind megabytes of bytes the decoder no longer needs.
+                // Yield only a validated streaming continuation, never an atomic
+                // window, overlapping demand, or the original local response.
+                if (rangeYield && forwarded > 0 && !finiteWindowIsWarmup
+                    && exactRange.length > context.finiteAtomicWindowBytes) {
+                    attempt.yieldToNewRange = (next) => {
+                        if (next.requestId <= requestId || next.localClosed || !next.waitingProviderRange
+                            || (next.waitingProviderRange.start <= remainingRange.end
+                                && next.waitingProviderRange.end >= remainingRange.start)
+                            || receivedBytes >= exactRange.length || upstreamController.signal.aborted
+                            || controller.signal.aborted || attempt.localClosed || context.closed || context.terminalError) return;
+                        rangeYield.abort(new Error('FINITE_NEW_RANGE_YIELD'));
+                        upstreamController.abort(rangeYield.signal.reason);
+                    };
+                    for (const next of context.activeFiniteAttempts) attempt.yieldToNewRange(next);
+                }
                 if (!responseStarted && !finiteSeek) {
                     res.statusCode = 206;
                     res.setHeader('Accept-Ranges', 'bytes');
@@ -6844,15 +6872,20 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     && upstreamController.signal.reason === retainedPause.signal.reason
                     && !controller.signal.aborted && !context.closed && !attempt.localClosed
                     && !context.terminalError && !timeoutKind;
+                const yieldedToNewRange = rangeYield?.signal.aborted
+                    && upstreamController.signal.reason === rangeYield.signal.reason
+                    && !controller.signal.aborted && !context.closed && !attempt.localClosed
+                    && !context.terminalError && !timeoutKind;
                 finishFiniteMkvSeekWindowTrace(
                     context,
                     finiteWindowTrace,
-                    interruptedForRetention ? 'retained-pause' : attempt.stopReason === 'superseded'
+                    yieldedToNewRange ? 'new-range-yield' : interruptedForRetention ? 'retained-pause' : attempt.stopReason === 'superseded'
                         ? 'superseded'
                         : (timeoutKind ? `timeout-${timeoutKind}` : (error?.code || 'failed')),
                 );
-                if (interruptedForRetention) {
-                    await closeStrictLidBrokerProviderFetch(context, attempt, 'retained-pause');
+                if (interruptedForRetention || yieldedToNewRange) {
+                    await closeStrictLidBrokerProviderFetch(context, attempt,
+                        yieldedToNewRange ? 'new-range-yield' : 'retained-pause');
                     // Never publish a partial window or join it to a later
                     // response. Streaming bytes already sent stay sent; atomic
                     // bytes still held locally must be read again after fresh
@@ -6996,6 +7029,8 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 }
             }
             } finally {
+                attempt.yieldToNewRange = null;
+                attempt.waitingProviderRange = null;
                 releaseFiniteProviderSlot?.();
             }
         }
@@ -7343,6 +7378,8 @@ async function createStrictLidBroker(options = {}) {
     context.finiteAtomicWindowBytes = pathPrefix === 'finite-mkv-seek'
         && Number.isSafeInteger(options.finiteAtomicWindowBytes) && options.finiteAtomicWindowBytes > 0
         ? Math.min(1024 * 1024, options.finiteAtomicWindowBytes) : 0;
+    context.finiteYieldToNewRange = pathPrefix === 'finite-mkv-seek'
+        && options.finiteYieldToNewRange === true;
     context.finiteResumePrefixTargetBytes = Math.min(
         context.fileSizeBytes,
         context.finiteWindowBytes,
@@ -16294,6 +16331,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         finiteSequentialGrowthBytes: growMkvSequential ? 2 * effectiveWindowBytes : 0,
         finiteFirstWindowBytes: finiteMp4 ? 1024 * 1024 : 0,
         finiteAtomicWindowBytes: finiteMp4 ? 1024 * 1024 : 0,
+        finiteYieldToNewRange: finiteMp4 && canUseRecentResumeSamples(session.ownerKey),
         finiteCacheAbandonedPrefix: finiteMp4,
         finiteCacheBytes: FINITE_MKV_SEEK_CACHE_BYTES,
         finiteResumePrefixTargetBytes: finiteTs ? 0 : Math.min(effectiveWindowBytes, INBAND_HEADER_BYTES),

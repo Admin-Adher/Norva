@@ -160,6 +160,91 @@ function brokerHarness(diagnosticLogs = null) {
   );
 }
 
+for (const changed of [false, true]) test(`a distant MP4 cue ${changed ? 'rejects a changed file after yield' : 'passes a slow continuation without truncating either local response'}`, { timeout: 5000 }, async t => {
+  const N = 65536, data = Buffer.alloc(8 * N);
+  for (let i = 0; i < data.length; i++) data[i] = i % 251;
+  let active = 0, maxActive = 0, interrupted = 0;
+  const ranges = [];
+  const upstream = http.createServer((req, res) => {
+    const [start, end] = req.headers.range.slice(6).split('-').map(Number);
+    ranges.push([start, end]); active++; maxActive = Math.max(maxActive, active);
+    let settled = false;
+    const settle = () => { if (!settled) { settled = true; active--; } };
+    res.once('finish', settle); res.once('close', () => { if (!res.writableFinished) interrupted++; settle(); });
+    res.writeHead(206, { 'Content-Range': `bytes ${start}-${end}/${data.length}`,
+      'Content-Length': end - start + 1, ETag: changed && start === 7 * N ? '"changed-file"' : '"same-file"' });
+    if (start === N && end === 4 * N - 1) res.write(data.subarray(start, 2 * N));
+    else res.end(data.subarray(start, end + 1));
+  });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  const broker = await brokerHarness().createStrictLidBroker({
+    sourceUrl: `http://127.0.0.1:${upstream.address().port}/file`, fileSizeBytes: data.length,
+    pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 4 * N, finiteWarmupWindowBytes: N,
+    finiteCacheBytes: 8 * N, finiteYieldToNewRange: true, releaseDelayMs: 25, completedReleaseDelayMs: 0,
+  });
+  t.after(async () => { await broker.close(); upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve)); });
+  const response = await fetch(broker.inputUrl, { headers: { Range: `bytes=0-${data.length - 1}` } });
+  const reader = response.body.getReader(), chunks = []; let received = 0;
+  while (received < 2 * N) { const { value } = await reader.read(); chunks.push(Buffer.from(value)); received += value.length; }
+  const cue = await Promise.race([
+    fetch(broker.inputUrl, { headers: { Range: `bytes=${7 * N}-${8 * N - 1}` } }),
+    new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('new cue blocked behind old continuation')), 600); timer.unref(); }),
+  ]);
+  if (changed) {
+    assert.equal(cue.status, 502); await cue.arrayBuffer();
+    assert.equal(broker.terminalError?.code, 'VOD_CHANGED');
+    await assert.rejects(async () => { while (!(await reader.read()).done) {} });
+    assert.equal(maxActive, 1);
+    assert.equal(ranges.length, 3, 'terminal identity rejection must not reopen the yielded old range');
+    return;
+  }
+  assert.deepEqual(Buffer.from(await cue.arrayBuffer()), data.subarray(7 * N));
+  for (;;) { const { value, done } = await reader.read(); if (done) break; chunks.push(Buffer.from(value)); }
+  assert.deepEqual(Buffer.concat(chunks), data, 'the old declared Content-Length remains complete, without a duplicate or gap');
+  assert.equal(maxActive, 1); assert.equal(interrupted, 1);
+  assert.ok(ranges.some(([start]) => start === 2 * N), 'resume precisely after bytes already forwarded');
+  assert.equal(broker.terminalError, null);
+  assert.equal(broker.windowTrace.filter(x => x.outcome === 'new-range-yield').length, 1);
+});
+
+for (const mode of ['disabled', 'overlap', 'cached', 'atomic']) test(`new cue leaves ${mode} provider work intact`, { timeout: 5000 }, async t => {
+  const N = 65536, data = Buffer.alloc(8 * N, 23); let release, entered;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  let active = 0, maximum = 0, interrupted = 0;
+  const upstream = http.createServer((req, res) => {
+    const [start, end] = req.headers.range.slice(6).split('-').map(Number);
+    active++; maximum = Math.max(maximum, active); let settled = false;
+    const settle = () => { if (!settled) { settled = true; active--; } };
+    res.once('finish', settle); res.once('close', () => { if (!res.writableFinished) interrupted++; settle(); });
+    res.writeHead(206, { 'Content-Range': `bytes ${start}-${end}/${data.length}`,
+      'Content-Length': end - start + 1, ETag: '"same-file"' });
+    if (start === N && end === 4 * N - 1) {
+      res.write(data.subarray(start, 2 * N)); release = () => res.end(data.subarray(2 * N, end + 1)); entered();
+    } else res.end(data.subarray(start, end + 1));
+  });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  const broker = await brokerHarness().createStrictLidBroker({
+    sourceUrl: `http://127.0.0.1:${upstream.address().port}/file`, fileSizeBytes: data.length,
+    pathPrefix: 'finite-mkv-seek', finiteWindowBytes: 4 * N, finiteWarmupWindowBytes: N,
+    finiteCacheBytes: 8 * N, finiteYieldToNewRange: mode !== 'disabled',
+    finiteAtomicWindowBytes: mode === 'atomic' ? 4 * N : 0,
+    releaseDelayMs: 25, completedReleaseDelayMs: 0,
+  });
+  t.after(async () => { await broker.close(); upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve)); });
+  const old = fetch(broker.inputUrl, { headers: { Range: `bytes=0-${data.length - 1}` } }).then(r => r.arrayBuffer());
+  await waiting;
+  const start = mode === 'overlap' ? 2 * N : mode === 'cached' ? 0 : 7 * N;
+  const next = fetch(broker.inputUrl, { headers: { Range: `bytes=${start}-${start + N - 1}` } });
+  if (mode === 'cached') assert.deepEqual(Buffer.from(await (await next).arrayBuffer()), data.subarray(0, N));
+  else await new Promise(resolve => setTimeout(resolve, 75));
+  assert.equal(interrupted, 0, 'no interruption of atomic, overlapping, cached or disabled work');
+  release();
+  assert.deepEqual(Buffer.from(await old), data);
+  if (mode !== 'cached') assert.deepEqual(Buffer.from(await (await next).arrayBuffer()), data.subarray(start, start + N));
+  assert.equal(maximum, 1); assert.equal(broker.terminalError, null);
+  assert.equal(broker.windowTrace.filter(x => x.outcome === 'new-range-yield').length, 0);
+});
+
 test('retained finite input parks outside network deadlines and destroys its private transport', async t => {
   const N=65536,data=Buffer.alloc(8*N,9),scope={};let calls=0,sockets=0,factories=0;
   const provider=http.createServer((req,res)=>{calls++;sendExactRange(req,res,data);});
