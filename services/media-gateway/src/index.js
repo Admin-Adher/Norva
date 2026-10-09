@@ -15798,7 +15798,7 @@ function privateResumeHlsBindingForSession(session) {
     const resumeProfile = privateResumeProfile({ format, audio, audioMode: session.audioMode,
         clientAudioPassthrough: session.clientAudioPassthrough, encoder: VIDEO_ENCODER_CONFIG.backend,
         subtitleClock: retainedSubtitleClock(session) ? SOURCE_CLOCK : undefined,
-        subtitleInputClock: retainedSubtitleClock(session) ? 'absolute-v1' : undefined,
+        subtitleInputClock: retainedSubtitleClock(session) ? 'absolute-v2' : undefined,
         subtitles: exactSubtitleRenditionsForSession(session).map(r => ({
             streamIndex: r.streamIndex, language: r.language, sourceCodec: r.sourceCodec,
             default: r.default, forced: r.forced, hearingImpaired: r.hearingImpaired,
@@ -21360,7 +21360,15 @@ function freezeExactSubtitleHlsTopology(session) {
 }
 
 function audioArgsForSession(session, copyAudio = shouldCopyAudio(session)) {
-    return copyAudio ? ['-c:a', 'copy'] : TRANSCODE_AUDIO_ARGS;
+    if (copyAudio) return ['-c:a', 'copy'];
+    // Retained subtitle graphs use -copyts for every lane. Forcing first_pts=0
+    // here would pad audio from zero to the seek position while video and
+    // subtitles already start on the source clock.
+    if (retainedSubtitleClock(session)) {
+        return TRANSCODE_AUDIO_ARGS.map((value) => value === 'aresample=48000:async=1:first_pts=0'
+            ? 'aresample=48000:async=1' : value);
+    }
+    return TRANSCODE_AUDIO_ARGS;
 }
 
 function audioModeForSession(session) {

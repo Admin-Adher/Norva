@@ -1860,7 +1860,10 @@ test('an admitted replay starts one FFmpeg graph with copied video and proof-sel
     exactSubtitleHlsEnabled: () => false,
     inputProbeArgsForSession: () => [],
     shouldCopyAudio: (value) => value.forceMkvH264FastStartAudioTranscode !== true,
-    audioArgsForSession: (_value, copyAudio) => copyAudio ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-profile:a', 'aac_low', '-ar', '48000', '-ac', '2'],
+    audioArgsForSession: vm.runInNewContext(`(() => {
+      ${between(GATEWAY, 'const TRANSCODE_AUDIO_ARGS = [', '\n];')}\n];
+      return (${between(GATEWAY, 'function audioArgsForSession(', '\nfunction audioModeForSession(').trim()});
+    })()`, { ...require('../services/media-gateway/src/retained-subtitle-clock') }),
     audioMapForSession: () => '0:1',
     normalizeAudioStreamIndex: (value) => Number(value),
     videoModeForSession: (value) => value.videoMode,
@@ -1918,9 +1921,11 @@ test('an admitted replay starts one FFmpeg graph with copied video and proof-sel
   // framecrc journal while the WebVTT muxer shifts it to zero. Every output
   // must retain the same source clock, including the input-side seek.
   startFfmpeg({ ...session, videoMode: 'encode', seekOffset: 9,
+    forceMkvH264FastStartAudioTranscode: true,
     retainedRequestBinding: 'admitted-owner', exactSubtitleHls: { enabled: true } });
   assert.ok(capturedArgs.indexOf('-copyts') >= 0);
   assert.ok(capturedArgs.indexOf('-copyts') < capturedArgs.indexOf('-i'));
+  assert.equal(capturedArgs[capturedArgs.indexOf('-af') + 1], 'aresample=48000:async=1');
   for (const excluded of [{ retainedRequestBinding: null }, { exactSubtitleHls: { enabled: false } },
     { multiAudioHls: { enabled: true } }, { mediaCacheProducer: {} }, { completeHlsCacheLease: {} }]) {
     startFfmpeg({ ...session, videoMode: 'encode', retainedRequestBinding: 'admitted-owner',

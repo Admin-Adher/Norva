@@ -25,6 +25,10 @@ test('a source-clock HLS window never shares the old mux-clock cache key', () =>
     const absolute = privateResumeProfile({ ...sourceClock, subtitleInputClock: 'absolute-v1' });
     assert.ok(absolute);
     assert.notEqual(absolute, privateResumeProfile(sourceClock));
+    const alignedAudio = privateResumeProfile({ ...sourceClock, subtitleInputClock: 'absolute-v2' });
+    assert.ok(alignedAudio);
+    assert.notEqual(alignedAudio, absolute, 'zero-padded AAC windows cannot match the aligned graph');
+    assert.equal(privateResumeProfile({ ...input, subtitleInputClock: 'absolute-v2' }), null);
     assert.equal(privateResumeProfile({ ...sourceClock, subtitleInputClock: 'guessed' }), null);
     assert.equal(privateResumeProfile({ ...input, subtitleInputClock: 'absolute-v1' }), null);
 });
