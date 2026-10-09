@@ -1,6 +1,6 @@
 # NorvaEngine : démarrage, lectures concurrentes et limite de décodage
 
-9 octobre 2026, suite de PR752/753. Preuves résumées dans le JSON homonyme ; reçus locaux sous `.codex-artifacts/web-engine-startup-20261009/`. Le présent candidat est en validation ; aucune nouvelle publication n'est encore revendiquée.
+9 octobre 2026, suite de PR752/753. Preuves résumées dans le JSON homonyme ; reçus locaux sous `.codex-artifacts/web-engine-startup-20261009/`. PR754, code `67aafad1c`. Le candidat est en validation CI ; aucune nouvelle publication n'est encore revendiquée.
 
 ## Deux défauts Norva observés
 
@@ -45,3 +45,11 @@ Deux replays locaux, sans aucun nouvel appel fournisseur : la version 47 échoue
 À 22:52 Paris, les six sessions sont expirées normalement, zéro claim actif du propriétaire testé, deux Gateways sains, zéro session/pompe, image `e7520bec…` inchangée. Contrôleurs et tunnels des essais fournisseur arrêtés. Aucune modification de serveur, de relais, de limite ou de tâche permanente. Les preuves de nettoyage des extraits et l'état CI/publication seront ajoutés après clôture.
 
 Conclave reste limité par l'arrivée des données et Abduct par des pauses et une erreur de décodage sur l'extrait reçu. Ces deux copies ne sont pas déclarées réparées.
+
+## Compléments de clôture
+
+AAC copié sur le MKV synthétique multipiste de 60 s : première image 277 ms, saut dans le buffer vers 50 s, fin à 60,010 s, aucune erreur ni intervalle vidéo supérieur à 250 ms. L'audio a été contrôlé techniquement ; l'onglet reste muet, aucune écoute humaine revendiquée.
+
+À 22:54:55 Paris, 60 fichiers temporaires de prélèvement, sortie et diagnostic détaillé supprimés (62 193 981 octets). Reçus de tailles, empreintes, erreurs et comparaison des paquets conservés ; aucune copie média diagnostique restante. Onglet de preuve fermé après le dernier contrôle synthétique.
+
+Première CI : le contrôle « Notification channel policy » échoue avant les tests sur la limite de téléchargement anonyme Docker Hub. Aucun échec fonctionnel de ce contrôle n'est démontré. Une demande de relance ciblée est refusée par GitHub car le workflow tourne encore : aucune relance effectivement commencée à ce stade. Les autres contrôles poursuivent leur exécution. Attachement de PR754 refusé par Codex à la limite de 100 ; aucune pièce retirée.

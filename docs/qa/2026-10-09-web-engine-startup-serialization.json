@@ -2964,5 +2964,168 @@
     "Conclave still exceeds 15 seconds",
     "Abduct starts but stalls and fails decode",
     "No human listening acceptance"
-  ]
+  ],
+  "syntheticAAC": {
+    "firstFrameMs": 277.19999985694886,
+    "finalTime": 60.01,
+    "events": [
+      {
+        "event": "waiting",
+        "ms": 78,
+        "time": 0
+      },
+      {
+        "event": "playing",
+        "ms": 278,
+        "time": 0.000818
+      },
+      {
+        "event": "requested-seek",
+        "ms": 49198,
+        "time": 48.880314,
+        "target": 50,
+        "buffer": [
+          [
+            0,
+            60.01
+          ]
+        ]
+      },
+      {
+        "event": "seeking",
+        "ms": 49200,
+        "time": 50
+      },
+      {
+        "event": "waiting",
+        "ms": 49201,
+        "time": 50
+      },
+      {
+        "event": "seeked",
+        "ms": 49201,
+        "time": 50.002197
+      },
+      {
+        "event": "playing",
+        "ms": 49201,
+        "time": 50.002266
+      },
+      {
+        "event": "ended",
+        "ms": 59260,
+        "time": 60.01
+      },
+      {
+        "event": "operator-stop",
+        "ms": 81078,
+        "time": 60.01
+      }
+    ],
+    "gaps": [],
+    "errors": [],
+    "timings": {
+      "startupDeadlineMs": 15000,
+      "initialWindowKB": 512,
+      "startupWindowMaxKB": 1024,
+      "fetchWindows": [
+        {
+          "start": 0,
+          "requestedBytes": 524288,
+          "bytes": 524288,
+          "ms": 8,
+          "outcome": "ok"
+        },
+        {
+          "start": 524288,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 6,
+          "outcome": "ok"
+        },
+        {
+          "start": 1572864,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 15,
+          "outcome": "ok"
+        },
+        {
+          "start": 5767168,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 12,
+          "outcome": "ok"
+        },
+        {
+          "start": 9961472,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 11,
+          "outcome": "ok"
+        },
+        {
+          "start": 14155776,
+          "requestedBytes": 382859,
+          "bytes": 382859,
+          "ms": 6,
+          "outcome": "ok"
+        }
+      ],
+      "fetchAttempts": 6,
+      "startupFetchWindows": [
+        {
+          "start": 0,
+          "requestedBytes": 524288,
+          "bytes": 524288,
+          "ms": 8,
+          "outcome": "ok"
+        },
+        {
+          "start": 524288,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 6,
+          "outcome": "ok"
+        }
+      ],
+      "wasmMs": 30,
+      "probeMs": 0,
+      "openInputMs": 23,
+      "detectMimeMs": 1,
+      "mediaSourceMs": 1,
+      "encoderMs": 0,
+      "firstAppendMs": 58,
+      "muxerMs": 6,
+      "seekMs": 0,
+      "loadTotalMs": 61,
+      "fetches": 1,
+      "fetchMB": 0.5,
+      "fetchMs": 8,
+      "audio": "copy",
+      "video": "h264",
+      "engineVersion": 48,
+      "firstUsableAppendMs": 77,
+      "firstMediaAppendMs": 77,
+      "firstMediaAppendFetches": 2,
+      "firstMediaAppendSuccessfulFetches": 2,
+      "firstMediaAppendFetchKB": 1536
+    }
+  },
+  "captureCleanup": {
+    "atUtc": "2026-10-09T20:54:55.601386+00:00",
+    "directory": "decode.private",
+    "removedFiles": 60,
+    "removedBytes": 62193981,
+    "remaining": false
+  },
+  "initialCIFailure": {
+    "atUtc": "2026-10-09T20:55:43.930744+00:00",
+    "job": 114021735715,
+    "reason": "Docker Hub unauthenticated pull rate limit before test execution",
+    "targetedReruns": 0,
+    "productionChange": false,
+    "rerunRequestAccepted": false,
+    "response": "403 workflow still running"
+  }
 }
