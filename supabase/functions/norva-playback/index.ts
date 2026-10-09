@@ -2230,6 +2230,9 @@ async function createPlaybackSessionCore(
   const mediaCacheReadBypassOnce = mediaCacheReadPolicy === "bypass-once"
     || body.privateMediaCacheProtocol !== 1;
   let requestedPlaybackHint = recordOrEmpty(body.playbackHint ?? body.playback_hint);
+  // Capabilities belong to this caller, never to persisted catalogue hints.
+  requestedPlaybackHint = { ...requestedPlaybackHint,
+    committedSubtitleDelivery: requestedPlaybackHint.committedSubtitleDelivery === 1 ? 1 : 0 };
   const parentSeriesId = itemType === "series"
     ? stringOr(
       requestedPlaybackHint.audioSeriesId ??
@@ -10344,6 +10347,14 @@ function normalizeGatewayExactSubtitleHls(
     maxRenditions,
     sourceTrackCount,
     preparedTrackCount,
+    ...(recordOrEmpty(raw.delivery).protocol === 1 &&
+        recordOrEmpty(raw.delivery).kind === "committed-webvtt" &&
+        recordOrEmpty(raw.delivery).clock === "source-pes-v1" &&
+        Array.isArray(recordOrEmpty(raw.delivery).streamIndexes) &&
+        JSON.stringify(recordOrEmpty(raw.delivery).streamIndexes) ===
+          JSON.stringify(renditions.map(track => track.streamIndex))
+      ? { delivery: { protocol: 1, kind: "committed-webvtt", clock: "source-pes-v1",
+        streamIndexes: renditions.map(track => track.streamIndex) } } : {}),
   };
 }
 

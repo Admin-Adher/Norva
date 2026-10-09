@@ -220,3 +220,16 @@ test('Edge drops every stale, contradictory or non-text subtitle graph as one un
   }
   assert.equal(normalizeMetadata(metadata, null, profile), null);
 });
+
+
+test('committed delivery metadata accepts only the exact prepared rendition order', () => {
+  const { normalizeGatewayExactSubtitleHls } = loadNormalizers();
+  const renditions = [{streamIndex:4},{streamIndex:7}];
+  const profile = {subtitles:[{index:4},{index:7}]};
+  const exact = {protocol:1,enabled:true,cacheEligible:true,reason:'enabled',maxRenditions:8,sourceTrackCount:2,preparedTrackCount:2};
+  const delivery = {protocol:1,kind:'committed-webvtt',clock:'source-pes-v1',streamIndexes:[4,7]};
+  assert.deepEqual(JSON.parse(JSON.stringify(normalizeGatewayExactSubtitleHls({...exact,delivery},renditions,profile).delivery)),delivery);
+  for(const invalid of [{...delivery,streamIndexes:[7,4]},{...delivery,streamIndexes:[4,4]},
+      {...delivery,clock:'guessed'},{...delivery,protocol:2}])
+    assert.equal(normalizeGatewayExactSubtitleHls({...exact,delivery:invalid},renditions,profile).delivery,undefined);
+});

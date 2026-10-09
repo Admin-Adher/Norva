@@ -133,6 +133,7 @@ const { RetainedSessionTransfer } = require('./retained-session-transfer');
 const { retainRecentDeliveryTarget, consumeRecentDeliveryTarget } = require('./recent-delivery-target');
 const { privateResumeProfile, canonicalResumeProfile } = require('./private-resume-profile');
 const { SOURCE_CLOCK, retainedSubtitleClock, retainedSubtitleClockArgs } = require('./retained-subtitle-clock');
+const { committedSubtitleOutputArgs, readCommittedSubtitle } = require('./committed-subtitle-delivery');
 const { captureSamples, sampleProof, samplesMatch, SAMPLE_BYTES, captureInputWindows, RECENT_INPUT_MAX_BYTES,
     RECENT_HEADER_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES } = require('./recent-resume-samples');
 const { validateRecentResume, recentResumeTargetParts, compareRecentResumeTargetParts } = require('./recent-resume-validation');
@@ -13408,6 +13409,8 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
     if (!requested) return res.status(400).send('Invalid segment path');
     if (session.liveTsStartupGate && !session.liveTsStartupGate.allows(requested))
         return res.status(404).send('Segment not available');
+    if (/^committed_/i.test(requested) || /\.commit$/i.test(requested))
+        return res.status(404).send('Segment not found');
     const isGrowingSubtitle = requested.toLowerCase().endsWith('.vtt');
     if (requested.toLowerCase().endsWith('.m3u8') && !isAllowedSessionPlaylistName(session, requested)) {
         return res.status(404).send('Segment not found');
@@ -13482,6 +13485,30 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
             });
             stream.pipe(res);
             return;
+        }
+        const committed = /^sub_(\d+)\.vtt$/.exec(requested);
+        if (committed && retainedSubtitleClock(session)) {
+            const index = Number(committed[1]);
+            if (!session.exactSubtitleHls.renditions.some(track => track.streamIndex === index))
+                return res.status(404).send('Subtitle track not found');
+            const assertAccess = () => {
+                const primary = session.primaryViewerAttached !== false
+                    && timingSafeEqual(req.playbackToken, session.accessToken);
+                const attachment = session.viewerAttachments?.authorize?.(req.playbackToken, Date.now());
+                if (res.destroyed || session.id !== req.params.id || sessions.get(req.params.id) !== session
+                    || session.expiresAt.getTime() <= Date.now() || (!primary && !attachment))
+                    throw new Error('SUBTITLE_ACCESS_REVOKED');
+            };
+            try {
+                const vtt = await readCommittedSubtitle(session.outputDir, index, assertAccess);
+                assertAccess();
+                res.setHeader('Cache-Control', 'private, no-store');
+                return res.type('text/vtt').send(vtt);
+            } catch (error) {
+                if (res.destroyed) return;
+                const revoked = error.message === 'SUBTITLE_ACCESS_REVOKED';
+                return res.status(revoked ? 410 : 503).end();
+            }
         }
         const filePath = path.resolve(session.outputDir, requested);
         if (!isWithin(session.outputDir, filePath)) return res.status(400).send('Invalid segment path');
@@ -15550,7 +15577,8 @@ async function closePreopenedBoundedMkvInput(session) {
 // The very same decoder, output graph, clocks and bounded output reservation
 // survive a short, fully drained detachment.
 function retainedSessionRequestBinding(body, ownerKey) {
-    if (!retainedSessionOwnerGate(ownerKey) || !canUsePrivateResumeCache(ownerKey)
+    if (body?.playbackHint?.committedSubtitleDelivery !== 1
+        || !retainedSessionOwnerGate(ownerKey) || !canUsePrivateResumeCache(ownerKey)
         || !canUseRecentResumeSamples(ownerKey)) return null;
     const identity = asRecord(body?.playbackIdentity);
     if (!identity.sourceId || !identity.sourceRevision || !identity.vodIdentityKey) return null;
@@ -21257,6 +21285,8 @@ function exactSubtitleHlsDiagnosticsForSession(session) {
         maxCacheableRenditions: MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS,
         sourceTrackCount: Number.isInteger(plan.sourceTrackCount) ? plan.sourceTrackCount : 0,
         preparedTrackCount: Array.isArray(plan.renditions) ? plan.renditions.length : 0,
+        ...(retainedSubtitleClock(session) ? { delivery: { protocol: 1, kind: 'committed-webvtt',
+            clock: SOURCE_CLOCK, streamIndexes: plan.renditions.map(t => t.streamIndex) } } : {}),
     };
 }
 
@@ -21316,6 +21346,7 @@ function appendSubtitleOutputs(args, session, postInputSeek = []) {
     if (exactSubtitleHlsEnabled(session)) {
         const renditions = exactSubtitleRenditionsForSession(session);
         args.push(...exactSubtitleOutputArgs(session.exactSubtitleHls, session.outputDir, postInputSeek));
+        if (retainedSubtitleClock(session)) args.push(...committedSubtitleOutputArgs(renditions, session.outputDir, postInputSeek));
         console.log(`[media-gateway] segmenting exact subtitle stream(s): ${renditions.map((track) => track.streamIndex).join(', ')}`);
         return;
     }

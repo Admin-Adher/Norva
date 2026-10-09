@@ -1625,6 +1625,10 @@ const CloudAdapter = (() => {
             container,
             streamType: type,
             itemType: type,
+            committedSubtitleDelivery: typeof window !== 'undefined'
+                && window.WatchPage?.committedSubtitleDelivery === 1
+                && (window.MediaSource || window.ManagedMediaSource)
+                && !window.NodeCastNative && !window.NorvaTVCloud ? 1 : undefined,
             // Series playback uses the episode id as itemId. Keep the provider's
             // parent series id so the server can prove that exact episode belongs
             // to the selected catalog variant before sharing any track metadata.
