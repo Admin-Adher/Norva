@@ -149,7 +149,7 @@ async function startDesktopApp() {
     // cloud app for full cloud sync. Either way the in-app server runs as the
     // residential transcoder. Override with NORVA_DESKTOP_URL, e.g.
     // https://norva.tv/app.html for the pure cloud experience.
-    const appUrl = process.env.NORVA_DESKTOP_URL || serverUrl;
+    const appUrl = process.env.NORVA_DESKTOP_URL || `${serverUrl}/app`;
 
     // If we load a remote (cloud) origin, let the in-app server accept its
     // cross-origin playback calls so the page can use the local transcoder.
