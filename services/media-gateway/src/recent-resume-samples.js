@@ -2,6 +2,7 @@
 const crypto = require('node:crypto');
 const SAMPLE_BYTES = 64 * 1024;
 const RECENT_TTL_MS = 10 * 60_000;
+const LINEAR_SAMPLE_WINDOW_BYTES = 2 * 1024 * 1024;
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const hex = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 
@@ -55,6 +56,61 @@ function captureSamples(entries) {
         ...selected.sort((a, b) => a.start - b.start).map(e => ({ start: e.start, payload: Buffer.from(e.payload) }))];
 }
 
+// Passive evidence from bytes already delivered to the decoder. A completed
+// local window is NOT a completed HTTP response, a replayable input window, or
+// whole-file authority. Only the existing private, four-fresh-range policy may
+// use these samples, after an ordinary viewer stop has drained the transport.
+// Keep one rolling window and four detached samples; never retain the movie.
+class LinearResumeSamples {
+    constructor(fileSizeBytes, target) {
+        this.fileSizeBytes = fileSizeBytes;
+        this.target = target;
+        this.valid = Number.isSafeInteger(fileSizeBytes)
+            && fileSizeBytes >= LINEAR_SAMPLE_WINDOW_BYTES && hex(target);
+        this.offset = 0;
+        this.window = this.valid ? Buffer.alloc(LINEAR_SAMPLE_WINDOW_BYTES) : null;
+        this.head = null;
+        this.samples = null;
+    }
+
+    append(start, bytes) {
+        if (!this.valid) return;
+        if (start !== this.offset || !Buffer.isBuffer(bytes)
+            || start + bytes.length > this.fileSizeBytes) return this.invalidate();
+        let consumed = 0;
+        while (consumed < bytes.length) {
+            const at = this.offset % LINEAR_SAMPLE_WINDOW_BYTES;
+            const length = Math.min(bytes.length - consumed, LINEAR_SAMPLE_WINDOW_BYTES - at);
+            bytes.copy(this.window, at, consumed, consumed + length);
+            consumed += length;
+            this.offset += length;
+            if (!this.head && this.offset >= SAMPLE_BYTES) this.head = Buffer.from(this.window.subarray(0, SAMPLE_BYTES));
+            if (at + length === LINEAR_SAMPLE_WINDOW_BYTES) {
+                const base = this.offset - LINEAR_SAMPLE_WINDOW_BYTES;
+                const starts = [base === 0 ? SAMPLE_BYTES : 0,
+                    Math.floor((LINEAR_SAMPLE_WINDOW_BYTES - SAMPLE_BYTES) / 2),
+                    LINEAR_SAMPLE_WINDOW_BYTES - SAMPLE_BYTES];
+                this.samples = [{ start: 0, payload: this.head }, ...starts.map(offset => ({
+                    start: base + offset, payload: Buffer.from(this.window.subarray(offset, offset + SAMPLE_BYTES)),
+                }))];
+            }
+        }
+    }
+
+    finish({ graceful = false, fileSizeBytes, target } = {}) {
+        const samples = this.valid && graceful && fileSizeBytes === this.fileSizeBytes
+            && target === this.target && sampleProof(this.samples, fileSizeBytes, target)
+            ? this.samples : null;
+        this.invalidate();
+        return samples;
+    }
+
+    invalidate() {
+        this.valid = false;
+        this.window = this.head = this.samples = null;
+    }
+}
+
 const RECENT_INPUT_MAX_BYTES = 8 * 1024 * 1024;
 // Input-only entries have no HLS assets. They may use the existing per-file
 // cache allowance, still reserved inside the unchanged aggregate budget.
@@ -91,4 +147,5 @@ function captureInputWindows(entries, fileSizeBytes, maximum = RECENT_INPUT_MAX_
 }
 
 module.exports = { SAMPLE_BYTES, RECENT_TTL_MS, sampleProof, samplesMatch, captureSamples,
+    LinearResumeSamples, LINEAR_SAMPLE_WINDOW_BYTES,
     RECENT_INPUT_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES, RECENT_HEADER_MAX_BYTES, captureInputWindows };

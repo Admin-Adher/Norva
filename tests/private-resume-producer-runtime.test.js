@@ -36,7 +36,7 @@ function run(binary, args) {
     child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-12_000); });
     child.once('error', reject);
     child.once('exit', (code) => code === 0
-      ? resolve()
+      ? resolve(stderr)
       : reject(new Error(`LIVE_JOIN_FIXTURE_FFMPEG_FAILED:${code}:${stderr}`)));
   });
 }
@@ -84,7 +84,7 @@ async function readJson(response) {
   return { response, payload, text };
 }
 
-test('an abandoned complete-cache producer keeps a private HLS window and revalidates it before resume', {
+for (const validator of ['strong', 'absent']) test(`an abandoned complete-cache producer with ${validator} validators keeps a private HLS window and revalidates it before resume`, {
   timeout: 120_000,
 }, async (t) => {
   const { ffmpeg, ffprobe } = locateMediaTools();
@@ -105,6 +105,11 @@ test('an abandoned complete-cache producer keeps a private HLS window and revali
 
   const provider = new ProviderSimulator({ fixtureRoot: root });
   const providerServer = http.createServer((request, response) => {
+    if (validator === 'absent') {
+      const setHeader = response.setHeader.bind(response);
+      response.setHeader = (name, value) => ['etag','last-modified'].includes(name.toLowerCase())
+        ? response : setHeader(name, value);
+    }
     provider.handle(request, response).then((handled) => {
       if (!handled && !response.writableEnded) {
         response.statusCode = 404;
@@ -204,6 +209,7 @@ test('an abandoned complete-cache producer keeps a private HLS window and revali
   const workerBase = await listen(workerServer);
   t.after(() => closeServer(workerServer));
 
+  const ownerKey = crypto.randomBytes(32).toString('hex');
   const gatewayPort = await reservePort();
   const gateway = spawn(process.execPath, [GATEWAY_PATH], {
     cwd: ROOT,
@@ -224,6 +230,8 @@ test('an abandoned complete-cache producer keeps a private HLS window and revali
       NORVA_SHARED_MEDIA_CACHE_ENABLED: 'true',
       BOUNDED_HLS_OUTPUT_ENABLED: 'true',
       PRIVATE_RESUME_CACHE_ENABLED: 'true',
+      PRIVATE_RESUME_RECENT_SAMPLES_ENABLED: 'true',
+      PRIVATE_RESUME_RECENT_SAMPLES_OWNER_HASHES: ownerKey,
       WEAK_VALIDATOR_SPOOL_MIN_FREE_BYTES: '1073741824',
       NORVA_SHARED_MEDIA_CACHE_BACKGROUND_CONTINUATION_ENABLED: 'true',
       NORVA_MEDIA_CACHE_WORKER_URL: `${workerBase}/`,
@@ -274,7 +282,7 @@ test('an abandoned complete-cache producer keeps a private HLS window and revali
   const requestBody = {
       sourceUrl: providerRun.mediaUrl,
       playbackSessionId,
-      ownerKey: crypto.randomBytes(32).toString('hex'),
+      ownerKey,
       mode: 'remux',
       expiresAt: expiry,
       playbackHint: { streamType: 'movie', container: 'mkv' },
@@ -347,7 +355,7 @@ test('an abandoned complete-cache producer keeps a private HLS window and revali
     { method:'DELETE', headers:serviceHeaders }));
   assert.equal(close.response.status,200,close.text);
   const stopped = await waitFor(h=>h.activeSessions===0 && h.vodInputPump.active===0 && h.videoEncoderCapacity.active===0,'drain');
-  assert.equal(stopped.privateResumeHlsCache.stores,1,JSON.stringify(stopped.privateResumeHlsCache));
+  assert.equal(stopped.privateResumeHlsCache.stores,1,JSON.stringify(stopped.privateResumeHlsCache)+'\n'+gatewayOutput.join(''));
   assert.equal(stopped.sharedMediaCache.stats.publications,0);
   assert.equal(publications.length,0);
   assert.equal(workerCalls.length,0,'partial graph must never reach shared storage');
@@ -361,13 +369,26 @@ test('an abandoned complete-cache producer keeps a private HLS window and revali
   assert.equal(reopened.response.status,201,reopened.text);
   assert.equal(reopened.payload.startupTimings.privateResumeWindowHit,true,JSON.stringify(reopened.payload.startupTimings));
   assert.ok(reopened.payload.startupTimings.privateResumeAheadSeconds>=24);
+  if (validator === 'absent') {
+    assert.equal(reopened.payload.startupTimings.privateResumeValidationMode, 'sampled-recent-v1');
+    assert.equal(reopened.payload.startupTimings.privateResumeInputSeededBytes || 0, 0, 'incomplete HTTP body is not a replayable input window');
+  }
   assert.ok(providerRun.snapshot().maximumConcurrentProviderGets<=1);
   const playlist=await (await fetch(reopened.payload.hlsUrl)).text();
   assert.match(playlist,/resume-/);
   await run(ffmpeg,['-v','error','-xerror','-nostdin','-i',reopened.payload.hlsUrl,'-t','8','-f','null','-']);
+  // Independent TS encoders reset transport continuity counters at the HLS
+  // discontinuity. Validate codecs across that declared splice instead of
+  // treating the transport counter reset as a fatal input-packet flag. Raw
+  // sinks check decoding, not timestamp rewriting by FFmpeg's output muxer.
+  // Browser continuity/timing still requires the separate playback replay.
+  const decodeLog = await run(ffmpeg,['-v','error','-err_detect','explode','-nostdin','-y',
+    '-i',reopened.payload.hlsUrl,'-map','0:v:0','-t','55','-f','rawvideo','pipe:1',
+    '-map','0:a:0','-t','55','-f','s16le',os.devNull]);
+  assert.equal(decodeLog.trim(), '', 'cached prefix and fresh continuation must decode without codec errors');
   await fetch(`${gatewayBase}/sessions/${reopened.payload.id}`,{method:'DELETE',headers:serviceHeaders});
   await waitFor(h=>h.activeSessions===0 && h.vodInputPump.active===0 && h.videoEncoderCapacity.active===0,'final drain');
   assert.equal(providerRun.snapshot().activeGets,0);
-  t.diagnostic(JSON.stringify({privateWindowStored:true,privateWindowHit:true,partialSharedPublications:publications.length,
+  t.diagnostic(JSON.stringify({privateWindowStored:true,privateWindowHit:true,decodedSeconds:55,partialSharedPublications:publications.length,
     maximumConcurrentProviderGets:providerRun.snapshot().maximumConcurrentProviderGets,aheadSeconds:reopened.payload.startupTimings.privateResumeAheadSeconds}));
 });
