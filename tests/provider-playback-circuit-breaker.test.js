@@ -597,7 +597,7 @@ test('desktop local VOD owns one cloud session and never cascades into the cloud
   const api = read('public/js/api.js');
   const desktopFlow = section(
     api,
-    'const localTranscoder = _localTranscoderBase();',
+    'const localTranscoder = _localTranscoderBase(type, container);',
     '// Plain browser (no native player, no local transcoder):',
   );
 
