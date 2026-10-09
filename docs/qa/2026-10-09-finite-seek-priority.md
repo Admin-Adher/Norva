@@ -59,3 +59,23 @@ Les métriques de lecture encore pendantes après interruption ne sont pas addit
 Code candidat : `85b0d374dbbda6334dfdfd51e88182d5fe751567`. Image, canary, CI et éventuelle application seront consignés séparément après observation. À ce stade, **production inchangée par cette correction**. Les conteneurs d'essai sont arrêtés et les claims expirés normalement ; le lecteur public a été ramené au catalogue après collecte du diagnostic.
 
 Reçus sous `.codex-artifacts/retained-startup-ab-20261009/` : tests, comparaisons, traces et `public-cache-audit.safe.json`. Les identifiants, accès et URLs restent dans les fichiers privés serveur. Les limites et le déploiement précédent restent conservés dans [le rapport du pilote](2026-10-09-retained-owner-pilot.md).
+
+## Livraison et contrôle public à 10:53 Paris
+
+**PR732 fusionnée** par `a2d7c435da14d3204fd66bb61eddcaf02cbb5d3b`, tête `d2f439eb9735602246e91ffad920b54fb2d02f5a`, code `85b0d374dbbda6334dfdfd51e88182d5fe751567`. Contrats cloud réussis avant fusion. Suite Linux : **6 171 réussis, 31 ignorés, zéro échec** ; la suite SQL séparée de 40 tests passe aussi, sans addition des groupes recoupés. Les cinq check-runs, paquets Android Phone/TV et Windows compris, sont réussis à la clôture. Aucun changement d'interface ou de code natif ; aucune nouvelle matrice émulateur revendiquée.
+
+Canary à `08:46:33 UTC` : image exacte, UID1000, GPU réel, réseau `none`, aucun montage de production ni requête fournisseur. Six régressions du broker réussies ; test FFmpeg de fenêtre glissante (600 s synthétiques et 280 s de continuation), fenêtre rendue et garde propriétaire réussis. Les sources ont les permissions 0644, celles des paquets sont conservées ; canary arrêté et retiré.
+
+- Image déployée : `sha256:9e6f0849014864b13c756b2a4c79a6ce000f089273021fa4f85fb582760775f5`.
+- Arbre des sources : `f797023c5163d7d30e883a191da1cbb923b621c7f8a1c926e1d7ac7f984a56e6`.
+- 94 empreintes concordantes sur chaque Gateway, **un fichier changé, 93 conservés**. Environnement entier et politique de redémarrage comparés, inchangés. Edge et ses 194 fichiers inchangés.
+- Démarrages à `08:50:23.807` et `08:50:26.385 UTC`.
+- Pause d'admission de `08:50:07.114878` à `08:50:28.098528 UTC`, **20,983650 s**, drainage naturel compris. Deux travaux avaient un bail au début ; aucun bail forcé. Worker, cron, admission restaurés et dispatcher conservé.
+
+Un seul nouvel essai public, **Le Robot Sauvage à 660 s**, créé à `08:50:54.378 UTC`, atteint toujours `PLAYLIST_TIMEOUT` à `08:51:54.740`. Le préfixe initial de 1 Mio est reçu, puis 3 119 617 octets de continuation en 40,230 s. Une nouvelle plage commence ensuite à l'octet demandé : les 16 366 premiers octets arrivent en 533 ms ; la suivante n'a livré que 1 909 213 octets au dernier instantané. Zéro segment et zéro première image ; `gateway_502` public à `08:51:57.349`. La trace finale normalise l'interruption en `other`, donc elle n'est pas présentée comme un deuxième reçu textuel `new-range-yield`. Le passage à la cible est observé ; **aucun gain de démarrage ni réparation de la copie ne sont revendiqués**.
+
+À `08:53:16 UTC` : Gateways sains, zéro session/pompe sur les deux, zéro claim vivant du compte testé. Les traitements globaux ont repris ; trois réservations d'encodeur sont occupées dans le registre partagé et ne sont pas déclarées comme des fuites ou des sessions de test. Pilote toujours limité à un propriétaire. Aucun test à l'écoute validé.
+
+Les sept conteneurs temporaires sont absents. **47 fichiers temporaires, 1 591 335 octets**, supprimés sous les dossiers de preuve nommés, dont les préfixes MP4 diagnostiques. Reçus et diagnostics privés conservés. Les opérateurs d'essai et de déploiement ont leurs marqueurs consommés ; ne pas les rejouer. Attachement Codex de PR732 refusé à la limite de 100 ; aucune pièce retirée. Le navigateur est revenu au catalogue.
+
+**Reste ouvert : obtenir des démarrages réels suffisamment rapides pour alimenter le cache, puis valider reprise, continuité et écoute.** La courte conservation du décodeur et le cache récent ne promettent aucune reprise immédiate lorsque les données sont absentes, expirées ou invalidées.

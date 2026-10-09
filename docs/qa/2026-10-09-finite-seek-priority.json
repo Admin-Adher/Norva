@@ -1,0 +1,1035 @@
+{
+  "status": "pilot-deployed-real-startup-unresolved",
+  "code": "85b0d374dbbda6334dfdfd51e88182d5fe751567",
+  "pr": 732,
+  "merge": "a2d7c435da14d3204fd66bb61eddcaf02cbb5d3b",
+  "scope": "existing-owner-pilot-finite-mp4",
+  "targetedTests": {
+    "passed": 199,
+    "skipped": 5,
+    "failed": 0
+  },
+  "ci": {
+    "passed": 6171,
+    "skipped": 31,
+    "failed": 0,
+    "checkRunsPassed": 5,
+    "workflow": 37907074327
+  },
+  "canary": {
+    "at": "2026-10-09T08:46:33.125871+00:00",
+    "image": "sha256:9e6f0849014864b13c756b2a4c79a6ce000f089273021fa4f85fb582760775f5",
+    "revision": "85b0d374dbbda6334dfdfd51e88182d5fe751567",
+    "healthy": true,
+    "user": "1000:1000",
+    "network": "none",
+    "productionVolumes": false,
+    "sourceHashesMatch": true,
+    "health": {
+      "ok": true,
+      "videoEncoder": {
+        "protocol": 1,
+        "backend": "vaapi",
+        "hardware": true,
+        "ready": true,
+        "preflight": "vaapi-ready",
+        "deviceConfigured": true,
+        "decode": "vaapi-exact-profile-with-software-fallback",
+        "outputCodec": "h264"
+      },
+      "activeSessions": 0,
+      "rawPumpCount": 0,
+      "recentOwnerScope": "owner-allowlist"
+    },
+    "providerRequests": 0,
+    "gpuEncodePassed": true,
+    "allSourceFiles0644": true,
+    "packagePermissionsPreserved": true,
+    "functional": {
+      "functionalPassed": true,
+      "syntheticFilesRemoved": true,
+      "tests": 1,
+      "fixture": "600 second sliding output, measured clock, cached video/audio/subtitles, 280 second continuation, decode across splice",
+      "renderedWindowPassed": true,
+      "ownerGatePassed": true,
+      "seekRegressionTests": 6
+    },
+    "functionalCanarySha256": "b3878d292754ec1e6ce1fb42c1dca9938b37c801ea20a21f5817cd707de23e3c"
+  },
+  "deployment": {
+    "revision": "85b0d374dbbda6334dfdfd51e88182d5fe751567",
+    "image": "sha256:9e6f0849014864b13c756b2a4c79a6ce000f089273021fa4f85fb582760775f5",
+    "startedAt": "2026-10-09T08:50:07.028515+00:00",
+    "pausedAt": "2026-10-09T08:50:07.114878+00:00",
+    "gatewaysApplied": [
+      {
+        "name": "norva-media-gateway",
+        "at": "2026-10-09T08:50:25.152166+00:00"
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "at": "2026-10-09T08:50:27.732107+00:00"
+      }
+    ],
+    "edgesUnchanged": true,
+    "leasesForced": false,
+    "dispatcherRestarted": false,
+    "completedAt": "2026-10-09T08:50:27.809026+00:00",
+    "restoredAt": "2026-10-09T08:50:28.098528+00:00",
+    "admissionsRestored": true,
+    "workerStateRestored": true,
+    "dispatcherPreserved": true
+  },
+  "runtime": {
+    "at": "2026-10-09T08:50:45.491661+00:00",
+    "revision": "85b0d374dbbda6334dfdfd51e88182d5fe751567",
+    "image": "sha256:9e6f0849014864b13c756b2a4c79a6ce000f089273021fa4f85fb582760775f5",
+    "sourceTreeSha256": "f797023c5163d7d30e883a191da1cbb923b621c7f8a1c926e1d7ac7f984a56e6",
+    "replicas": [
+      {
+        "name": "norva-media-gateway",
+        "startedAt": "2026-10-09T08:50:23.807354823Z",
+        "healthy": true,
+        "all94SourceHashesMatch": true,
+        "retainedOwnerCount": 1
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "startedAt": "2026-10-09T08:50:26.384927991Z",
+        "healthy": true,
+        "all94SourceHashesMatch": true,
+        "retainedOwnerCount": 1
+      }
+    ],
+    "admissions": {
+      "cron": {
+        "id": 159,
+        "active": true
+      },
+      "paused": false
+    },
+    "stopAbsent": true,
+    "dispatcherRunning": true,
+    "workerRunning": true
+  },
+  "cleanup": {
+    "atUtc": "2026-10-09T08:48:08.886680+00:00",
+    "trials": {
+      "previous-4": {
+        "label": "previous",
+        "copyIndex": 4,
+        "atUtc": "2026-10-09T08:21:51.564402+00:00",
+        "position": 1222,
+        "productionChanged": false,
+        "entry": "ordinary direct claim plus isolated Gateway",
+        "playlistReady": true,
+        "title": "FR - Conclave (2024)",
+        "source": "Dino",
+        "startupMs": 48398,
+        "status": "ready",
+        "startupPolicy": {
+          "protocol": 2,
+          "eligible": true,
+          "pipeline": "video-transcode",
+          "targetBufferSeconds": 6,
+          "minimumEncodeRateX": 2,
+          "observedEncodeRateX": 8.106,
+          "reason": "vaapi-transcode-ready"
+        },
+        "heartbeatFailures": []
+      },
+      "current-4": {
+        "label": "current",
+        "copyIndex": 4,
+        "atUtc": "2026-10-09T08:23:22.599068+00:00",
+        "position": 1222,
+        "productionChanged": false,
+        "entry": "ordinary direct claim plus isolated Gateway",
+        "playlistReady": true,
+        "title": "FR - Conclave (2024)",
+        "source": "Dino",
+        "startupMs": 36406,
+        "status": "ready",
+        "startupPolicy": {
+          "protocol": 2,
+          "eligible": true,
+          "pipeline": "video-transcode",
+          "targetBufferSeconds": 6,
+          "minimumEncodeRateX": 2,
+          "observedEncodeRateX": 13.128,
+          "reason": "vaapi-transcode-ready"
+        },
+        "heartbeatFailures": []
+      },
+      "previous-2": {
+        "label": "previous",
+        "copyIndex": 2,
+        "atUtc": "2026-10-09T08:24:23.278914+00:00",
+        "position": 660,
+        "productionChanged": false,
+        "entry": "ordinary direct claim plus isolated Gateway",
+        "playlistReady": false,
+        "title": "FR| Le Robot Sauvage",
+        "source": "MAX OTT",
+        "failureType": "HTTPError",
+        "http": 502,
+        "guard": null,
+        "elapsedMs": 62612,
+        "heartbeatFailures": []
+      },
+      "current-2": {
+        "label": "current",
+        "copyIndex": 2,
+        "atUtc": "2026-10-09T08:25:51.279992+00:00",
+        "position": 660,
+        "productionChanged": false,
+        "entry": "ordinary direct claim plus isolated Gateway",
+        "playlistReady": false,
+        "title": "FR| Le Robot Sauvage",
+        "source": "MAX OTT",
+        "failureType": "HTTPError",
+        "http": 502,
+        "guard": null,
+        "elapsedMs": 62596,
+        "heartbeatFailures": []
+      },
+      "observed-2": {
+        "label": "observed",
+        "copyIndex": 2,
+        "atUtc": "2026-10-09T08:28:03.322741+00:00",
+        "position": 660,
+        "productionChanged": false,
+        "entry": "ordinary direct claim plus isolated Gateway",
+        "playlistReady": false,
+        "title": "FR| Le Robot Sauvage",
+        "source": "MAX OTT",
+        "failureType": "RemoteDisconnected",
+        "http": null,
+        "guard": null,
+        "elapsedMs": 40764,
+        "heartbeatFailures": []
+      },
+      "fixed-2": {
+        "label": "fixed",
+        "copyIndex": 2,
+        "atUtc": "2026-10-09T08:33:40.004563+00:00",
+        "position": 660,
+        "productionChanged": false,
+        "entry": "ordinary direct claim plus isolated Gateway",
+        "playlistReady": false,
+        "title": "FR| Le Robot Sauvage",
+        "source": "MAX OTT",
+        "failureType": "HTTPError",
+        "http": 502,
+        "guard": null,
+        "elapsedMs": 62566,
+        "heartbeatFailures": []
+      },
+      "reviewed-2": {
+        "label": "reviewed",
+        "copyIndex": 2,
+        "atUtc": "2026-10-09T08:36:26.105069+00:00",
+        "position": 660,
+        "productionChanged": false,
+        "entry": "ordinary direct claim plus isolated Gateway",
+        "playlistReady": false,
+        "title": "FR| Le Robot Sauvage",
+        "source": "MAX OTT",
+        "failureType": "HTTPError",
+        "http": 502,
+        "guard": null,
+        "elapsedMs": 62595,
+        "heartbeatFailures": []
+      }
+    },
+    "removedMediaBytes": 1591335,
+    "removedMediaFiles": 47,
+    "providerIO": false,
+    "mp4Prefix": {
+      "sampleBytes": 262144,
+      "sampleSha256": "caf771db9684b87e774a6c3f3fd703089e228dbcf3803a4e1414c3f3a521d903",
+      "ftypBytes": 32,
+      "moovOffset": 32,
+      "moovBytes": 4165413,
+      "completeMoovInSample": false
+    },
+    "candidateContainersAbsent": true
+  },
+  "closeout": {
+    "atUtc": "2026-10-09T08:53:16.334350+00:00",
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "healthy": true,
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "image": "sha256:9e6f0849014864b13c756b2a4c79a6ce000f089273021fa4f85fb582760775f5",
+        "startedAt": "2026-10-09T08:50:23.807354823Z",
+        "environmentUnchanged": true,
+        "sharedVideoEncoderCapacity": {
+          "limit": 8,
+          "occupied": 3
+        }
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "healthy": true,
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "image": "sha256:9e6f0849014864b13c756b2a4c79a6ce000f089273021fa4f85fb582760775f5",
+        "startedAt": "2026-10-09T08:50:26.384927991Z",
+        "environmentUnchanged": true,
+        "sharedVideoEncoderCapacity": {
+          "limit": 8,
+          "occupied": 3
+        }
+      }
+    ],
+    "pilotOwnerCount": 1,
+    "audibleAcceptance": false,
+    "ownerLiveClaims": 0,
+    "admissions": {
+      "paused": false,
+      "cron": true
+    },
+    "dispatcherRunning": true,
+    "workerRunning": true,
+    "canaryAbsent": true
+  },
+  "publicBefore": {
+    "atUtc": "2026-10-09T08:43:23.836699+00:00",
+    "sessions": [
+      {
+        "error": "gateway_502",
+        "state": "failed",
+        "createdAt": "2026-10-09T08:38:28.327921+00:00",
+        "events": [
+          {
+            "at": "2026-10-09T08:39:31.228654+00:00",
+            "code": "gateway_502",
+            "event": "gateway_error",
+            "ttffMs": null,
+            "position": 0
+          }
+        ]
+      }
+    ],
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "startedAt": "2026-10-09T08:00:40.638101606Z",
+        "running": true,
+        "cache": {
+          "finiteMkvResumePrefixCache": {
+            "protocol": 1,
+            "scope": "process-private-exact-source",
+            "validator": "strong-etag-or-exact-source-size-current-prefix",
+            "entries": 0,
+            "bytes": 0,
+            "maxBytes": 134217728,
+            "maxEntryBytes": 4194304,
+            "ttlMs": 1800000,
+            "stats": {
+              "hits": 0,
+              "misses": 0,
+              "stores": 0,
+              "rejected": 0,
+              "evictions": 0,
+              "expired": 0
+            }
+          },
+          "finitePlaybackRangeReuse": {
+            "protocol": 1,
+            "files": 0,
+            "bytes": 0,
+            "reusedBytes": 0,
+            "hits": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "scope": "process-private-owner-exact-source",
+            "revalidation": "current-drained-range-strong-etag-size-target",
+            "maxBytes": 67108864,
+            "perFileBytes": 8388608,
+            "maxFiles": 32,
+            "maxFragments": 64,
+            "ttlMs": 1800000,
+            "maxRetainedWindowBytes": 1310720,
+            "skippedSequentialWindows": 0,
+            "validation": {
+              "confirmed": 0,
+              "rejectedIdentity": 0,
+              "changed": 0,
+              "rejectedLifecycle": 0,
+              "storedWindows": 0
+            },
+            "identityRejections": {
+              "missingValidator": 0,
+              "nonEtagValidator": 0,
+              "weakOrInvalidEtag": 0,
+              "sizeMismatch": 0,
+              "missingTargetIdentity": 0
+            }
+          },
+          "privateResumeByteRanges": {
+            "enabled": true,
+            "ownerScoped": false,
+            "protocol": 1,
+            "files": 0,
+            "bytes": 0,
+            "reusedBytes": 0,
+            "hits": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "scope": "process-private-owner-exact-source",
+            "revalidation": "current-drained-range-strong-etag-size-target",
+            "maxBytes": 134217728,
+            "perFileBytes": 33554432,
+            "maxFiles": 32,
+            "maxFragments": 64,
+            "ttlMs": 1800000,
+            "maxRetainedWindowBytes": 8388608,
+            "skippedSequentialWindows": 0,
+            "validation": {
+              "confirmed": 0,
+              "rejectedIdentity": 0,
+              "changed": 0,
+              "rejectedLifecycle": 0,
+              "storedWindows": 0
+            },
+            "identityRejections": {
+              "missingValidator": 0,
+              "nonEtagValidator": 0,
+              "weakOrInvalidEtag": 0,
+              "sizeMismatch": 0,
+              "missingTargetIdentity": 0
+            }
+          },
+          "privateResumeHlsCache": {
+            "enabled": true,
+            "recentOwnerScope": "owner-allowlist",
+            "ownerScoped": false,
+            "protocol": 1,
+            "stores": 0,
+            "hits": 0,
+            "misses": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "inputStores": 0,
+            "inputHits": 0,
+            "sampledStores": 0,
+            "sampledHits": 0,
+            "captureRejects": 0,
+            "lastCaptureRejection": null,
+            "entries": 0,
+            "bytes": 0,
+            "reservedBytes": 0,
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "ttlMs": 1800000,
+            "windowSeconds": 48,
+            "recentRevalidation": true,
+            "recentTtlMs": 600000,
+            "scope": "private-owner-source-revision",
+            "revalidation": "current-strong-etag-size-target"
+          }
+        },
+        "sessions": [],
+        "failures": []
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "startedAt": "2026-10-09T08:00:43.251562164Z",
+        "running": true,
+        "cache": {
+          "finiteMkvResumePrefixCache": {
+            "protocol": 1,
+            "scope": "process-private-exact-source",
+            "validator": "strong-etag-or-exact-source-size-current-prefix",
+            "entries": 1,
+            "bytes": 2097152,
+            "maxBytes": 134217728,
+            "maxEntryBytes": 4194304,
+            "ttlMs": 1800000,
+            "stats": {
+              "hits": 0,
+              "misses": 2,
+              "stores": 2,
+              "rejected": 0,
+              "evictions": 0,
+              "expired": 1
+            }
+          },
+          "finitePlaybackRangeReuse": {
+            "protocol": 1,
+            "files": 0,
+            "bytes": 0,
+            "reusedBytes": 0,
+            "hits": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "scope": "process-private-owner-exact-source",
+            "revalidation": "current-drained-range-strong-etag-size-target",
+            "maxBytes": 67108864,
+            "perFileBytes": 8388608,
+            "maxFiles": 32,
+            "maxFragments": 64,
+            "ttlMs": 1800000,
+            "maxRetainedWindowBytes": 1310720,
+            "skippedSequentialWindows": 0,
+            "validation": {
+              "confirmed": 0,
+              "rejectedIdentity": 0,
+              "changed": 0,
+              "rejectedLifecycle": 0,
+              "storedWindows": 0
+            },
+            "identityRejections": {
+              "missingValidator": 0,
+              "nonEtagValidator": 0,
+              "weakOrInvalidEtag": 0,
+              "sizeMismatch": 0,
+              "missingTargetIdentity": 0
+            }
+          },
+          "privateResumeByteRanges": {
+            "enabled": true,
+            "ownerScoped": false,
+            "protocol": 1,
+            "files": 0,
+            "bytes": 0,
+            "reusedBytes": 0,
+            "hits": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "scope": "process-private-owner-exact-source",
+            "revalidation": "current-drained-range-strong-etag-size-target",
+            "maxBytes": 134217728,
+            "perFileBytes": 33554432,
+            "maxFiles": 32,
+            "maxFragments": 64,
+            "ttlMs": 1800000,
+            "maxRetainedWindowBytes": 8388608,
+            "skippedSequentialWindows": 0,
+            "validation": {
+              "confirmed": 0,
+              "rejectedIdentity": 3,
+              "changed": 0,
+              "rejectedLifecycle": 0,
+              "storedWindows": 0
+            },
+            "identityRejections": {
+              "missingValidator": 3,
+              "nonEtagValidator": 0,
+              "weakOrInvalidEtag": 0,
+              "sizeMismatch": 0,
+              "missingTargetIdentity": 0
+            }
+          },
+          "privateResumeHlsCache": {
+            "enabled": true,
+            "recentOwnerScope": "owner-allowlist",
+            "ownerScoped": false,
+            "protocol": 1,
+            "stores": 0,
+            "hits": 0,
+            "misses": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "inputStores": 0,
+            "inputHits": 0,
+            "sampledStores": 0,
+            "sampledHits": 0,
+            "captureRejects": 0,
+            "lastCaptureRejection": null,
+            "entries": 0,
+            "bytes": 0,
+            "reservedBytes": 0,
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "ttlMs": 1800000,
+            "windowSeconds": 48,
+            "recentRevalidation": true,
+            "recentTtlMs": 600000,
+            "scope": "private-owner-source-revision",
+            "revalidation": "current-strong-etag-size-target"
+          }
+        },
+        "sessions": [],
+        "failures": [
+          {
+            "time": "2026-10-09T08:39:28.628Z",
+            "status": "starting",
+            "startup": {
+              "protocol": 1,
+              "code": "PLAYLIST_TIMEOUT",
+              "timings": {
+                "codecProfileMs": 0,
+                "providerGetPreopenMs": 0,
+                "slotReleaseWaitMs": 0,
+                "ffmpegReadyMs": 60007,
+                "playlistSegmentCount": 0,
+                "playlistBufferSeconds": 0,
+                "ffmpegSpawnCount": 1,
+                "finiteTsFastInput": false,
+                "finiteTsDurationScanSkipped": false,
+                "finiteTsIndexUsed": false
+              },
+              "broker": {
+                "providerFetches": 6,
+                "completedProviderFetches": 4,
+                "interruptedProviderFetches": 1,
+                "cacheHits": 3,
+                "cacheMisses": 8,
+                "resumeRangeReusedBytes": 0
+              },
+              "windows": [
+                {
+                  "localStart": 0,
+                  "localEnd": 3093967018,
+                  "providerStart": 0,
+                  "providerEnd": 262143,
+                  "bytes": 262144,
+                  "responseHeadersMs": 1489,
+                  "firstByteMs": 1489,
+                  "durationMs": 2186,
+                  "redirects": 1,
+                  "resolvedTargetReused": false,
+                  "outcome": "completed"
+                },
+                {
+                  "localStart": 3093965715,
+                  "localEnd": 3093967018,
+                  "providerStart": 3093965715,
+                  "providerEnd": 3093967018,
+                  "bytes": 1304,
+                  "responseHeadersMs": 1370,
+                  "firstByteMs": 1371,
+                  "durationMs": 1371,
+                  "redirects": 0,
+                  "resolvedTargetReused": true,
+                  "outcome": "completed"
+                },
+                {
+                  "localStart": 0,
+                  "localEnd": 3093967018,
+                  "providerStart": 262144,
+                  "providerEnd": 2097151,
+                  "bytes": 0,
+                  "durationMs": 0,
+                  "resolvedTargetReused": false,
+                  "outcome": "superseded"
+                },
+                {
+                  "localStart": 6884,
+                  "localEnd": 3093967018,
+                  "providerStart": 262144,
+                  "providerEnd": 2097151,
+                  "bytes": 1835008,
+                  "responseHeadersMs": 674,
+                  "firstByteMs": 674,
+                  "durationMs": 21142,
+                  "redirects": 0,
+                  "resolvedTargetReused": true,
+                  "outcome": "completed"
+                },
+                {
+                  "localStart": 3093893333,
+                  "localEnd": 3093967018,
+                  "providerStart": 3093893333,
+                  "providerEnd": 3093967018,
+                  "bytes": 73686,
+                  "responseHeadersMs": 651,
+                  "firstByteMs": 652,
+                  "durationMs": 1048,
+                  "redirects": 0,
+                  "resolvedTargetReused": true,
+                  "outcome": "completed"
+                },
+                {
+                  "localStart": 10018,
+                  "localEnd": 3093967018,
+                  "providerStart": 2097152,
+                  "providerEnd": 4194303,
+                  "bytes": 969432,
+                  "responseHeadersMs": 258,
+                  "firstByteMs": 258,
+                  "redirects": 0,
+                  "resolvedTargetReused": true,
+                  "outcome": "active"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "publicAfter": {
+    "atUtc": "2026-10-09T08:52:32.812726+00:00",
+    "sessions": [
+      {
+        "error": "gateway_502",
+        "state": "failed",
+        "createdAt": "2026-10-09T08:50:54.37839+00:00",
+        "events": [
+          {
+            "at": "2026-10-09T08:51:57.34905+00:00",
+            "code": "gateway_502",
+            "event": "gateway_error",
+            "ttffMs": null,
+            "position": 0
+          }
+        ]
+      }
+    ],
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "startedAt": "2026-10-09T08:50:23.807354823Z",
+        "running": true,
+        "cache": {
+          "finiteMkvResumePrefixCache": {
+            "protocol": 1,
+            "scope": "process-private-exact-source",
+            "validator": "strong-etag-or-exact-source-size-current-prefix",
+            "entries": 0,
+            "bytes": 0,
+            "maxBytes": 134217728,
+            "maxEntryBytes": 4194304,
+            "ttlMs": 1800000,
+            "stats": {
+              "hits": 0,
+              "misses": 0,
+              "stores": 0,
+              "rejected": 0,
+              "evictions": 0,
+              "expired": 0
+            }
+          },
+          "finitePlaybackRangeReuse": {
+            "protocol": 1,
+            "files": 0,
+            "bytes": 0,
+            "reusedBytes": 0,
+            "hits": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "scope": "process-private-owner-exact-source",
+            "revalidation": "current-drained-range-strong-etag-size-target",
+            "maxBytes": 67108864,
+            "perFileBytes": 8388608,
+            "maxFiles": 32,
+            "maxFragments": 64,
+            "ttlMs": 1800000,
+            "maxRetainedWindowBytes": 1310720,
+            "skippedSequentialWindows": 0,
+            "validation": {
+              "confirmed": 0,
+              "rejectedIdentity": 0,
+              "changed": 0,
+              "rejectedLifecycle": 0,
+              "storedWindows": 0
+            },
+            "identityRejections": {
+              "missingValidator": 0,
+              "nonEtagValidator": 0,
+              "weakOrInvalidEtag": 0,
+              "sizeMismatch": 0,
+              "missingTargetIdentity": 0
+            }
+          },
+          "privateResumeByteRanges": {
+            "enabled": true,
+            "ownerScoped": false,
+            "protocol": 1,
+            "files": 0,
+            "bytes": 0,
+            "reusedBytes": 0,
+            "hits": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "scope": "process-private-owner-exact-source",
+            "revalidation": "current-drained-range-strong-etag-size-target",
+            "maxBytes": 134217728,
+            "perFileBytes": 33554432,
+            "maxFiles": 32,
+            "maxFragments": 64,
+            "ttlMs": 1800000,
+            "maxRetainedWindowBytes": 8388608,
+            "skippedSequentialWindows": 0,
+            "validation": {
+              "confirmed": 0,
+              "rejectedIdentity": 0,
+              "changed": 0,
+              "rejectedLifecycle": 0,
+              "storedWindows": 0
+            },
+            "identityRejections": {
+              "missingValidator": 0,
+              "nonEtagValidator": 0,
+              "weakOrInvalidEtag": 0,
+              "sizeMismatch": 0,
+              "missingTargetIdentity": 0
+            }
+          },
+          "privateResumeHlsCache": {
+            "enabled": true,
+            "recentOwnerScope": "owner-allowlist",
+            "ownerScoped": false,
+            "protocol": 1,
+            "stores": 0,
+            "hits": 0,
+            "misses": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "inputStores": 0,
+            "inputHits": 0,
+            "sampledStores": 0,
+            "sampledHits": 0,
+            "captureRejects": 0,
+            "lastCaptureRejection": null,
+            "entries": 0,
+            "bytes": 0,
+            "reservedBytes": 0,
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "ttlMs": 1800000,
+            "windowSeconds": 48,
+            "recentRevalidation": true,
+            "recentTtlMs": 600000,
+            "scope": "private-owner-source-revision",
+            "revalidation": "current-strong-etag-size-target"
+          }
+        },
+        "sessions": [],
+        "failures": []
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "startedAt": "2026-10-09T08:50:26.384927991Z",
+        "running": true,
+        "cache": {
+          "finiteMkvResumePrefixCache": {
+            "protocol": 1,
+            "scope": "process-private-exact-source",
+            "validator": "strong-etag-or-exact-source-size-current-prefix",
+            "entries": 0,
+            "bytes": 0,
+            "maxBytes": 134217728,
+            "maxEntryBytes": 4194304,
+            "ttlMs": 1800000,
+            "stats": {
+              "hits": 0,
+              "misses": 0,
+              "stores": 0,
+              "rejected": 0,
+              "evictions": 0,
+              "expired": 0
+            }
+          },
+          "finitePlaybackRangeReuse": {
+            "protocol": 1,
+            "files": 0,
+            "bytes": 0,
+            "reusedBytes": 0,
+            "hits": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "scope": "process-private-owner-exact-source",
+            "revalidation": "current-drained-range-strong-etag-size-target",
+            "maxBytes": 67108864,
+            "perFileBytes": 8388608,
+            "maxFiles": 32,
+            "maxFragments": 64,
+            "ttlMs": 1800000,
+            "maxRetainedWindowBytes": 1310720,
+            "skippedSequentialWindows": 0,
+            "validation": {
+              "confirmed": 0,
+              "rejectedIdentity": 0,
+              "changed": 0,
+              "rejectedLifecycle": 0,
+              "storedWindows": 0
+            },
+            "identityRejections": {
+              "missingValidator": 0,
+              "nonEtagValidator": 0,
+              "weakOrInvalidEtag": 0,
+              "sizeMismatch": 0,
+              "missingTargetIdentity": 0
+            }
+          },
+          "privateResumeByteRanges": {
+            "enabled": true,
+            "ownerScoped": false,
+            "protocol": 1,
+            "files": 0,
+            "bytes": 0,
+            "reusedBytes": 0,
+            "hits": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "scope": "process-private-owner-exact-source",
+            "revalidation": "current-drained-range-strong-etag-size-target",
+            "maxBytes": 134217728,
+            "perFileBytes": 33554432,
+            "maxFiles": 32,
+            "maxFragments": 64,
+            "ttlMs": 1800000,
+            "maxRetainedWindowBytes": 8388608,
+            "skippedSequentialWindows": 0,
+            "validation": {
+              "confirmed": 0,
+              "rejectedIdentity": 1,
+              "changed": 0,
+              "rejectedLifecycle": 0,
+              "storedWindows": 0
+            },
+            "identityRejections": {
+              "missingValidator": 1,
+              "nonEtagValidator": 0,
+              "weakOrInvalidEtag": 0,
+              "sizeMismatch": 0,
+              "missingTargetIdentity": 0
+            }
+          },
+          "privateResumeHlsCache": {
+            "enabled": true,
+            "recentOwnerScope": "owner-allowlist",
+            "ownerScoped": false,
+            "protocol": 1,
+            "stores": 0,
+            "hits": 0,
+            "misses": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "inputStores": 0,
+            "inputHits": 0,
+            "sampledStores": 0,
+            "sampledHits": 0,
+            "captureRejects": 0,
+            "lastCaptureRejection": null,
+            "entries": 0,
+            "bytes": 0,
+            "reservedBytes": 0,
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "ttlMs": 1800000,
+            "windowSeconds": 48,
+            "recentRevalidation": true,
+            "recentTtlMs": 600000,
+            "scope": "private-owner-source-revision",
+            "revalidation": "current-strong-etag-size-target"
+          }
+        },
+        "sessions": [],
+        "failures": [
+          {
+            "time": "2026-10-09T08:51:54.740Z",
+            "status": "starting",
+            "startup": {
+              "protocol": 1,
+              "code": "PLAYLIST_TIMEOUT",
+              "timings": {
+                "codecProfileMs": 0,
+                "slotReleaseWaitMs": 0,
+                "ffmpegReadyMs": 60028,
+                "playlistSegmentCount": 0,
+                "playlistBufferSeconds": 0,
+                "ffmpegSpawnCount": 1,
+                "finiteTsFastInput": false,
+                "finiteTsDurationScanSkipped": false,
+                "finiteTsIndexUsed": false
+              },
+              "broker": {
+                "providerFetches": 5,
+                "completedProviderFetches": 3,
+                "interruptedProviderFetches": 1,
+                "cacheHits": 0,
+                "cacheMisses": 6,
+                "resumeRangeReusedBytes": 0
+              },
+              "windows": [
+                {
+                  "localStart": 0,
+                  "localEnd": 1118403838,
+                  "providerStart": 0,
+                  "providerEnd": 262143,
+                  "bytes": 262144,
+                  "responseHeadersMs": 2506,
+                  "firstByteMs": 2508,
+                  "durationMs": 2933,
+                  "redirects": 1,
+                  "resolvedTargetReused": false,
+                  "outcome": "completed"
+                },
+                {
+                  "localStart": 0,
+                  "localEnd": 1118403838,
+                  "providerStart": 262144,
+                  "providerEnd": 1048575,
+                  "bytes": 786432,
+                  "responseHeadersMs": 1593,
+                  "firstByteMs": 1594,
+                  "durationMs": 7232,
+                  "redirects": 0,
+                  "resolvedTargetReused": true,
+                  "outcome": "completed"
+                },
+                {
+                  "localStart": 0,
+                  "localEnd": 1118403838,
+                  "providerStart": 1048576,
+                  "providerEnd": 9437183,
+                  "bytes": 3119617,
+                  "responseHeadersMs": 1746,
+                  "firstByteMs": 1746,
+                  "durationMs": 40230,
+                  "redirects": 0,
+                  "resolvedTargetReused": true,
+                  "outcome": "other"
+                },
+                {
+                  "localStart": 124764178,
+                  "localEnd": 1118403838,
+                  "providerStart": 124764178,
+                  "providerEnd": 124780543,
+                  "bytes": 16366,
+                  "responseHeadersMs": 394,
+                  "firstByteMs": 394,
+                  "durationMs": 533,
+                  "redirects": 0,
+                  "resolvedTargetReused": true,
+                  "outcome": "completed"
+                },
+                {
+                  "localStart": 124764178,
+                  "localEnd": 1118403838,
+                  "providerStart": 124780544,
+                  "providerEnd": 133169151,
+                  "bytes": 1909213,
+                  "responseHeadersMs": 547,
+                  "firstByteMs": 548,
+                  "redirects": 0,
+                  "resolvedTargetReused": true,
+                  "outcome": "active"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "limits": {
+    "audibleAcceptance": false,
+    "robotRepaired": false,
+    "normalGain": false,
+    "realPlaybackGain": false,
+    "generalRollout": false,
+    "retainedDecoderMaxMs": 10000,
+    "recentSampleTtlMs": 600000,
+    "historicalCacheTtlMs": 1800000,
+    "cacheSurvivesProcessRestart": false
+  }
+}
