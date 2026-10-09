@@ -13412,6 +13412,60 @@
       "hardwareClockContainerAbsent": true,
       "remainingMediaFiles": []
     },
-    "evidenceDirectory": ".codex-artifacts/retained-rendered-window-20261009"
+    "evidenceDirectory": ".codex-artifacts/retained-rendered-window-20261009",
+    "clockFailureFallback": {
+      "code": "a5668eade645f1ac46158c3b23da007a636df539",
+      "regressionFailedBeforeFix": true,
+      "targetedPassed": 110,
+      "targetedSkipped": 0,
+      "productionGatewayChanged": false,
+      "newRealSourceReplay": false,
+      "canary": {
+        "atUtc": "2026-10-09T07:40:11.823Z",
+        "realFfmpeg": true,
+        "network": "none",
+        "providerRequests": 0,
+        "first": {
+          "protocol": 1,
+          "consumed": 61,
+          "produced": 61,
+          "bytes": 6316503,
+          "peakBytes": 6316503,
+          "maxBytes": 33554432,
+          "aheadSegments": 32,
+          "renderedSequence": 0,
+          "admissionWaits": 0,
+          "admittedSegments": 62,
+          "pending": 1,
+          "stopped": false,
+          "resumeRetainedBytes": 0,
+          "resumeRetainedFiles": 0
+        },
+        "after": {
+          "protocol": 1,
+          "consumed": 111,
+          "produced": 111,
+          "bytes": 8146374,
+          "peakBytes": 8264062,
+          "maxBytes": 33554432,
+          "aheadSegments": 32,
+          "renderedSequence": 50,
+          "admissionWaits": 0,
+          "admittedSegments": 112,
+          "pending": 1,
+          "stopped": false,
+          "resumeRetainedBytes": 0,
+          "resumeRetainedFiles": 0
+        },
+        "origin": 96,
+        "renderedPosition": 101,
+        "containsRenderedPosition": true,
+        "initialMediaSeconds": 124,
+        "startupReserveUnchanged": 96,
+        "wholePlayerValidated": false,
+        "codeRevision": "a5668eade645f1ac46158c3b23da007a636df539",
+        "admissionSha256": "9eb56568dfbde1bec5a27ac75498ba4e8d516df575933c78c1553d608559a718"
+      }
+    }
   }
 }
