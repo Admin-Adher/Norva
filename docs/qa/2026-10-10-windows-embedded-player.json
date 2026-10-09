@@ -1,0 +1,127 @@
+{
+  "status": "awaiting_final_portable_test",
+  "code": "26ca61dec14129621e36fbef8335b417aadfcb71",
+  "pr": 757,
+  "version": "2.1.5-native.2",
+  "design": "Web WatchPage hierarchy, SVG controls, Inter, integrated native child window",
+  "ci": {
+    "run": 38002037177,
+    "passed": 6286,
+    "skipped": 34,
+    "failed": 0,
+    "checksPassed": 5,
+    "targetedTestsPassed": 39
+  },
+  "package": {
+    "code": "26ca61dec14129621e36fbef8335b417aadfcb71",
+    "artifactId": 11649238426,
+    "archiveSha256": "a20825f52a5e61e61d140fa2a04c76d25e924aabf15670e187a3f3529a7c8aed",
+    "version": "2.1.5-native.2",
+    "canonicalSourceMatches": [
+      "electron-main.js",
+      "preload.js",
+      "desktop/native-player-ipc.js",
+      "desktop/native-player-controller.js",
+      "desktop/native-input.js",
+      "public/js/utils/desktopNative.js"
+    ],
+    "requiredFiles": [
+      "Norva.NativePlayer.exe",
+      "Norva.NativePlayer.dll",
+      "libvlc/win-x64/libvlc.dll",
+      "libvlc/win-x64/libvlccore.dll",
+      "norva-player-icons.json",
+      "norva-labels.json",
+      "norva-theme.css",
+      "fonts/Inter-Regular.ttf",
+      "fonts/LICENSE.txt",
+      "THIRD-PARTY-NOTICES.md",
+      "source-manifest.json",
+      "licenses/vlc/COPYING",
+      "licenses/vlc/COPYING.LIB",
+      "licenses/libvlcsharp/LICENSE",
+      "licenses/microsoft.windowsdesktop.app.runtime.win-x64/LICENSE"
+    ],
+    "fontMatches": true,
+    "modernWindowsManifest": true,
+    "qaArtifactsExcluded": true,
+    "debugReceiptExcluded": true,
+    "x64Only": true,
+    "exeBytes": 239572276,
+    "exeSha256": "a40e8a0e058a7e1967bdd8d715081dd828b3b10dcf5f2f04adda6bb2b66dca04",
+    "finalPortableUiVerified": false
+  },
+  "realTests": [
+    {
+      "title": "Conclave",
+      "provider": "Dino",
+      "mode": "resume and seek",
+      "firstImageFromNativeOpenSeconds": 5.968
+    },
+    {
+      "title": "Prey",
+      "provider": "MAX OTT",
+      "mode": "resume and zero seek",
+      "firstImageFromNativeOpenSeconds": 40.453
+    },
+    {
+      "title": "Last Bullet",
+      "provider": "MAX OTT",
+      "mode": "first zero start",
+      "firstImageFromNativeOpenSeconds": 45.764
+    },
+    {
+      "title": "Breaking Bad S1E3",
+      "provider": "Dino",
+      "mode": "resume",
+      "firstImageFromNativeOpenSeconds": 50.389
+    },
+    {
+      "title": "California King",
+      "provider": "MAX OTT",
+      "mode": "resume",
+      "firstImageFromNativeOpenSeconds": 20.173,
+      "firstImageFromClickSeconds": 27.247,
+      "controls": {
+        "pause": true,
+        "subtitleSwitch": true,
+        "fullscreen": true,
+        "escape": true,
+        "catalogueReturn": true
+      }
+    },
+    {
+      "title": "Peaky Blinders S1E2",
+      "provider": "Dino",
+      "format": "MP4",
+      "mode": "first zero start and seek",
+      "firstImageFromNativeOpenSeconds": 3.41,
+      "firstImageFromClickSeconds": 3.97,
+      "seekFirstSampleSeconds": 1.149,
+      "positionAfterSeekSeconds": 1049.36,
+      "maximumConcurrentSourceRequests": 1,
+      "sourceRequestsAtClose": 0,
+      "cacheHits": 14,
+      "maxCacheBytes": 16777216
+    },
+    {
+      "title": "Peaky Blinders S1E2",
+      "provider": "Strng",
+      "format": "MP4",
+      "mode": "first zero start",
+      "failed": true,
+      "upstreamStatuses": [
+        460,
+        460
+      ],
+      "bytes": 0,
+      "cause": "undetermined"
+    }
+  ],
+  "limitations": [
+    "Some copies remain slow or refuse delivery",
+    "No full-film fluency or audible acceptance claimed",
+    "Portable UI launch rejected by automatic review; human confirmation pending"
+  ],
+  "productionGatewayChanged": false
+}
