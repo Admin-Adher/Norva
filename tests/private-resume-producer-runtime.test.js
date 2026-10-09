@@ -379,12 +379,13 @@ for (const validator of ['strong', 'absent']) test(`an abandoned complete-cache 
   await run(ffmpeg,['-v','error','-xerror','-nostdin','-i',reopened.payload.hlsUrl,'-t','8','-f','null','-']);
   // Independent TS encoders reset transport continuity counters at the HLS
   // discontinuity. Validate codecs across that declared splice instead of
-  // treating the transport counter reset as a fatal input-packet flag. Raw
-  // sinks check decoding, not timestamp rewriting by FFmpeg's output muxer.
-  // Browser continuity/timing still requires the separate playback replay.
+  // treating the transport counter reset as a fatal input-packet flag. The
+  // PCM sink explicitly numbers decoded samples: this assertion checks codec
+  // errors, NOT the source clock or audio continuity at the discontinuity.
+  // Those still require the separate browser timing/playback replay.
   const decodeLog = await run(ffmpeg,['-v','error','-err_detect','explode','-nostdin','-y',
     '-i',reopened.payload.hlsUrl,'-map','0:v:0','-t','55','-f','rawvideo','pipe:1',
-    '-map','0:a:0','-t','55','-f','s16le',os.devNull]);
+    '-map','0:a:0','-af','asetpts=N/SR/TB','-t','55','-f','s16le',os.devNull]);
   assert.equal(decodeLog.trim(), '', 'cached prefix and fresh continuation must decode without codec errors');
   await fetch(`${gatewayBase}/sessions/${reopened.payload.id}`,{method:'DELETE',headers:serviceHeaders});
   await waitFor(h=>h.activeSessions===0 && h.vodInputPump.active===0 && h.videoEncoderCapacity.active===0,'final drain');
