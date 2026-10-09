@@ -345,7 +345,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
       - name: Pull the pinned PostgreSQL proof image
-        run: docker pull supabase/postgres:17.6.1.136
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Supabase's official mirror has the identical 17.6.1.136 linux/amd64
+          # manifest, config and layers. Avoid Docker Hub's anonymous pull quota.
+          proof_image='public.ecr.aws/supabase/postgres@sha256:5a4314708484bec672de2c09653a5c01fb1c84a998564ac231b0325e2238ed5b'
+          docker pull --platform linux/amd64 "$proof_image"
+          test "$(docker image inspect --format '{{.Id}}' "$proof_image")" = 'sha256:f519727303f0af6862882be2a30f420e28710d4209226e681aaddb2c01d12d9b'
+          docker tag "$proof_image" supabase/postgres:17.6.1.136
       - name: Verify channels, consent and shared contact limits without network
         run: python3 ops/hetzner/scripts/proof-notification-channels-20260908.py
 

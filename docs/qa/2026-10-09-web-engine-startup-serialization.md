@@ -53,3 +53,9 @@ AAC copié sur le MKV synthétique multipiste de 60 s : première image 277 ms, 
 À 22:54:55 Paris, 60 fichiers temporaires de prélèvement, sortie et diagnostic détaillé supprimés (62 193 981 octets). Reçus de tailles, empreintes, erreurs et comparaison des paquets conservés ; aucune copie média diagnostique restante. Onglet de preuve fermé après le dernier contrôle synthétique.
 
 Première CI : le contrôle « Notification channel policy » échoue avant les tests sur la limite de téléchargement anonyme Docker Hub. Aucun échec fonctionnel de ce contrôle n'est démontré. Une demande de relance ciblée est refusée par GitHub car le workflow tourne encore : aucune relance effectivement commencée à ce stade. Les autres contrôles poursuivent leur exécution. Attachement de PR754 refusé par Codex à la limite de 100 ; aucune pièce retirée.
+
+### Disponibilité de l'image de preuve CI
+
+Le même quota Docker Hub échoue sur la tête documentaire suivante. Vérification indépendante des deux registres : [miroir officiel Supabase ECR](https://gallery.ecr.aws/supabase/postgres) et Docker Hub retournent des index, manifeste Linux/amd64, configuration et 29 couches strictement identiques pour 17.6.1.136. Manifeste `sha256:5a4314708484bec672de2c09653a5c01fb1c84a998564ac231b0325e2238ed5b`, configuration `sha256:f519727303f0af6862882be2a30f420e28710d4209226e681aaddb2c01d12d9b`.
+
+Le job CI des notifications tire désormais le miroir officiel par ce digest immuable, vérifie l'ID de configuration puis lui donne le même tag local attendu par le script. Tests SQL, réseau isolé, mémoire, utilisateur et script inchangés. Aucun registre ni conteneur de production modifié. Cela répare un téléchargement de dépendance ; aucun contrôle n'est supprimé ni considéré réussi avant exécution.
