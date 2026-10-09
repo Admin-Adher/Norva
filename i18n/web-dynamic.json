@@ -24411,5 +24411,90 @@
     "ar": "يسري اعتبارًا من {{date}}.",
     "id": "Berlaku mulai {{date}}.",
     "fil": "Magkakabisa sa {{date}}."
+  },
+  "ui_watch_slow_preparation": {
+    "source": "This version is taking longer to prepare",
+    "refs": [
+      "public/app.html",
+      "public/js/pages/WatchPage.js"
+    ],
+    "en": "This version is taking longer to prepare",
+    "fr": "Cette version met plus de temps à se préparer",
+    "pt-BR": "Esta versão está demorando mais para ficar pronta",
+    "es": "Esta versión está tardando más en prepararse",
+    "hi": "इस संस्करण को तैयार होने में अधिक समय लग रहा है",
+    "tr": "Bu sürümün hazırlanması daha uzun sürüyor",
+    "bn": "এই সংস্করণটি প্রস্তুত হতে বেশি সময় লাগছে",
+    "ar": "يستغرق تجهيز هذه النسخة وقتًا أطول",
+    "id": "Versi ini membutuhkan waktu lebih lama untuk disiapkan",
+    "fil": "Mas matagal ihanda ang bersyong ito"
+  },
+  "ui_watch_slow_preparation_help": {
+    "source": "You can keep waiting or choose another version. Playback will start when this version is ready.",
+    "refs": [
+      "public/app.html",
+      "public/js/pages/WatchPage.js"
+    ],
+    "en": "You can keep waiting or choose another version. Playback will start when this version is ready.",
+    "fr": "Vous pouvez patienter ou choisir une autre version. La lecture démarrera lorsque cette version sera prête.",
+    "pt-BR": "Você pode continuar aguardando ou escolher outra versão. A reprodução começará quando esta versão estiver pronta.",
+    "es": "Puedes seguir esperando o elegir otra versión. La reproducción comenzará cuando esta versión esté lista.",
+    "hi": "आप प्रतीक्षा कर सकते हैं या दूसरा संस्करण चुन सकते हैं। यह संस्करण तैयार होने पर चलना शुरू होगा।",
+    "tr": "Beklemeye devam edebilir veya başka bir sürüm seçebilirsiniz. Bu sürüm hazır olduğunda oynatma başlayacak.",
+    "bn": "আপনি অপেক্ষা করতে পারেন বা অন্য সংস্করণ বেছে নিতে পারেন। এই সংস্করণটি প্রস্তুত হলে প্লেব্যাক শুরু হবে।",
+    "ar": "يمكنك الانتظار أو اختيار نسخة أخرى. سيبدأ التشغيل عندما تصبح هذه النسخة جاهزة.",
+    "id": "Anda dapat menunggu atau memilih versi lain. Pemutaran akan dimulai saat versi ini siap.",
+    "fil": "Maaari kang maghintay o pumili ng ibang bersyon. Magsisimula ang pag-play kapag handa na ang bersyong ito."
+  },
+  "ui_watch_keep_preparing": {
+    "source": "Keep preparing this version",
+    "refs": [
+      "public/app.html",
+      "public/js/pages/WatchPage.js"
+    ],
+    "en": "Keep preparing this version",
+    "fr": "Continuer à préparer cette version",
+    "pt-BR": "Continuar preparando esta versão",
+    "es": "Seguir preparando esta versión",
+    "hi": "इस संस्करण की तैयारी जारी रखें",
+    "tr": "Bu sürümü hazırlamaya devam et",
+    "bn": "এই সংস্করণের প্রস্তুতি চালিয়ে যান",
+    "ar": "متابعة تجهيز هذه النسخة",
+    "id": "Lanjutkan persiapan versi ini",
+    "fil": "Ipagpatuloy ang paghahanda ng bersyong ito"
+  },
+  "ui_watch_preparation_stopped": {
+    "source": "Could not open other versions",
+    "refs": [
+      "public/app.html",
+      "public/js/pages/WatchPage.js"
+    ],
+    "en": "Could not open other versions",
+    "fr": "Impossible d’ouvrir les autres versions",
+    "pt-BR": "Não foi possível abrir outras versões",
+    "es": "No se pudieron abrir otras versiones",
+    "hi": "दूसरे संस्करण नहीं खोले जा सके",
+    "tr": "Diğer sürümler açılamadı",
+    "bn": "অন্য সংস্করণগুলি খোলা যায়নি",
+    "ar": "تعذّر فتح النسخ الأخرى",
+    "id": "Versi lain tidak dapat dibuka",
+    "fil": "Hindi mabuksan ang ibang bersyon"
+  },
+  "ui_watch_versions_after_stop_failed": {
+    "source": "Other versions could not be opened. Try again or return to details.",
+    "refs": [
+      "public/app.html",
+      "public/js/pages/WatchPage.js"
+    ],
+    "en": "Other versions could not be opened. Try again or return to details.",
+    "fr": "Les autres versions n’ont pas pu être ouvertes. Réessayez ou revenez à la fiche.",
+    "pt-BR": "Não foi possível abrir outras versões. Tente novamente ou volte aos detalhes.",
+    "es": "No se pudieron abrir otras versiones. Inténtalo de nuevo o vuelve a los detalles.",
+    "hi": "दूसरे संस्करण नहीं खोले जा सके। फिर कोशिश करें या विवरण पर लौटें।",
+    "tr": "Diğer sürümler açılamadı. Tekrar deneyin veya ayrıntılara dönün.",
+    "bn": "অন্য সংস্করণগুলি খোলা যায়নি। আবার চেষ্টা করুন বা বিবরণে ফিরে যান।",
+    "ar": "تعذّر فتح النسخ الأخرى. أعد المحاولة أو ارجع إلى التفاصيل.",
+    "id": "Versi lain tidak dapat dibuka. Coba lagi atau kembali ke detail.",
+    "fil": "Hindi mabuksan ang ibang bersyon. Subukan muli o bumalik sa mga detalye."
   }
 }

@@ -3077,6 +3077,7 @@ class WatchPage {
     }
 
     beginPlaybackAttempt() {
+        this.clearSlowPreparation?.();
         this.abortPlaybackResolution();
         this._playbackAttemptId += 1;
         this._gatewayPendingSeekIntent = null;
@@ -8594,21 +8595,23 @@ class WatchPage {
         });
     }
 
-    showRefusedVersionRecovery(errorEl, videoSection, { invalidMedia = false } = {}) {
+    showRefusedVersionRecovery(errorEl, videoSection, { invalidMedia = false, preparationStopped = false } = {}) {
         this.clearPlaybackErrorRefreshTimer();
         // Invalid bytes do not prove an access refusal. Keep that advisory separate.
-        if (!invalidMedia) window.NorvaPlaybackRefusals?.markRefused(this.content, this.app, this._fileRefusalScope);
+        if (!invalidMedia && !preparationStopped) window.NorvaPlaybackRefusals?.markRefused(this.content, this.app, this._fileRefusalScope);
         const t = (key, defaultValue) => globalThis.NorvaI18n?.t(key, { defaultValue }) ?? defaultValue;
-        const message = invalidMedia
+        const message = preparationStopped
+            ? t('ui_watch_versions_after_stop_failed', 'Other versions could not be opened. Try again or return to details.')
+            : invalidMedia
             ? t('ui_playback_version_invalid_media', 'The received data for this copy cannot be read. You can choose another version.')
             : t('ui_playback_version_unavailable_message', 'Access to this copy was refused.');
         errorEl.innerHTML = `<div class="watch-error-box watch-error-file-refused">
-            <p class="watch-error-title">${this.escapeHtml(t('ui_playback_version_unavailable_title', 'This version is unavailable'))}</p>
+            <p class="watch-error-title">${this.escapeHtml(preparationStopped ? t('ui_watch_preparation_stopped', 'Could not open other versions') : t('ui_playback_version_unavailable_title', 'This version is unavailable'))}</p>
             <p class="watch-error-msg">${this.escapeHtml(message)}</p>
             <p class="watch-error-refresh" id="watch-error-version-status" role="status" aria-live="polite"></p>
             <div class="watch-error-actions">
                 <button type="button" class="watch-error-refresh-btn" id="watch-error-versions-btn">${this.escapeHtml(t('ui_playback_version_other_versions', 'Other versions'))}</button>
-                <button type="button" class="watch-error-refresh-btn" id="watch-error-refresh-btn">${this.escapeHtml(t('ui_playback_version_retry', 'Retry this version'))}</button>
+                ${preparationStopped ? '' : `<button type="button" class="watch-error-refresh-btn" id="watch-error-refresh-btn">${this.escapeHtml(t('ui_playback_version_retry', 'Retry this version'))}</button>`}
                 <button type="button" class="watch-error-refresh-btn" id="watch-error-back-btn">${this.escapeHtml(t('ui_playback_version_details', 'Back to details'))}</button>
             </div></div>`;
         errorEl.setAttribute('role', 'alert');
@@ -8624,15 +8627,21 @@ class WatchPage {
         document.getElementById('watch-error-versions-btn')?.focus?.();
     }
 
-    async openRefusedVersionDetails(focusVersions = true) {
-        if (this._versionRecoveryBusy || this.app?.currentPage !== 'watch' || this.content?.type !== 'movie') return false;
+    async openRefusedVersionDetails(focusVersions = true, { slowPreparation = false } = {}) {
+        if (this._versionRecoveryBusy || this.app?.currentPage !== 'watch'
+            || !['movie', 'series'].includes(this.content?.type)) return false;
+        if (slowPreparation && !this.slowPreparationCurrent(this._slowPreparation)) return false;
         const content = this.content;
+        const position = Math.max(0, Math.floor(Number(this.getResumeSnapshotPosition()) || 0));
+        // An explicit departure must cancel the pending autoplay/resolve before
+        // closing its lane. A late ready callback cannot reopen the old copy.
+        if (slowPreparation) this.beginPlaybackAttempt();
         const attempt = this._playbackAttemptId;
         const owner = this.app.currentUser;
         const ownerId = owner?.id;
         const current = () => this.app.currentPage === 'watch' && this.content === content
-            && this._playbackAttemptId === attempt && this.app.currentUser === owner && this.app.currentUser?.id === ownerId;
-        const position = Math.max(0, Math.floor(Number(this.getResumeSnapshotPosition()) || 0));
+            && !this.app._signOutInFlight && this._playbackAttemptId === attempt
+            && this.app.currentUser === owner && this.app.currentUser?.id === ownerId;
         const buttons = ['watch-error-versions-btn', 'watch-error-refresh-btn', 'watch-error-back-btn']
             .map(id => document.getElementById(id)).filter(Boolean);
         const status = document.getElementById('watch-error-version-status');
@@ -8646,20 +8655,29 @@ class WatchPage {
             if (!current()) return false;
             await this.waitForProviderSlotRelease(800);
             if (!current()) return false;
-            const opened = await this.app.pages.movies.openPlaybackRecovery({
-                sourceId: content.sourceId, stream_id: content.id,
+            const movie = content.type === 'movie';
+            const opened = await this.app.pages[movie ? 'movies' : 'series'].openPlaybackRecovery({
+                sourceId: content.sourceId, ...(movie ? { stream_id: content.id } : { series_id: content.seriesId }),
             }, { focusVersions, position, isCurrent: current });
+            if (!opened && current() && slowPreparation) this.showStoppedPreparationRecovery();
             if (!opened && current() && status) {
                 status.textContent = globalThis.NorvaI18n?.t('ui_playback_version_lookup_failed', { defaultValue: 'The versions could not be loaded. Please try again.' }) ?? 'The versions could not be loaded. Please try again.';
             }
             return opened;
         } catch (_) {
+            if (current() && slowPreparation) this.showStoppedPreparationRecovery();
             if (current() && status) status.textContent = globalThis.NorvaI18n?.t('ui_playback_version_lookup_failed', { defaultValue: 'The versions could not be loaded. Please try again.' }) ?? 'The versions could not be loaded. Please try again.';
             return false;
         } finally {
             this._versionRecoveryBusy = false;
             if (current()) buttons.forEach(button => { button.disabled = false; });
         }
+    }
+
+    showStoppedPreparationRecovery() {
+        this.hideLoading();
+        const error = document.getElementById('watch-error');
+        if (error) this.showRefusedVersionRecovery(error, document.querySelector('.watch-video-section'), { preparationStopped: true });
     }
 
     hidePlaybackError() {
@@ -9225,11 +9243,12 @@ class WatchPage {
     // === Loading Spinner ===
 
     showLoading() {
+        this.armSlowPreparation?.();
         // The opaque preparation scene belongs to cold startup only. Keeping
         // the last frame and transport available is essential during a stall,
         // seek or same-title recovery; never move focus back to the Back button.
         if (this._firstFrameReported) {
-            if (this._loadingPresentationActive) this.hideLoading({ restoreFocus: false });
+            if (this._loadingPresentationActive) this.hideLoading({ restoreFocus: false, preserveSlowPreparation: true });
             if (this._rebufferPresentationActive) return;
             this._rebufferPresentationActive = true;
             this._rebufferMediaTime = Number(this.video?.currentTime) || 0;
@@ -9327,7 +9346,8 @@ class WatchPage {
         animation.src = animation.dataset.src;
     }
 
-    hideLoading({ restoreFocus = true } = {}) {
+    hideLoading({ restoreFocus = true, preserveSlowPreparation = false } = {}) {
+        if (!preserveSlowPreparation) this.clearSlowPreparation?.();
         this.loadingSpinner?.classList.remove('show');
         this.loadingSpinner?.classList.remove('is-rebuffering');
         this.loadingSpinner?.setAttribute('aria-hidden', 'true');
@@ -9363,6 +9383,69 @@ class WatchPage {
         this._loadingReturnFocus = null;
         this._loadingMotionQuery = null;
         this._loadingArtworkRefresh = null;
+    }
+
+    slowPreparationCurrent(state) {
+        return Boolean(state && state === this._slowPreparation && this.app?.currentPage === 'watch'
+            && !this.app._signOutInFlight && this.app.currentUser === state.owner
+            && this.app.currentUser?.id === state.ownerId && this.content === state.content
+            && this._playbackAttemptId === state.attempt && this.content?.sourceId === state.sourceId
+            && this.content?.id === state.fileId && this.content?.seriesId === state.seriesId);
+    }
+
+    armSlowPreparation() {
+        if (this._slowPreparation || this.app?.currentPage !== 'watch' || !this.app.currentUser?.id
+            || !['movie', 'series'].includes(this.content?.type) || !this.content.sourceId || !this.content.id
+            || (this.content.type === 'series' && !this.content.seriesId)) return;
+        const state = this._slowPreparation = {
+            content: this.content, sourceId: this.content.sourceId, fileId: this.content.id, seriesId: this.content.seriesId,
+            attempt: this._playbackAttemptId, owner: this.app.currentUser, ownerId: this.app.currentUser.id,
+            offered: false, dismissed: false,
+        };
+        // This timer describes an observed wait, never a diagnosis, a readiness
+        // proof or a persisted health/rate label. The preparation keeps running.
+        this._slowPreparationTimer = setTimeout(() => this.showSlowPreparation(state), 45000);
+    }
+
+    showSlowPreparation(state) {
+        if (!this.slowPreparationCurrent(state) || state.dismissed || state.offered
+            || !this.loadingSpinner?.classList.contains('show')) return false;
+        const panel = document.getElementById('watch-slow-preparation');
+        if (!panel) return false;
+        state.offered = true;
+        panel.classList.remove('hidden');
+        this.loadingSpinner.classList.add('has-slow-preparation');
+        const keep = document.getElementById('watch-slow-continue');
+        const versions = document.getElementById('watch-slow-versions');
+        if (keep) keep.onclick = () => {
+            if (!this.slowPreparationCurrent(state) || this._versionRecoveryBusy) return;
+            state.dismissed = true;
+            panel.classList.add('hidden');
+            this.loadingSpinner?.classList.remove('has-slow-preparation');
+            this.backBtn?.focus?.({ preventScroll: true });
+        };
+        if (versions) versions.onclick = () => {
+            if (this.slowPreparationCurrent(state) && !this._versionRecoveryBusy) {
+                this.openRefusedVersionDetails(true, { slowPreparation: true });
+            }
+        };
+        return true;
+    }
+
+    clearSlowPreparation() {
+        const state = this._slowPreparation;
+        clearTimeout(this._slowPreparationTimer);
+        this._slowPreparationTimer = null;
+        this._slowPreparation = null;
+        if (!state) return;
+        const panel = document.getElementById('watch-slow-preparation');
+        if (panel?.contains?.(document.activeElement)) this.backBtn?.focus?.({ preventScroll: true });
+        panel?.classList.add('hidden');
+        this.loadingSpinner?.classList.remove('has-slow-preparation');
+        for (const id of ['watch-slow-continue', 'watch-slow-versions']) {
+            const button = document.getElementById(id);
+            if (button) button.onclick = null;
+        }
     }
 
     // === Audio & Captions ===

@@ -13,6 +13,28 @@ on:
         required: false
         default: ''
         type: string
+      phone-gpu:
+        description: 'Phone emulator graphics backend for a bounded diagnostic comparison'
+        required: false
+        default: 'swangle'
+        type: choice
+        options:
+          - swiftshader_indirect
+          - swiftshader
+          - swangle
+      phone-vulkan:
+        description: 'Keep default rendering, or compare the documented Chromium/GLES emulator fallback'
+        required: false
+        default: 'enabled'
+        type: choice
+        options:
+          - enabled
+          - disabled
+      phone-host-debugger:
+        description: 'Attach a bounded host fault debugger; diagnostic only, never performance evidence'
+        required: false
+        default: false
+        type: boolean
   pull_request:
     paths:
       - '.github/workflows/android-emulator-qa.yml'
@@ -35,6 +57,7 @@ jobs:
     timeout-minutes: 90
     env:
       NORVA_ANDROID_TEST_CLASS: ${{ inputs['phone-test-class'] || '' }}
+      NORVA_ANDROID_HOST_DEBUGGER: ${{ inputs['phone-host-debugger'] && 'true' || 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -54,6 +77,11 @@ jobs:
           gradle-version: '8.11.1'
       - name: Install phone compile SDK
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+      - name: Install host debugger for explicit freeze diagnostic
+        if: inputs['phone-host-debugger']
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gdb
       # Compile before boot so Gradle does not compete with first-start setup of
       # the launcher and keyboard. The connected test task still runs below.
       - name: Compile phone and instrumentation APKs before emulator boot
@@ -82,7 +110,10 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_7
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim
+          # The GLES SwiftShader path in emulator 37.2.12 faults in RenderThread
+          # under repeated visible WebView transitions. ANGLE passes the same
+          # tests; keep the old modes selectable only for explicit diagnostics.
+          emulator-options: -no-window -gpu ${{ inputs['phone-gpu'] || 'swangle' }} -no-snapshot -no-boot-anim -show-kernel ${{ inputs['phone-vulkan'] == 'disabled' && '-feature -Vulkan' || '' }}
           script: bash scripts/qa/run-android-emulator-tests.sh phone ${{ matrix.navigation }} ${{ matrix.font_scale }}
       - name: Upload phone test reports
         if: always()

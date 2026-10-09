@@ -1,0 +1,94 @@
+# Préparation VOD longue : choix explicite de récupération — 9 octobre 2026
+
+## Périmètre
+
+L'observation d'une préparation continue de 45 secondes affiche une proposition dans WatchPage : continuer à préparer cette copie ou ouvrir les autres versions. Ce délai est un choix d'interface, pas une preuve de débit insuffisant ni une attribution au fournisseur. Le traitement en cours et les réserves de démarrage restent inchangés. Le parcours couvre les films et épisodes du lecteur Web ; les lecteurs natifs Android ne sont pas modifiés.
+
+Le choix de rester masque la proposition pour cette attente. Le choix des versions invalide d'abord la tentative et sa résolution tardive, ferme strictement la session et attend la libération ordinaire avant de lire les versions possédées. Aucune lecture alternative automatique. Pour une série, on retrouve la série exacte et choisit ensuite version et épisode ; aucun identifiant d'épisode, indice de piste ou point de reprise n'est transposé à une autre copie.
+
+Navigation, changement de compte, déconnexion, nouveau saut et disponibilité de la lecture annulent la proposition. Une erreur de fermeture ou de recherche conserve une récupération explicite et ne marque pas le fichier comme refusé. Les observations ne sont pas enregistrées dans la santé fournisseur.
+
+## Vérifications avant intégration
+
+- 76 tests Node ciblés réussis, dont neuf nouveaux contrôlant attente, annulation, double clic, échec du drainage et appartenance de la série.
+- Banc navigateur sans fournisseur : vrai HTML, CSS et WatchPage ; fermeture et réponse du catalogue simulées. Parcours exécuté à 360 × 800 et 844 × 390. Ce banc ne mesure aucun débit ni délai de lecture réel.
+- Traductions des cinq messages dans les dix langues ; bundle et références générés par l'outil i18n habituel. Les changements des autres pages HTML sont exclusivement les empreintes du bundle i18n.
+- Instrumentation WebView ajoutée : fenêtres visibles portrait/paysage, textes 100/130 %, français/arabe, films/séries, démarrage/rebuffering, fermeture avant transfert, Retour et changement de propriétaire. Matrice Android et CI restent à observer.
+
+## Limites
+
+Aucune réparation réseau revendiquée. Aucun nouveau relais configuré, aucune baisse des réserves, ni préchargement général. Les pilotes de cache restent dans leur périmètre actuel. Une préparation anticipée de fichiers lourds reste une piste à évaluer après comparaison des coûts de stockage, des pistes conservées et du bénéfice par rapport aux caches existants.
+
+Le nouveau checkout isolé préserve les modifications éditoriales présentes dans le checkout historique. Son attachement Codex a été refusé à la limite de 100 ; aucune pièce supprimée.
+
+## Suivi réseau et préparation anticipée
+
+Après accord explicite d'Adrien le 9 octobre, demande envoyée dans la conversation NodeMaven existante : possibilité d'un essai temporaire sur un trajet différent, coûts et conséquences sur l'IP à préciser avant essai. Aucun remplacement, configuration ou frais autorisé ; aucun accès fournisseur transmis. Message visible après envoi ; réponse technique pas encore reçue à ce relevé. Capture locale `nodemaven-sent.jpg`.
+
+L'évaluation du cache existant confirme un périmètre différent d'une préparation intégrale : `private-resume-hls-cache.js` impose un plafond mémoire maximal de 256 Mio et une durée maximale de 30 minutes ; le chemin de preuves récentes expire au plus à dix minutes et conserve au plus 64 Mio d'entrée multi-pistes. Ces bornes sont celles du code, pas un nouveau relevé des paramètres de chaque instance. Aucune borne modifiée.
+
+Protocole proposé pour la suite (non exécuté) : mêmes copies et positions, essai ordinaire, cache existant puis préparation anticipée de la même copie ; mesurer délai clic→lecture, au moins cinq minutes de progression, réserve, interruptions, octets fournisseur, stockage et CPU/GPU. Pistes audio et sous-titres, y compris forcés et traversants, doivent être identiques. Chaque source garde sa connexion unique et la lecture utilisateur reste prioritaire. Le coût de préparation et le gain sur la lecture suivante doivent être séparés ; aucune promesse pour la première lecture. Commencer par un petit lot explicite avec budget disque réservé avant acquisition et expiration/revalidation, sans admission automatique d'un catalogue entier.
+
+## Échecs de vérification conservés
+
+- CI initiale : références i18n des deux pages présentes uniquement dans la branche principale ; intégration de main puis regeneration ciblée.
+- Suite élargie du lecteur : huit tests sans DOM révélaient une dépendance inutile du nettoyage même sans proposition active. Nettoyage rendu inerte dans ce cas ; 283 tests lecteur/séries passent après correction.
+- Un contrat textuel de navigation attendait l'ancienne signature SeriesPage ; actualisé pour conserver les mêmes options et gardes que MoviesPage. Neuf tests de ce contrat réussis.
+- Première matrice ciblée 37934806259 : quatre émulateurs téléphone ont disparu pendant le test paysage (XML sans détail d'assertion, appareil absent). Les deux contrôles TV ont réussi. Cause de disparition non prouvée ; aucun échec de grande police attribué au produit. Le banc réutilise maintenant le DOM comme la SPA, charge son document par le chemin déjà utilisé par les autres fixtures WebView et journalise ses étapes. Seconde matrice ciblée sur code 8979e7be9 en cours ; pas de modification de seuil de vérification.
+- Matrices automatiques redondantes annulées au profit de la matrice ciblée ; premiers échecs conservés.
+
+### Diagnostic Android complémentaire
+
+La seconde matrice 37935667321 conserve le même arrêt des quatre émulateurs téléphone. Le code produit passe séparément la CI sur 063505192 puis a0d41d080 : 6 216 tests, 6 185 réussis, 31 ignorés, zéro échec ; paquets Phone/TV/Windows réussis. Les groupes locaux précédents sont inclus dans cette suite, pas additionnables.
+
+La matrice instrumentée 37936772099 ajoute des observations du noyau/processus/mémoire hôte et attend un rendu réel avant les mesures DOM. Les quatre téléphones s'arrêtent encore ; aucune assertion de police ou d'accessibilité n'est documentée. L'hôte a plus de 10 Gio disponibles au dernier relevé avant l'arrêt, sans OOM/segfault inscrit dans son noyau. Cela ne prouve pas l'état passé de la mémoire invitée ni la cause du blocage.
+
+Contrôle portrait séparé 37937510148 : même arrêt sur les quatre configurations ; un parcours français complet atteint `done` avant le parcours suivant dans le reçu geste/police 1.0. Ce n'est donc pas exclusivement une rotation paysage. Les tests TV de consentement passent, mais ne prouvent pas cet écran de lecteur.
+
+Comparaison diagnostique bornée du moteur graphique de l'émulateur proposée par entrée manuelle du workflow, sans changer le défaut existant ni le rendu applicatif. La [documentation Android](https://developer.android.com/studio/run/emulator-acceleration) distingue le mode actuel `swiftshader` et l'ancien `swiftshader_indirect`, déprécié depuis 36.4.9. Cette documentation ne prouve pas la cause de nos arrêts. Les mêmes tests/tailles/polices restent requis ; résultat à observer avant publication.
+
+### Clôture de cette vérification — publication bloquée
+
+La comparaison `swiftshader` 37938208208 échoue également sur les quatre téléphones ; les deux tests TV passent. Aucun changement du moteur graphique par défaut n'est retenu comme correction. Le relevé supplémentaire 37938875389 conserve le journal noyau invité (`-show-kernel`) et des relevés mémoire invités. Dans le reçu geste/police 1.0, la dernière lecture mémoire réussie précède les manipulations : environ 895 Mio disponibles à 13:47:07 UTC ; le noyau reste muet après 13:47:12, puis la lecture mémoire expire, ADB devient hors ligne et l'émulateur disparaît. Ni OOM ni panic n'est observé dans cette fenêtre. Cette absence ne permet pas d'exclure toutes les causes ; aucune attribution précise ou réparation Android n'est revendiquée.
+
+Les parcours DOM du navigateur sont réussis. Les assertions de fermeture et d'appartenance passent dans la suite Node ; elles ne remplacent pas le contrôle Android demandé par `AGENTS.md`. **PR741 reste non intégrée et l'interface n'est pas déployée.** Aucun déploiement Gateway/Edge/Web ni lecture fournisseur opérateur n'a eu lieu pendant cette vérification. Les pilotes existants, langues, réserves, routes et limites restent inchangés.
+
+La demande NodeMaven est envoyée et visible dans la conversation avec Anna, mais toujours sans réponse technique observée. Aucun accès fournisseur, remplacement d'IP ni frais engagé. Les captures et diagnostics restent sous `.codex-artifacts/slow-vod-recovery/` du checkout isolé. Le prochain travail doit résoudre le blocage du banc Android avant intégration, puis vérifier le parcours public réel avec fermeture de la copie courante et choix explicite des alternatives. Aucun essai de préparation intégrale n'a été lancé.
+
+## Reprise du diagnostic Android
+
+Le contrôle 37940874981 (code de test 28695be0b) réussit les quatre configurations téléphone et les deux contrôles TV. Sur téléphone, une vraie attente continue de 45 secondes affiche la proposition ; continuer la masque en conservant la préparation et sans fermeture de session. Ce contrôle ponctuel ne remplace pas le parcours complet avec transitions répétées, français/arabe et portrait/paysage.
+
+La comparaison complète 37941647129 avec Vulkan désactivé conserve l'arrêt des quatre téléphones ; les deux contrôles TV passent. Le recours GLES est documenté par [Android pour certaines incompatibilités de rendu Chromium](https://developer.android.com/studio/run/emulator-troubleshooting#cannot-open-webpage-correctly), mais ne résout pas notre arrêt et n'est pas retenu comme correction. Crashpad ne contient aucun dump dans le reçu téléchargé ; cela n'établit pas la cause de sortie. Le code applicatif et les assertions restent identiques.
+
+Le diagnostic suivant compare la même interface avec l'image fixe canonique à la place du seul asset animé. Sa première exécution 37942434526 expose une erreur propre au nouvel intercepteur de test : certaines ressources n'ont pas de chemin et `path.equals` levait NullPointerException. Appareil encore présent, pas le blocage précédent. Correction limitée à une comparaison acceptant null dans 728b47e25. La comparaison 37943110697 conserve l'arrêt des quatre téléphones, avec deux contrôles TV réussis. Le reçu trois boutons/police 1.3 montre un parcours français complet puis l'arrêt pendant le parcours arabe, en rebuffering. L'animation ne suffit donc pas à expliquer l'incident. Aucune correction produit déduite de cette comparaison.
+
+Le moniteur ADB précédent interrogeait l'état côté hôte, qui pouvait encore répondre `device` pendant le blocage invité. Le diagnostic 0f2d753ef ajoute une lecture invitée indépendante, bornée à deux secondes, puis une seule capture de piles du processus encore vivant ; aucun redémarrage ni réessai des tests. Les mesures ainsi interrompues par le débogueur ne valent pas benchmark temporel. Le contrôle 37944408849 échoue encore, mais le débogueur n'était pas installé. Après installation explicite (5999e5e3f), le contrôle 37945235853 indique que le processus s'est déjà terminé par SIGSEGV lorsque l'attachement intervient ; aucune pile fautive récupérée à ce stade. Le parcours réel de 45 secondes réussi reste distinct des transitions accélérées qui échouent.
+
+L'attachement avant exécution dans 37946188720 intercepte d'abord SIGUSR1, signal normal de QEMU, puis se détache : cette pile n'est pas une preuve de faute. Le diagnostic 0fa6c05b5 transmet les signaux ordinaires et isole le débogueur derrière une option manuelle désactivée par défaut. Le contrôle 37947004664 conserve les quatre échecs téléphone et les deux succès TV. Le reçu trois boutons/police 1.3 intercepte réellement SIGSEGV dans un `RenderThread` du processus hôte de l'émulateur 37.2.12. La pile fautive est non symbolisée/endommagée ; un autre thread rend via `glDrawElementsInstanced`, `gles_swiftshader/libGLESv2.so` et `gfxstream`. Cela localise l'arrêt dans l'émulation graphique hôte sans identifier la fonction fautive ni prouver une défaillance équivalente sur téléphone réel. Crashpad ne contient toujours aucun dump.
+
+Comparaison ciblée 31ea5b9ba : mode `swangle` [documenté par Android](https://developer.android.com/studio/run/emulator-acceleration), utilisant ANGLE avec SwiftShader au lieu du chemin GLES observé. Le code Norva, le test complet avec animation, portrait/paysage, langues/polices et assertions restent identiques ; débogueur désactivé. **Contrôle 37947814464 : les six configurations sont réussies.** Chaque téléphone termine cinq tests : portrait, paysage, comparaison avec image fixe, attente réelle de 45 secondes et récupération après segments tardifs. Les quatre combinaisons geste/trois boutons et police système 1.0/1.3 passent ; les tests visibles vérifient aussi zoom texte 100/130 %, français/arabe, films/séries et préparation/rebuffering. TV : consentement D-pad uniquement, pas une preuve de décodage vidéo. Reçu trois boutons/police 1.3 : cinq tests, zéro échec/ignoré, 135,123 secondes. Aucun gain de performance du produit n'est déduit du moteur d'émulation.
+
+Le défaut de moteur téléphone du workflow devient `swangle`, identique à l'option explicite de cette matrice réussie. Les anciens moteurs restent disponibles pour diagnostic, sans débogueur par défaut. Aucun test, assertion ou taille de viewport supprimé. Le chemin exact du crash interne reste non symbolisé, mais le moteur alternatif permet de terminer le parcours exigé. Les échecs initiaux restent conservés. L'ancienne section « publication bloquée » décrit le relevé précédent ; ce blocage de validation Android est désormais levé. Intégration et publication du parcours à observer séparément.
+
+## Idée proposée par Adrien : version optimisée conservée
+
+Étude de faisabilité, pas activation d'un nouveau traitement. La taille seule ne permet pas de sélectionner les copies lentes : 2 Go décimaux représentent environ 8,9 Mbit/s sur 30 minutes, ou 2,2 Mbit/s sur deux heures. Il faut comparer débit requis, arrivées mesurées sur une durée suffisante, variabilité, codec et capacité du lecteur. Une attente ne doit pas devenir une étiquette persistante « trop lourd pour le navigateur » sans preuve.
+
+La compression peut réduire le débit serveur→lecteur, mais doit recevoir puis décoder l'original avant son réencodage ([pipeline FFmpeg](https://ffmpeg.org/ffmpeg.html#Transcoding)). Elle ne rend pas durablement rapide une première lecture lorsque l'original arrive trop lentement au Gateway. Une préparation conservée pourrait servir les lectures suivantes tant qu'elle reste disponible et valide ; qualité, délai initial et éventuelle expiration doivent être explicites.
+
+Le dépôt possède déjà des briques de publication complète : `sharedMediaCacheIdentity.js` exige empreinte complète, taille exacte et topologies des pistes ; `sharedMediaCachePublication.js` exige EOF de l'entrée et sortie FFmpeg propre avant enregistrement de l'objet et de son autorité d'accès. Lecture de santé pendant ce contrôle : stockage partagé activé sur les deux Gateways (`enabled-private-worker-r2`), TTL configuré 30 jours, zéro publication dans leurs compteurs en mémoire depuis le démarrage observé du 9 octobre à 11:44 UTC. Ce zéro ne décrit pas l'historique du stockage et ne prouve pas la disponibilité ou l'absence d'une copie précise. Reçu `shared-cache-readonly.safe.jsonl`. La continuation de fond est limitée aux followers distribués ; ce n'est pas une file générale de compression à la demande.
+
+Proposition à évaluer : action explicite « Préparer une version optimisée », estimation de qualité/taille/délai, progression et annulation ; espace réservé avant acquisition, job unique pour la même identité admissible, priorité à la lecture, TTL et éviction bornée. Préserver doublages, sous-titres forcés et choix de version. Un autre utilisateur doit prouver son accès courant à la même copie exacte ; même titre ou fournisseur ne suffit pas. Aucun partage de credentials ou de sessions. La publication complète doit être vérifiée avant de promettre une lecture entièrement disponible ; une préparation partielle reste explicitement partielle.
+
+Premier essai proposé : une copie lente et une copie déjà fluide, mêmes positions, qualité et pistes contrôlées, puis seconde lecture depuis l'objet préparé. Mesurer séparément acquisition initiale, encodage, stockage, démarrage et au moins cinq minutes avec sauts. Comparer au cache existant ; ne pas annoncer de gain pour Normal avant ce test. Aucun nouveau téléchargement intégral, stockage, réglage ou partage intercompte appliqué à la suite de cette discussion.
+
+### Contrainte soulevée par Adrien : occupation du compte pendant la préparation
+
+La réception de l'original consomme bien un slot du compte fournisseur, y compris sans lecteur visible. Le réencodage d'octets déjà disponibles localement n'en consomme pas, mais conserve un coût GPU/CPU et disque. Une interface ne peut pas faire disparaître cette contrainte. La mutualisation du résultat ne dispense jamais du slot nécessaire à sa première acquisition.
+
+Priorité proposée : enrichir le cache à partir de la connexion d'une lecture ordinaire, sans second accès média. Le résultat ne devient une version intégrale disponible qu'après acquisition complète et validation. Si la lecture cesse avant la fin, seules les données effectivement conservées peuvent être réutilisées ; aucune poursuite intégrale implicite n'est proposée.
+
+Une éventuelle acquisition dédiée attendrait une admission ordinaire sur un compte libre. Toute demande de lecture aurait priorité : suspendre le travail, fermer et drainer le transport avant d'accorder le slot au lecteur. La fermeture prend un temps mesurable, donc ne pas promettre une cession instantanée. Gardes communes aux propriétaires utilisant le même compte ; aucun relèvement du nombre de connexions ni contournement par alias. Les lectures extérieures non observables restent une limite des informations disponibles.
+
+Les états utilisateur devraient préciser « en attente : compte utilisé », « préparation en cours » et « préparation suspendue pour laisser place à une lecture ». Pour permettre une reprise de travail, il faut démontrer Range, identité du fichier et checkpoint durable ; faute de preuve, rester en attente ou terminer la tentative explicitement, sans reprendre des octets arbitraires. Ces éléments sont des critères de conception, pas des garanties déjà validées ou un nouveau service activé. Le test proposé doit inclure une lecture prioritaire pendant l'acquisition et mesurer le délai de libération avant tout essai plus large.

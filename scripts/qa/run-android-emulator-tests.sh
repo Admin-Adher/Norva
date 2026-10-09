@@ -72,12 +72,16 @@ collect_captures() {
   record_diagnostic adb-devices adb devices -l
   record_diagnostic app-pid adb shell pidof "tv.norva.${platform}"
   record_diagnostic emulator-process pgrep -af 'qemu-system|emulator.*-avd'
+  record_diagnostic host-memory free -m
+  record_diagnostic host-process-memory ps -eo pid,comm,rss,vsz --sort=-rss
+  record_diagnostic guest-memory adb shell cat /proc/meminfo
   record_diagnostic capture-pull adb pull "/sdcard/Android/data/tv.norva.${platform}/files/." app/build/outputs/androidTest-results/connected/captures/
 }
 # UTP can remove the test application and its external files at teardown.
 # Copy while instrumentation is running, before those files disappear.
 (while true; do collect_captures; sleep 5; done) &
 capture_pid=$!
+hang_monitor_pid=''
 # Per-test logcat can stop before the crash that terminates instrumentation.
 adb logcat -b all -v threadtime > "$diagnostic_dir/device-logcat.txt" 2>&1 &
 logcat_pid=$!
@@ -85,8 +89,20 @@ finish_captures() {
   local test_status=$?
   kill "$capture_pid" 2>/dev/null || true
   wait "$capture_pid" 2>/dev/null || true
+  if [[ -n "$hang_monitor_pid" ]]; then
+    kill "$hang_monitor_pid" 2>/dev/null || true
+    wait "$hang_monitor_pid" 2>/dev/null || true
+  fi
   collect_captures
   record_diagnostic process-exit-info adb shell dumpsys activity exit-info "tv.norva.${platform}"
+  record_diagnostic host-kernel sudo dmesg --ctime
+  # Preserve the emulator's own Crashpad evidence; adb logs cannot explain a
+  # host QEMU exit. This isolated fixture has no accounts or provider traffic.
+  local crash_dir="/tmp/android-$(id -un)"
+  if [[ -d "$crash_dir" ]]; then
+    find "$crash_dir" -maxdepth 3 -type f -printf '%P %s bytes\n' > "$diagnostic_dir/emulator-crash-files.txt"
+    timeout 15s tar -czf "$diagnostic_dir/emulator-crashdata.tgz" -C "$crash_dir" . || true
+  fi
   local logcat_stopped_by_harness=0 logcat_status=0
   if kill -0 "$logcat_pid" 2>/dev/null; then
     logcat_stopped_by_harness=1
@@ -192,6 +208,20 @@ wait_for_phone_home() {
 }
 if [[ "$platform" == phone ]]; then
   wait_for_phone_home
+fi
+
+# Attach before failure: after an ADB timeout the process is already handling
+# SIGSEGV. This explicit diagnostic is not a timing/performance benchmark.
+if [[ "${NORVA_ANDROID_HOST_DEBUGGER:-false}" == true ]] && command -v gdb >/dev/null; then
+  qpid="$(pgrep -f '^/.*/emulator/qemu/.*/qemu-system-' | head -n 1 || true)"
+  if [[ -n "$qpid" ]]; then
+    timeout --kill-after=2s 180s sudo gdb -nx -batch -iex 'set debuginfod enabled off' \
+      -ex 'set pagination off' -ex 'set confirm off' -ex 'set print thread-events off' \
+      -ex 'handle SIGUSR1 SIGUSR2 SIGPIPE nostop noprint pass' \
+      -ex 'handle SIGSEGV stop print pass' -ex continue -ex 'thread apply all bt 14' \
+      -ex detach -p "$qpid" > "$diagnostic_dir/emulator-live-debugger.txt" 2>&1 &
+    hang_monitor_pid=$!
+  fi
 fi
 
 test_args=()

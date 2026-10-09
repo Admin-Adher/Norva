@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <script src="/js/i18n.js?v=967117f53a"></script>
+  <script src="/js/i18n.js?v=020561a6b5"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1715,6 +1715,16 @@
                 <p class="watch-loading-label" data-i18n="ui_watch_preparing_video">Preparing your video</p>
                 <p class="watch-loading-help" data-i18n="ui_watch_preparing_video_help">Playback will start automatically when your video is ready.</p>
               </div>
+              <section class="watch-slow-preparation hidden" id="watch-slow-preparation" aria-labelledby="watch-slow-preparation-title">
+                <div role="status" aria-live="polite" aria-atomic="true">
+                  <p id="watch-slow-preparation-title" data-i18n="ui_watch_slow_preparation">This version is taking longer to prepare</p>
+                  <p data-i18n="ui_watch_slow_preparation_help">You can keep waiting or choose another version. Playback will start when this version is ready.</p>
+                </div>
+                <div class="watch-slow-preparation-actions">
+                  <button type="button" class="btn btn-primary" id="watch-slow-continue" data-i18n="ui_watch_keep_preparing">Keep preparing this version</button>
+                  <button type="button" class="btn btn-secondary" id="watch-slow-versions" data-i18n="ui_playback_version_other_versions">Other versions</button>
+                </div>
+              </section>
             </div>
           </div>
 
