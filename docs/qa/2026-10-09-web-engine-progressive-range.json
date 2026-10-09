@@ -1,0 +1,727 @@
+{
+  "recordedAtUtc": "2026-10-09T21:57:49.210618+00:00",
+  "status": "draft-not-deployed",
+  "candidateEngineVersion": 49,
+  "progressiveRangesDefault": false,
+  "focusedTests": {
+    "total": 410,
+    "passed": 410,
+    "failed": 0,
+    "skipped": 0,
+    "log": ".codex-artifacts/web-engine-progressive-20261009/tests-complete.log"
+  },
+  "offline": {
+    "comparisons": [
+      {
+        "name": "stereo",
+        "position": 0,
+        "byteIdentical": true,
+        "subtitlesIdentical": true,
+        "ended": true,
+        "errors": [],
+        "progressiveReads": 584,
+        "requests": [
+          5,
+          5
+        ]
+      },
+      {
+        "name": "stereo",
+        "position": 12,
+        "byteIdentical": true,
+        "subtitlesIdentical": true,
+        "ended": true,
+        "errors": [],
+        "progressiveReads": 545,
+        "requests": [
+          6,
+          6
+        ]
+      },
+      {
+        "name": "bframes",
+        "position": 0,
+        "byteIdentical": true,
+        "subtitlesIdentical": true,
+        "ended": true,
+        "errors": [],
+        "progressiveReads": 183,
+        "requests": [
+          2,
+          2
+        ]
+      },
+      {
+        "name": "bframes",
+        "position": 12,
+        "byteIdentical": true,
+        "subtitlesIdentical": true,
+        "ended": true,
+        "errors": [],
+        "progressiveReads": 150,
+        "requests": [
+          3,
+          3
+        ]
+      },
+      {
+        "name": "ass51",
+        "position": 0,
+        "byteIdentical": true,
+        "subtitlesIdentical": true,
+        "ended": true,
+        "errors": [],
+        "progressiveReads": 169,
+        "requests": [
+          2,
+          2
+        ]
+      },
+      {
+        "name": "ass51",
+        "position": 12,
+        "byteIdentical": true,
+        "subtitlesIdentical": true,
+        "ended": true,
+        "errors": [],
+        "progressiveReads": 139,
+        "requests": [
+          3,
+          3
+        ]
+      }
+    ],
+    "maxActiveResponse": 1,
+    "audio": {
+      "atUtc": "2026-10-09T21:54:39.152Z",
+      "result": [
+        {
+          "file": "ass51-0-progressive.mp4",
+          "sha256": "c2b07703c65855128f3351d84caa61958ad502899747c69540e703c6ab4b44d1",
+          "audio": [
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "sample_rate": "48000",
+              "channels": 6
+            }
+          ],
+          "exitCode": 0,
+          "errors": 0
+        },
+        {
+          "file": "ass51-12-progressive.mp4",
+          "sha256": "47dff156d2d4276ab4fa32466af57b2ef19578c12571c6946421b3f39b5d17d9",
+          "audio": [
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "sample_rate": "48000",
+              "channels": 6
+            }
+          ],
+          "exitCode": 0,
+          "errors": 0
+        },
+        {
+          "file": "bframes-0-progressive.mp4",
+          "sha256": "36fcdc07f510f25e8ed31794c7e04f4fea3740ec784f8416d4ddba014eddbc7e",
+          "audio": [
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "sample_rate": "44100",
+              "channels": 2
+            }
+          ],
+          "exitCode": 0,
+          "errors": 0
+        },
+        {
+          "file": "bframes-12-progressive.mp4",
+          "sha256": "e09170e65ed741d9e6638092ea56d0842c07b6ff27398a1fe90e624bd28c38c6",
+          "audio": [
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "sample_rate": "44100",
+              "channels": 2
+            }
+          ],
+          "exitCode": 0,
+          "errors": 0
+        },
+        {
+          "file": "stereo-0-progressive.mp4",
+          "sha256": "60b5d2d1fbe9c4050cb6435c7301f7a637e38a9e6ecf8c62f408cd7c1b3b1380",
+          "audio": [
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "sample_rate": "48000",
+              "channels": 2
+            }
+          ],
+          "exitCode": 0,
+          "errors": 0
+        },
+        {
+          "file": "stereo-12-progressive.mp4",
+          "sha256": "de85ceed69fc60d02afee91a4eb88131298ac021a4066e4ce2e34b35e6a7ae5d",
+          "audio": [
+            {
+              "codec_name": "aac",
+              "profile": "LC",
+              "sample_rate": "48000",
+              "channels": 2
+            }
+          ],
+          "exitCode": 0,
+          "errors": 0
+        }
+      ],
+      "listeningAccepted": false
+    }
+  },
+  "browserControlledTrace": {
+    "bytesPerChunk": 131072,
+    "chunkIntervalMs": 250,
+    "same90SecondFixture": true,
+    "results": [
+      {
+        "case": "stereo",
+        "mode": "complete",
+        "firstFrameMs": 2704.800000095367,
+        "ended": {
+          "event": "ended",
+          "ms": 98800,
+          "time": 90.005,
+          "name": "ended"
+        },
+        "waitingPeriods": [
+          {
+            "fromMs": 4706,
+            "position": 1.960237,
+            "durationMs": 6054,
+            "resumed": true
+          }
+        ],
+        "frameGapsOver250Ms": [
+          {
+            "ms": 10789,
+            "gapMs": 6090.9,
+            "mediaFrom": 1.958,
+            "mediaTo": 2,
+            "sinceSeek": 14447,
+            "hidden": false
+          }
+        ],
+        "errors": []
+      },
+      {
+        "case": "stereo",
+        "mode": "progressive",
+        "firstFrameMs": 1880.9000000476844,
+        "ended": {
+          "event": "ended",
+          "ms": 91942,
+          "time": 90.005,
+          "name": "ended"
+        },
+        "waitingPeriods": [],
+        "frameGapsOver250Ms": [],
+        "errors": []
+      },
+      {
+        "case": "bframes",
+        "mode": "progressive",
+        "firstFrameMs": 3109.7000000476837,
+        "ended": {
+          "event": "ended",
+          "ms": 22651,
+          "time": 30.656013,
+          "name": "ended"
+        },
+        "waitingPeriods": [],
+        "frameGapsOver250Ms": [
+          {
+            "ms": 4007,
+            "gapMs": 897.1000000000058,
+            "mediaFrom": 11.989,
+            "mediaTo": 12.031,
+            "sinceSeek": 182861.1,
+            "hidden": false
+          }
+        ],
+        "errors": []
+      }
+    ],
+    "rawServerActiveCounterMaximum": 2,
+    "rawCounterLimitation": "The fixture waits another 250 ms after writing its final declared byte. Its active counter includes this delayed handler tail; it is not proof of concurrently receiving two bodies."
+  },
+  "realConclave": [
+    {
+      "case": "progressive-without-header-hint",
+      "copy": "Conclave — Dino",
+      "startPositionSeconds": 0,
+      "seekPositionSeconds": 120,
+      "firstFrameMs": 5062.7999998092655,
+      "requestedSeekMs": 85382.39999985695,
+      "seekToPlayingMs": 35616.5,
+      "cueHeaderReused": false,
+      "seek": {
+        "warm": false,
+        "setupMs": 25987,
+        "fetches": 3,
+        "fetchKB": 8264
+      },
+      "waitingPeriods": [
+        {
+          "fromMs": 5405.199999809265,
+          "position": 0.300178,
+          "durationMs": 3624.800000190735,
+          "resumed": true
+        },
+        {
+          "fromMs": 55871.09999990463,
+          "position": 47.14168,
+          "durationMs": 4693.5,
+          "resumed": true
+        },
+        {
+          "fromMs": 64502.89999985695,
+          "position": 51.089478,
+          "durationMs": 382.5,
+          "resumed": true
+        },
+        {
+          "fromMs": 85385.69999980927,
+          "position": 120,
+          "durationMs": 35613.200000047684,
+          "resumed": true
+        },
+        {
+          "fromMs": 121199.39999985695,
+          "position": 120.160067,
+          "durationMs": 25059.5,
+          "resumed": true
+        },
+        {
+          "fromMs": 152419.79999995232,
+          "position": 126.327616,
+          "durationMs": null,
+          "resumed": false
+        }
+      ],
+      "lastSample": {
+        "ms": 180573.19999980927,
+        "time": 126.327616,
+        "paused": false,
+        "ready": 2,
+        "hidden": false,
+        "buffer": [
+          [
+            119.036,
+            126.373
+          ]
+        ]
+      },
+      "subtitles": [
+        {
+          "index": 2,
+          "codec": "ass",
+          "cueCount": 0
+        },
+        {
+          "index": 3,
+          "codec": "ass",
+          "cueCount": 1
+        }
+      ],
+      "errors": [],
+      "initialAndTeardownMediaError4": true,
+      "startupFetchWindows": [
+        {
+          "start": 0,
+          "requestedBytes": 524288,
+          "bytes": 524288,
+          "ms": 2303,
+          "outcome": "ok"
+        },
+        {
+          "start": 3093965715,
+          "requestedBytes": 1304,
+          "bytes": 1304,
+          "ms": 813,
+          "outcome": "ok"
+        },
+        {
+          "start": 524288,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 1897,
+          "outcome": "ok"
+        }
+      ],
+      "retainedRecentFetchWindows": [
+        {
+          "start": 3093965715,
+          "requestedBytes": 1304,
+          "bytes": 1304,
+          "ms": 813,
+          "outcome": "ok"
+        },
+        {
+          "start": 524288,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 1897,
+          "outcome": "ok"
+        },
+        {
+          "start": 1572864,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 3839,
+          "outcome": "ok"
+        },
+        {
+          "start": 5767168,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 2702,
+          "outcome": "ok"
+        },
+        {
+          "start": 9961472,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 6257,
+          "outcome": "ok"
+        },
+        {
+          "start": 14155776,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 20168,
+          "outcome": "ok"
+        },
+        {
+          "start": 18350080,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 32252,
+          "outcome": "ok"
+        },
+        {
+          "start": 22544384,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 25749,
+          "outcome": "ok"
+        },
+        {
+          "start": 0,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 13242,
+          "outcome": "ok"
+        },
+        {
+          "start": 3093893333,
+          "requestedBytes": 73686,
+          "bytes": 73686,
+          "ms": 1262,
+          "outcome": "ok"
+        },
+        {
+          "start": 52899702,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 32768,
+          "outcome": "ok"
+        },
+        {
+          "start": 57094006,
+          "requestedBytes": 4194304,
+          "bytes": 0,
+          "ms": 36440,
+          "outcome": "network_error"
+        }
+      ],
+      "progressiveReads": 922,
+      "progressiveConsumedBytes": 32158641,
+      "demuxStreamInfoMs": 13
+    },
+    {
+      "case": "progressive-with-header-hint",
+      "copy": "Conclave — Dino",
+      "startPositionSeconds": 0,
+      "seekPositionSeconds": 120,
+      "firstFrameMs": 5512.399999809266,
+      "requestedSeekMs": 57926.799999952316,
+      "seekToPlayingMs": 11408.0,
+      "cueHeaderReused": true,
+      "seek": {
+        "warm": false,
+        "setupMs": 9625,
+        "fetches": 3,
+        "fetchKB": 8264
+      },
+      "waitingPeriods": [
+        {
+          "fromMs": 5853.299999952316,
+          "position": 0.300092,
+          "durationMs": 4391.700000047684,
+          "resumed": true
+        },
+        {
+          "fromMs": 16205.399999856949,
+          "position": 6.261478,
+          "durationMs": 3531.2999999523163,
+          "resumed": true
+        },
+        {
+          "fromMs": 28893.299999952316,
+          "position": 15.434858,
+          "durationMs": 1055.2999999523163,
+          "resumed": true
+        },
+        {
+          "fromMs": 33909.799999952316,
+          "position": 19.408123,
+          "durationMs": 6426.799999952316,
+          "resumed": true
+        },
+        {
+          "fromMs": 53077.699999809265,
+          "position": 32.156247,
+          "durationMs": 4375.600000143051,
+          "resumed": true
+        },
+        {
+          "fromMs": 57932.59999990463,
+          "position": 120,
+          "durationMs": 11402.200000047684,
+          "resumed": true
+        },
+        {
+          "fromMs": 69535.39999985695,
+          "position": 120.160095,
+          "durationMs": 1963.7999999523163,
+          "resumed": true
+        }
+      ],
+      "lastSample": {
+        "ms": 141875.29999995232,
+        "time": 190.444509,
+        "paused": false,
+        "ready": 4,
+        "hidden": false,
+        "buffer": [
+          [
+            119.036,
+            228.56
+          ]
+        ]
+      },
+      "subtitles": [
+        {
+          "index": 2,
+          "codec": "ass",
+          "cueCount": 0
+        },
+        {
+          "index": 3,
+          "codec": "ass",
+          "cueCount": 10
+        }
+      ],
+      "errors": [],
+      "initialAndTeardownMediaError4": true,
+      "startupFetchWindows": [
+        {
+          "start": 0,
+          "requestedBytes": 524288,
+          "bytes": 524288,
+          "ms": 2628,
+          "outcome": "ok"
+        },
+        {
+          "start": 3093965715,
+          "requestedBytes": 1304,
+          "bytes": 1304,
+          "ms": 640,
+          "outcome": "ok"
+        },
+        {
+          "start": 524288,
+          "requestedBytes": 1048576,
+          "bytes": 1048576,
+          "ms": 2564,
+          "outcome": "ok"
+        }
+      ],
+      "retainedRecentFetchWindows": [
+        {
+          "start": 57094006,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 3199,
+          "outcome": "ok"
+        },
+        {
+          "start": 61288310,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 4016,
+          "outcome": "ok"
+        },
+        {
+          "start": 65482614,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 4609,
+          "outcome": "ok"
+        },
+        {
+          "start": 69676918,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 9718,
+          "outcome": "ok"
+        },
+        {
+          "start": 73871222,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 4254,
+          "outcome": "ok"
+        },
+        {
+          "start": 78065526,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 8252,
+          "outcome": "ok"
+        },
+        {
+          "start": 82259830,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 2784,
+          "outcome": "ok"
+        },
+        {
+          "start": 86454134,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 1572,
+          "outcome": "ok"
+        },
+        {
+          "start": 90648438,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 3158,
+          "outcome": "ok"
+        },
+        {
+          "start": 94842742,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 1917,
+          "outcome": "ok"
+        },
+        {
+          "start": 99037046,
+          "requestedBytes": 4194304,
+          "bytes": 4194304,
+          "ms": 1989,
+          "outcome": "ok"
+        },
+        {
+          "start": 103231350,
+          "requestedBytes": 4194304,
+          "bytes": 0,
+          "ms": 1681,
+          "outcome": "network_error"
+        }
+      ],
+      "progressiveReads": 2018,
+      "progressiveConsumedBytes": 67875769,
+      "demuxStreamInfoMs": 45
+    }
+  ],
+  "realComparisonCausalGainClaimed": false,
+  "realAudioListeningAccepted": false,
+  "ordinarySessions": [
+    {
+      "case": "4-engine-progressive-header-0",
+      "state": [
+        {
+          "mode": "relay",
+          "status": "expired",
+          "createdAt": "2026-10-09T21:52:57.458723+00:00",
+          "expiresAt": "2026-10-09T21:55:20.299+00:00"
+        }
+      ],
+      "startupMs": null,
+      "startupPolicy": null
+    },
+    {
+      "case": "4-engine-progressive-0",
+      "state": [
+        {
+          "mode": "relay",
+          "status": "expired",
+          "createdAt": "2026-10-09T21:43:24.991265+00:00",
+          "expiresAt": "2026-10-09T21:46:25.686+00:00"
+        }
+      ],
+      "startupMs": null,
+      "startupPolicy": null
+    }
+  ],
+  "gateways": [
+    {
+      "name": "norva-media-gateway",
+      "ok": true,
+      "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815",
+      "activeSessions": 0,
+      "rawPumpCount": 0
+    },
+    {
+      "name": "norva-resume-cache-pilot-20260916",
+      "ok": true,
+      "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815",
+      "activeSessions": 0,
+      "rawPumpCount": 0
+    }
+  ],
+  "otherOwnerSessionsPreserved": 1,
+  "controllerStopped": true,
+  "localProofListenersRemaining": 0,
+  "temporaryMediaCleanup": {
+    "files": 16,
+    "bytes": 150578477.0,
+    "remaining": 0
+  },
+  "production": {
+    "atUtc": "2026-10-09T21:55:16.737937+00:00",
+    "engineVersion": 48,
+    "sourceCommit": "90a1784fc",
+    "sha256": "ec21b67c217d6407e0f3d37eaa0d8991fe77cc0f4b5b3e693c096c6b3f007f78",
+    "publicURL": "https://norva.tv/js/norvaEngine.ec21b67c217d6407.js",
+    "shellReferencesExactAsset": true,
+    "integrityMatches": true,
+    "deliveredBytesMatchGit": true,
+    "allManifestEntriesMatchGit": 60
+  },
+  "pullRequest": {
+    "url": "https://github.com/Admin-Adher/Norva/pull/756",
+    "draft": true,
+    "merged": false,
+    "ciStatus": "pending-new-head"
+  }
+}

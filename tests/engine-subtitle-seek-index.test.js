@@ -137,3 +137,54 @@ test('a requested seek waits for cache-only discovery, then performs one shared 
     assert.deepStrictEqual(modes, [true, false]);
     assert.strictEqual(engine._subtitleSeekOffset(90), 100);
 });
+
+function indexedHead() {
+    const info = element(0x1549a966, uint(0x2ad7b1, 1000000));
+    const seek = element(0x114d9b74, element(0x4dbb,
+        [...element(0x53ab, [0x1c, 0x53, 0xbb, 0x6b]), ...uint(0x53ac, 128)]));
+    // EBML + an unknown-sized Segment; Info and SeekHead are complete.
+    return Uint8Array.from([...element(0x1a45dfa3, []), 0x18, 0x53, 0x80, 0x67, 0xff, ...info, ...seek]);
+}
+
+test('retained cue header survives read-ahead eviction and avoids another source-head request', async () => {
+    const engine = makeEngine(); engine._progressiveRanges = true; engine.url = 'https://invalid.test/current';
+    const head = indexedHead(); engine._raCache = [{ start: 0, end: head.length, buf: head }];
+    engine._rememberCueHeader(); assert.ok(engine._cueHeader);
+    const saved = engine._cueHeader, points = point(89000, [{ off: 100, duration: 6000 }]);
+    const cue = Uint8Array.from(element(0x1c53bb6b, points));
+    engine._raCache = []; const requests = [];
+    engine._readRange = async (pos, len) => { requests.push(pos); assert.ok(pos >= saved.cuesPos); return cue.subarray(pos - saved.cuesPos, pos - saved.cuesPos + len); };
+    await engine._readCueIndex();
+    assert.equal(engine.timings.cueHeaderReused, true);
+    assert.equal(engine._subtitleSeekOffset(90), saved.segStart + 100);
+    assert.equal(requests.includes(0), false);
+});
+
+test('incomplete Info or SeekHead never becomes a reusable cue-header hint', () => {
+    const engine = makeEngine(); engine._progressiveRanges = true;
+    const head = indexedHead();
+    for (const candidate of [head.subarray(0, 15), head.subarray(0, head.length - 1)]) {
+        engine._raCache = [{ start: 0, end: candidate.length, buf: candidate }];
+        engine._rememberCueHeader(); assert.equal(engine._cueHeader, null);
+    }
+});
+
+test('a hint for a different URL or size falls back to the ordinary current-source read', async () => {
+    for (const delta of [{ source: 'old' }, { size: 2 }]) {
+        const engine = makeEngine(); engine._progressiveRanges = true; engine.url = 'current';
+        engine._cueHeader = { segStart: 10, scaleNs: 1e6, cuesPos: 100, size: engine.size, source: engine.url, ...delta };
+        const positions = []; engine._readRange = async pos => { positions.push(pos); throw Error('bounded fixture stop'); };
+        await engine._readCueIndex(); assert.deepEqual(positions, [0]);
+        assert.equal(engine.timings.cueHeaderReused, undefined);
+    }
+});
+
+test('cue elements delivered in short positive slices are assembled before parsing', async () => {
+    const engine = makeEngine(); engine._progressiveRanges = true; engine.url = 'current';
+    const points = point(89000, [{ off: 100, duration: 6000 }]), cue = Uint8Array.from(element(0x1c53bb6b, points));
+    engine._cueHeader = { segStart: 10, scaleNs: 1e6, cuesPos: 1000, size: engine.size, source: engine.url };
+    let reads = 0;
+    engine._readRange = async (pos, len) => { reads++; return cue.subarray(pos - 1000, pos - 1000 + Math.min(7, len)); };
+    await engine._readCueIndex(); assert.ok(reads > 2);
+    assert.equal(engine._subtitleSeekOffset(90), 110);
+});

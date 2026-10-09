@@ -78,3 +78,7 @@ Premier contrôle CI interrompu sur le manifeste i18n d'assets périmé, après 
 Nettoyage local : **22 fichiers médias/sous-titres synthétiques, 56 680 273 octets**, supprimés du seul répertoire d'essai ; aucune copie média fournisseur n'a été conservée dans ce relevé. Scripts de reproduction, hashes, métriques et résultats sûrs conservés. Onglet de test, serveur local, contrôleur et tunnels arrêtés ; aucun écouteur restant sur les ports locaux de preuve.
 
 À **23:28:36 Paris**, vérification publique par l'outil curl habituel : révision **48** inchangée, SHA-256 `ec21b67c217d6407e0f3d37eaa0d8991fe77cc0f4b5b3e693c096c6b3f007f78`, référence immuable et intégrité du shell correctes, **60 entrées du manifeste conformes** au code précédemment livré. La première requête du client Python avait reçu 403 ; ce refus du client de vérification n'est pas assimilé à une panne du lecteur. Le candidat 49 n'est pas publié.
+
+## Suite du même brouillon
+
+Les quatre contrôles de la tête `f094e8e4d` ont ensuite réussi, paquets compris. La restitution progressive des plages et la conservation des repères de reprise ont été testées dans [le rapport suivant](2026-10-09-web-engine-progressive-range.md). Les paragraphes ci-dessus décrivent l'étape initiale ; le nouveau parcours reste désactivé par défaut et Conclave reste irrégulier. Aucune fusion ni publication supplémentaire n'est revendiquée.
