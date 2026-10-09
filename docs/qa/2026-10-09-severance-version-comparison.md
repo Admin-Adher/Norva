@@ -122,3 +122,12 @@ utilisateur restent ouverts. Les lectures ont créé leur historique ordinaire.
 
 Ce changement est documentaire uniquement. Aucun correctif applicatif ni
 déploiement supplémentaire n'est revendiqué.
+
+### Suite : qualification des rafales (PR738)
+
+Le [rapport du pilote](2026-10-09-startup-observation-pilot.md) documente le
+correctif ultérieur et ses essais avant/après sur les mêmes copies. La rafale
+MAX OTT ne déclenche plus le départ prématuré, mais cette copie ne lit toujours
+pas après 131 s. Le témoin anglais passe de 4,1 à 12,1 s au démarrage, puis
+progresse 135 s sans interruption observée. La préservation des démarrages
+rapides n'est donc pas validée : activation limitée au compte pilote existant.
