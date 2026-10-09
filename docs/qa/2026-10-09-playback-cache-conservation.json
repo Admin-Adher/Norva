@@ -1,0 +1,1932 @@
+{
+  "schema": 1,
+  "date": "2026-10-09",
+  "productionChanged": false,
+  "baseCommit": "b1323824c601cc6d5e49ac39b78e86e5befb1de0",
+  "scope": "ordinary-playback-conservation-slot-release-and-reopen",
+  "publicPlaybackLaunches": 2,
+  "operatorProviderMediaCalls": 0,
+  "isolated": {
+    "atUtc": "2026-10-09T15:52:05.762951+00:00",
+    "exitCode": 0,
+    "network": "none",
+    "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+    "oom": false,
+    "log": "TAP version 13\n# Subtest: ordinary playback publishes one complete graph from its existing input and cached output decodes without provider reads\nok 1 - ordinary playback publishes one complete graph from its existing input and cached output decodes without provider reads\n  ---\n  duration_ms: 9821.234109\n  ...\n# {\"providerGets\":1,\"maximumConcurrentProviderGets\":1,\"activeGetsAfterEOF\":0,\"ffmpegSpawns\":1,\"retainedCompleteHlsOutput\":true,\"sourceBytes\":2107970,\"sourceDurationSeconds\":24,\"graphBytes\":2354017,\"graphFiles\":44,\"publications\":1,\"providerGetsForStoredGraphDecode\":0,\"audioRenditionsDecoded\":2,\"subtitleCuesPresent\":6,\"oldTicketRevoked\":true}\n# Subtest: demand keeps the detached producer alive, zero demand stops it, and a new viewer preempts before reconnecting\nok 2 - demand keeps the detached producer alive, zero demand stops it, and a new viewer preempts before reconnecting\n  ---\n  duration_ms: 1239.480157\n  ...\n# Subtest: ten authorized viewers live-join one exact MKV producer and detach independently\nok 3 - ten authorized viewers live-join one exact MKV producer and detach independently\n  ---\n  duration_ms: 7674.792173\n  ...\n# Subtest: Gateway v170 keeps global R2 publication dark and behind private dedicated credentials\nok 4 - Gateway v170 keeps global R2 publication dark and behind private dedicated credentials\n  ---\n  duration_ms: 0.98589\n  ...\n# Subtest: only an admitted, exact, short MKV can retain its complete HLS output\nok 5 - only an admitted, exact, short MKV can retain its complete HLS output\n  ---\n  duration_ms: 1.472047\n  ...\n# Subtest: subtitle-heavy playback and shared-cache limits remain independently bounded\nok 6 - subtitle-heavy playback and shared-cache limits remain independently bounded\n  ---\n  duration_ms: 0.397103\n  ...\n# Subtest: shared publication waits for profile and immutable media barriers then reuses one graph walk\nok 7 - shared publication waits for profile and immutable media barriers then reuses one graph walk\n  ---\n  duration_ms: 0.672081\n  ...\n# Subtest: Gateway publishes manifest-last graph before one bounded Edge authority callback\nok 8 - Gateway publishes manifest-last graph before one bounded Edge authority callback\n  ---\n  duration_ms: 0.397644\n  ...\n# Subtest: clean session teardown keeps producer renewal alive until publication settles\nok 9 - clean session teardown keeps producer renewal alive until publication settles\n  ---\n  duration_ms: 0.505563\n  ...\n# Subtest: shared completion after viewer exit is dark, demand-driven and immediately preemptable\nok 10 - shared completion after viewer exit is dark, demand-driven and immediately preemptable\n  ---\n  duration_ms: 0.630133\n  ...\n# Subtest: session cleanup returns the cache locator only after any eligible local promotion settles\nok 11 - session cleanup returns the cache locator only after any eligible local promotion settles\n  ---\n  duration_ms: 0.427459\n  ...\n# Subtest: EOF-complete Gateway output is uploaded before one authority-only callback\nok 12 - EOF-complete Gateway output is uploaded before one authority-only callback\n  ---\n  duration_ms: 2.2807\n  ...\n# Subtest: partial source, FFmpeg failure and callback mismatch all fail closed\nok 13 - partial source, FFmpeg failure and callback mismatch all fail closed\n  ---\n  duration_ms: 1.388473\n  ...\n# Subtest: transient Worker loss retries the immutable upload and registers once\nok 14 - transient Worker loss retries the immutable upload and registers once\n  ---\n  duration_ms: 0.44422\n  ...\n# Subtest: terminal upload rejection does not retry or register\nok 15 - terminal upload rejection does not retry or register\n  ---\n  duration_ms: 0.220166\n  ...\n# Subtest: lost producer lease prevents retrying a transient upload\nok 16 - lost producer lease prevents retrying a transient upload\n  ---\n  duration_ms: 0.317717\n  ...\n1..16\n# tests 16\n# suites 0\n# pass 16\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 18936.10802\n"
+  },
+  "browser": {
+    "clickUtc": "2026-10-09T15:58:37.942Z",
+    "closeUtc": "2026-10-09T16:04:22.683Z",
+    "reopenUtc": "2026-10-09T16:04:41.915Z",
+    "stopUtc": "2026-10-09T16:07:00.540Z",
+    "invalidFirstSample": "First sample read hidden live-TV video; excluded.",
+    "firstSamples": [
+      {
+        "at": "2026-10-09T15:59:14.810Z",
+        "buffer": [
+          [
+            0.042333,
+            80.081333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "quality": null,
+        "ready": 4,
+        "time": 24.215411
+      },
+      {
+        "at": "2026-10-09T15:59:49.792Z",
+        "buffer": [
+          [
+            28.070333,
+            110.069333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 59.198095
+      },
+      {
+        "at": "2026-10-09T16:00:26.964Z",
+        "buffer": [
+          [
+            66.067333,
+            122.081333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 96.369722
+      },
+      {
+        "at": "2026-10-09T16:03:30.692Z",
+        "buffer": [
+          [
+            226.060333,
+            264.056333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 256.69815
+      },
+      {
+        "at": "2026-10-09T16:04:14.233Z",
+        "buffer": [
+          [
+            262.054333,
+            296.045333
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 2,
+        "time": 294.002527
+      }
+    ],
+    "resumeSamples": [
+      {
+        "at": "2026-10-09T16:04:57.686Z",
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "ready": 0,
+        "time": 0
+      },
+      {
+        "at": "2026-10-09T16:05:23.898Z",
+        "buffer": [],
+        "error": null,
+        "paused": true,
+        "ready": 0,
+        "time": 0
+      },
+      {
+        "at": "2026-10-09T16:05:43.606Z",
+        "buffer": [
+          [
+            0.047334,
+            8.054334
+          ]
+        ],
+        "error": null,
+        "paused": true,
+        "ready": 4,
+        "time": 0
+      },
+      {
+        "at": "2026-10-09T16:06:07.669Z",
+        "buffer": [
+          [
+            0.047334,
+            14.060334
+          ]
+        ],
+        "error": null,
+        "paused": true,
+        "ready": 4,
+        "time": 0
+      },
+      {
+        "at": "2026-10-09T16:06:29.387Z",
+        "buffer": [
+          [
+            0.047334,
+            26.072334
+          ]
+        ],
+        "error": null,
+        "paused": true,
+        "ready": 4,
+        "time": 0
+      },
+      {
+        "at": "2026-10-09T16:06:51.050Z",
+        "buffer": [
+          [
+            0.047334,
+            46.052334
+          ]
+        ],
+        "error": null,
+        "paused": false,
+        "ready": 4,
+        "time": 7.020175
+      }
+    ]
+  },
+  "snapshots": {
+    "real-preflight": {
+      "atUtc": "2026-10-09T15:58:33.790988+00:00",
+      "objectCounts": [
+        {
+          "live": 1,
+          "bytes": 479650098,
+          "count": 2,
+          "state": "ready"
+        }
+      ],
+      "ownerBindings": [
+        {
+          "count": 2,
+          "state": "revoked"
+        }
+      ],
+      "ownerLiveClaims": [
+        {
+          "count": 0
+        }
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+          "healthy": true,
+          "activeSessions": 0,
+          "rawPumpCount": 0,
+          "encoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          },
+          "boundedHls": {
+            "enabled": true,
+            "admissionProtocol": 1,
+            "admittedProducers": 0,
+            "waitingOutputRequests": 0,
+            "sessionMaxBytes": 536870912,
+            "playlistSegments": 64,
+            "retainedExtraSegments": 16,
+            "retainedSharedCacheMaxBytes": 4294967296,
+            "retainedSharedCacheSourceMaxBytes": 805306368,
+            "retainedSharedCacheDurationMaxSeconds": 3600,
+            "retainedSharedCacheSessions": 0,
+            "sessions": 0,
+            "bytes": 0,
+            "peakSessionBytes": 0,
+            "peakSessionFiles": 0,
+            "paused": 0
+          },
+          "privateResumeHlsCache": null,
+          "controlledSessions": [],
+          "shared": {
+            "protocol": 1,
+            "requested": true,
+            "enabled": true,
+            "status": "enabled-private-worker-r2",
+            "scope": "global-private-complete-hls-only",
+            "storageBackend": "r2-via-private-worker",
+            "manifestLast": true,
+            "exactContentSha256": true,
+            "exactAudioTopology": true,
+            "exactSubtitleTopologyInIdentity": true,
+            "embeddedSubtitleAssets": true,
+            "pipelineBuild": "mkv-complete-hls-mpegts-v6",
+            "segmenterBuild": "ffmpeg-hls-mpegts-webvtt-v2",
+            "ttlMs": 2592000000,
+            "liveJoin": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "maximumViewersPerProducer": 64,
+              "activeViewers": 0,
+              "topologyGate": "exact-audio-subtitle-graph",
+              "continuityGate": "non-empty-contiguous-hls-window"
+            },
+            "backgroundContinuation": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "demand": "distributed-followers-only",
+              "preemptable": true,
+              "maxMs": 1800000,
+              "active": 0
+            },
+            "producerControl": {
+              "protocol": 1,
+              "active": true,
+              "attached": 0,
+              "pulses": 0,
+              "renewals": 0,
+              "preemptions": 0,
+              "demandStops": 0,
+              "expirations": 0,
+              "completions": 0,
+              "abandons": 0,
+              "failures": 0,
+              "heartbeatMs": 20000
+            },
+            "stats": {
+              "publications": 0,
+              "alreadyReady": 0,
+              "failures": 0,
+              "transientRetries": 0,
+              "callbackFailures": 0,
+              "bytesPublished": 0,
+              "filesPublished": 0,
+              "admissionSkipped": 0,
+              "liveJoinAccepted": 0,
+              "liveJoinRejected": 0,
+              "liveJoinRevoked": 0,
+              "liveJoinReattachedContinuations": 0
+            }
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+          "healthy": true,
+          "activeSessions": 0,
+          "rawPumpCount": 0,
+          "encoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          },
+          "boundedHls": {
+            "enabled": true,
+            "admissionProtocol": 1,
+            "admittedProducers": 0,
+            "waitingOutputRequests": 0,
+            "sessionMaxBytes": 536870912,
+            "playlistSegments": 64,
+            "retainedExtraSegments": 16,
+            "retainedSharedCacheMaxBytes": 4294967296,
+            "retainedSharedCacheSourceMaxBytes": 805306368,
+            "retainedSharedCacheDurationMaxSeconds": 3600,
+            "retainedSharedCacheSessions": 0,
+            "sessions": 0,
+            "bytes": 0,
+            "peakSessionBytes": 0,
+            "peakSessionFiles": 0,
+            "paused": 0
+          },
+          "privateResumeHlsCache": null,
+          "controlledSessions": [],
+          "shared": {
+            "protocol": 1,
+            "requested": true,
+            "enabled": true,
+            "status": "enabled-private-worker-r2",
+            "scope": "global-private-complete-hls-only",
+            "storageBackend": "r2-via-private-worker",
+            "manifestLast": true,
+            "exactContentSha256": true,
+            "exactAudioTopology": true,
+            "exactSubtitleTopologyInIdentity": true,
+            "embeddedSubtitleAssets": true,
+            "pipelineBuild": "mkv-complete-hls-mpegts-v6",
+            "segmenterBuild": "ffmpeg-hls-mpegts-webvtt-v2",
+            "ttlMs": 2592000000,
+            "liveJoin": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "maximumViewersPerProducer": 64,
+              "activeViewers": 0,
+              "topologyGate": "exact-audio-subtitle-graph",
+              "continuityGate": "non-empty-contiguous-hls-window"
+            },
+            "backgroundContinuation": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "demand": "distributed-followers-only",
+              "preemptable": true,
+              "maxMs": 1800000,
+              "active": 0
+            },
+            "producerControl": {
+              "protocol": 1,
+              "active": true,
+              "attached": 2,
+              "pulses": 16,
+              "renewals": 16,
+              "preemptions": 0,
+              "demandStops": 0,
+              "expirations": 0,
+              "completions": 0,
+              "abandons": 2,
+              "failures": 0,
+              "heartbeatMs": 20000
+            },
+            "stats": {
+              "publications": 0,
+              "alreadyReady": 0,
+              "failures": 0,
+              "transientRetries": 0,
+              "callbackFailures": 0,
+              "bytesPublished": 0,
+              "filesPublished": 0,
+              "admissionSkipped": 0,
+              "liveJoinAccepted": 0,
+              "liveJoinRejected": 0,
+              "liveJoinRevoked": 0,
+              "liveJoinReattachedContinuations": 0
+            }
+          }
+        }
+      ]
+    },
+    "real-start": {
+      "atUtc": "2026-10-09T15:58:55.663701+00:00",
+      "objectCounts": [
+        {
+          "live": 1,
+          "bytes": 479650098,
+          "count": 2,
+          "state": "ready"
+        }
+      ],
+      "ownerBindings": [
+        {
+          "count": 2,
+          "state": "revoked"
+        }
+      ],
+      "ownerLiveClaims": [
+        {
+          "count": 1
+        }
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+          "healthy": true,
+          "activeSessions": 0,
+          "rawPumpCount": 0,
+          "encoderCapacity": {
+            "limit": 8,
+            "occupied": 1
+          },
+          "boundedHls": {
+            "enabled": true,
+            "admissionProtocol": 1,
+            "admittedProducers": 0,
+            "waitingOutputRequests": 0,
+            "sessionMaxBytes": 536870912,
+            "playlistSegments": 64,
+            "retainedExtraSegments": 16,
+            "retainedSharedCacheMaxBytes": 4294967296,
+            "retainedSharedCacheSourceMaxBytes": 805306368,
+            "retainedSharedCacheDurationMaxSeconds": 3600,
+            "retainedSharedCacheSessions": 0,
+            "sessions": 0,
+            "bytes": 0,
+            "peakSessionBytes": 0,
+            "peakSessionFiles": 0,
+            "paused": 0
+          },
+          "privateResumeHlsCache": null,
+          "controlledSessions": [],
+          "shared": {
+            "protocol": 1,
+            "requested": true,
+            "enabled": true,
+            "status": "enabled-private-worker-r2",
+            "scope": "global-private-complete-hls-only",
+            "storageBackend": "r2-via-private-worker",
+            "manifestLast": true,
+            "exactContentSha256": true,
+            "exactAudioTopology": true,
+            "exactSubtitleTopologyInIdentity": true,
+            "embeddedSubtitleAssets": true,
+            "pipelineBuild": "mkv-complete-hls-mpegts-v6",
+            "segmenterBuild": "ffmpeg-hls-mpegts-webvtt-v2",
+            "ttlMs": 2592000000,
+            "liveJoin": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "maximumViewersPerProducer": 64,
+              "activeViewers": 0,
+              "topologyGate": "exact-audio-subtitle-graph",
+              "continuityGate": "non-empty-contiguous-hls-window"
+            },
+            "backgroundContinuation": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "demand": "distributed-followers-only",
+              "preemptable": true,
+              "maxMs": 1800000,
+              "active": 0
+            },
+            "producerControl": {
+              "protocol": 1,
+              "active": true,
+              "attached": 0,
+              "pulses": 0,
+              "renewals": 0,
+              "preemptions": 0,
+              "demandStops": 0,
+              "expirations": 0,
+              "completions": 0,
+              "abandons": 0,
+              "failures": 0,
+              "heartbeatMs": 20000
+            },
+            "stats": {
+              "publications": 0,
+              "alreadyReady": 0,
+              "failures": 0,
+              "transientRetries": 0,
+              "callbackFailures": 0,
+              "bytesPublished": 0,
+              "filesPublished": 0,
+              "admissionSkipped": 0,
+              "liveJoinAccepted": 0,
+              "liveJoinRejected": 0,
+              "liveJoinRevoked": 0,
+              "liveJoinReattachedContinuations": 0
+            }
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+          "healthy": true,
+          "activeSessions": 1,
+          "rawPumpCount": 0,
+          "encoderCapacity": {
+            "limit": 8,
+            "occupied": 1
+          },
+          "boundedHls": {
+            "enabled": true,
+            "admissionProtocol": 1,
+            "admittedProducers": 1,
+            "waitingOutputRequests": 0,
+            "sessionMaxBytes": 536870912,
+            "playlistSegments": 64,
+            "retainedExtraSegments": 16,
+            "retainedSharedCacheMaxBytes": 4294967296,
+            "retainedSharedCacheSourceMaxBytes": 805306368,
+            "retainedSharedCacheDurationMaxSeconds": 3600,
+            "retainedSharedCacheSessions": 1,
+            "sessions": 1,
+            "bytes": 4661187,
+            "peakSessionBytes": 4661187,
+            "peakSessionFiles": 38,
+            "paused": 0
+          },
+          "privateResumeHlsCache": null,
+          "controlledSessions": [
+            {
+              "status": "ready",
+              "createdAt": "2026-10-09T15:58:39.234Z",
+              "seek": 0,
+              "audioMode": "transcode",
+              "inputProgress": {
+                "outcome": "active",
+                "phase": "provider-read",
+                "elapsedMs": 12939.704,
+                "receivedBytes": 4861263,
+                "forwardedBytes": 4861263,
+                "openedRanges": 0,
+                "reopens": 0,
+                "plannedWindowContinuations": 0
+              },
+              "timings": {
+                "retainedSharedCacheHlsOutput": true,
+                "fileSizeBytes": 475790063,
+                "ffmpegSpawnCount": 1,
+                "ffmpegReadyMs": 508,
+                "totalMs": 4156,
+                "providerGetPreopened": true,
+                "providerPreopenRetries": 0,
+                "completeHlsCacheHit": null,
+                "recentResumeCacheHit": null,
+                "finiteMkvSeekBroker": null
+              }
+            }
+          ],
+          "shared": {
+            "protocol": 1,
+            "requested": true,
+            "enabled": true,
+            "status": "enabled-private-worker-r2",
+            "scope": "global-private-complete-hls-only",
+            "storageBackend": "r2-via-private-worker",
+            "manifestLast": true,
+            "exactContentSha256": true,
+            "exactAudioTopology": true,
+            "exactSubtitleTopologyInIdentity": true,
+            "embeddedSubtitleAssets": true,
+            "pipelineBuild": "mkv-complete-hls-mpegts-v6",
+            "segmenterBuild": "ffmpeg-hls-mpegts-webvtt-v2",
+            "ttlMs": 2592000000,
+            "liveJoin": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "maximumViewersPerProducer": 64,
+              "activeViewers": 0,
+              "topologyGate": "exact-audio-subtitle-graph",
+              "continuityGate": "non-empty-contiguous-hls-window"
+            },
+            "backgroundContinuation": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "demand": "distributed-followers-only",
+              "preemptable": true,
+              "maxMs": 1800000,
+              "active": 0
+            },
+            "producerControl": {
+              "protocol": 1,
+              "active": true,
+              "attached": 3,
+              "pulses": 17,
+              "renewals": 17,
+              "preemptions": 0,
+              "demandStops": 0,
+              "expirations": 0,
+              "completions": 0,
+              "abandons": 2,
+              "failures": 0,
+              "heartbeatMs": 20000
+            },
+            "stats": {
+              "publications": 0,
+              "alreadyReady": 0,
+              "failures": 0,
+              "transientRetries": 0,
+              "callbackFailures": 0,
+              "bytesPublished": 0,
+              "filesPublished": 0,
+              "admissionSkipped": 0,
+              "liveJoinAccepted": 0,
+              "liveJoinRejected": 0,
+              "liveJoinRevoked": 0,
+              "liveJoinReattachedContinuations": 0
+            }
+          }
+        }
+      ]
+    },
+    "real-before-close": {
+      "atUtc": "2026-10-09T16:03:56.679583+00:00",
+      "objectCounts": [
+        {
+          "live": 1,
+          "bytes": 479650098,
+          "count": 2,
+          "state": "ready"
+        }
+      ],
+      "ownerBindings": [
+        {
+          "count": 2,
+          "state": "revoked"
+        }
+      ],
+      "ownerLiveClaims": [
+        {
+          "count": 1
+        }
+      ],
+      "testEvents": [
+        {
+          "at": "2026-10-09T15:58:38.620318+00:00",
+          "mode": null,
+          "error": null,
+          "event": "play_requested",
+          "ttffMs": null,
+          "position": 0
+        },
+        {
+          "at": "2026-10-09T15:58:44.245958+00:00",
+          "mode": "gateway-session",
+          "error": null,
+          "event": "first_frame",
+          "ttffMs": 5664,
+          "position": 0
+        },
+        {
+          "at": "2026-10-09T15:58:51.087544+00:00",
+          "mode": "gateway-session",
+          "error": null,
+          "event": "play_started",
+          "ttffMs": null,
+          "position": 0
+        }
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+          "healthy": true,
+          "activeSessions": 0,
+          "rawPumpCount": 0,
+          "encoderCapacity": {
+            "limit": 8,
+            "occupied": 1
+          },
+          "boundedHls": {
+            "enabled": true,
+            "admissionProtocol": 1,
+            "admittedProducers": 0,
+            "waitingOutputRequests": 0,
+            "sessionMaxBytes": 536870912,
+            "playlistSegments": 64,
+            "retainedExtraSegments": 16,
+            "retainedSharedCacheMaxBytes": 4294967296,
+            "retainedSharedCacheSourceMaxBytes": 805306368,
+            "retainedSharedCacheDurationMaxSeconds": 3600,
+            "retainedSharedCacheSessions": 0,
+            "sessions": 0,
+            "bytes": 0,
+            "peakSessionBytes": 0,
+            "peakSessionFiles": 0,
+            "paused": 0
+          },
+          "privateResumeHlsCache": {
+            "enabled": true,
+            "recentOwnerScope": "owner-allowlist",
+            "ownerScoped": false,
+            "protocol": 1,
+            "stores": 0,
+            "hits": 0,
+            "misses": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "inputStores": 0,
+            "inputHits": 0,
+            "sampledStores": 0,
+            "sampledHits": 0,
+            "captureRejects": 1,
+            "lastCaptureRejection": "session-ineligible",
+            "entries": 0,
+            "bytes": 0,
+            "reservedBytes": 0,
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "ttlMs": 1800000,
+            "windowSeconds": 48,
+            "recentRevalidation": true,
+            "recentTtlMs": 600000,
+            "scope": "private-owner-source-revision",
+            "revalidation": "current-strong-etag-size-target"
+          },
+          "controlledSessions": [],
+          "shared": {
+            "protocol": 1,
+            "requested": true,
+            "enabled": true,
+            "status": "enabled-private-worker-r2",
+            "scope": "global-private-complete-hls-only",
+            "storageBackend": "r2-via-private-worker",
+            "manifestLast": true,
+            "exactContentSha256": true,
+            "exactAudioTopology": true,
+            "exactSubtitleTopologyInIdentity": true,
+            "embeddedSubtitleAssets": true,
+            "pipelineBuild": "mkv-complete-hls-mpegts-v6",
+            "segmenterBuild": "ffmpeg-hls-mpegts-webvtt-v2",
+            "ttlMs": 2592000000,
+            "liveJoin": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "maximumViewersPerProducer": 64,
+              "activeViewers": 0,
+              "topologyGate": "exact-audio-subtitle-graph",
+              "continuityGate": "non-empty-contiguous-hls-window"
+            },
+            "backgroundContinuation": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "demand": "distributed-followers-only",
+              "preemptable": true,
+              "maxMs": 1800000,
+              "active": 0
+            },
+            "producerControl": {
+              "protocol": 1,
+              "active": true,
+              "attached": 0,
+              "pulses": 0,
+              "renewals": 0,
+              "preemptions": 0,
+              "demandStops": 0,
+              "expirations": 0,
+              "completions": 0,
+              "abandons": 0,
+              "failures": 0,
+              "heartbeatMs": 20000
+            },
+            "stats": {
+              "publications": 0,
+              "alreadyReady": 0,
+              "failures": 0,
+              "transientRetries": 0,
+              "callbackFailures": 0,
+              "bytesPublished": 0,
+              "filesPublished": 0,
+              "admissionSkipped": 0,
+              "liveJoinAccepted": 0,
+              "liveJoinRejected": 0,
+              "liveJoinRevoked": 0,
+              "liveJoinReattachedContinuations": 0
+            }
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+          "healthy": true,
+          "activeSessions": 1,
+          "rawPumpCount": 0,
+          "encoderCapacity": {
+            "limit": 8,
+            "occupied": 1
+          },
+          "boundedHls": {
+            "enabled": true,
+            "admissionProtocol": 1,
+            "admittedProducers": 1,
+            "waitingOutputRequests": 0,
+            "sessionMaxBytes": 536870912,
+            "playlistSegments": 64,
+            "retainedExtraSegments": 16,
+            "retainedSharedCacheMaxBytes": 4294967296,
+            "retainedSharedCacheSourceMaxBytes": 805306368,
+            "retainedSharedCacheDurationMaxSeconds": 3600,
+            "retainedSharedCacheSessions": 1,
+            "sessions": 1,
+            "bytes": 35037197,
+            "peakSessionBytes": 35037197,
+            "peakSessionFiles": 202,
+            "paused": 0
+          },
+          "privateResumeHlsCache": {
+            "enabled": true,
+            "recentOwnerScope": "owner-allowlist",
+            "ownerScoped": false,
+            "protocol": 1,
+            "stores": 0,
+            "hits": 0,
+            "misses": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "inputStores": 0,
+            "inputHits": 0,
+            "sampledStores": 0,
+            "sampledHits": 0,
+            "captureRejects": 3,
+            "lastCaptureRejection": "insufficient-ahead",
+            "entries": 0,
+            "bytes": 0,
+            "reservedBytes": 0,
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "ttlMs": 1800000,
+            "windowSeconds": 48,
+            "recentRevalidation": true,
+            "recentTtlMs": 600000,
+            "scope": "private-owner-source-revision",
+            "revalidation": "current-strong-etag-size-target"
+          },
+          "controlledSessions": [
+            {
+              "status": "ready",
+              "createdAt": "2026-10-09T15:58:39.234Z",
+              "seek": 0,
+              "audioMode": "transcode",
+              "inputProgress": {
+                "outcome": "active",
+                "phase": "provider-read",
+                "elapsedMs": 313942.832,
+                "receivedBytes": 32484015,
+                "forwardedBytes": 32484015,
+                "openedRanges": 0,
+                "reopens": 0,
+                "plannedWindowContinuations": 0
+              },
+              "timings": {
+                "retainedSharedCacheHlsOutput": true,
+                "fileSizeBytes": 475790063,
+                "ffmpegSpawnCount": 1,
+                "ffmpegReadyMs": 508,
+                "totalMs": 4156,
+                "providerGetPreopened": true,
+                "providerPreopenRetries": 0,
+                "completeHlsCacheHit": null,
+                "privateResumeWindowHit": null,
+                "privateResumeInputSeededBytes": null,
+                "privateResumeValidationMode": null,
+                "privateResumeValidationMs": null,
+                "privateResumeAheadSeconds": null,
+                "retainedSessionHit": null,
+                "retainedSessionTransferMs": null,
+                "finiteMkvSeekBroker": null
+              }
+            }
+          ],
+          "shared": {
+            "protocol": 1,
+            "requested": true,
+            "enabled": true,
+            "status": "enabled-private-worker-r2",
+            "scope": "global-private-complete-hls-only",
+            "storageBackend": "r2-via-private-worker",
+            "manifestLast": true,
+            "exactContentSha256": true,
+            "exactAudioTopology": true,
+            "exactSubtitleTopologyInIdentity": true,
+            "embeddedSubtitleAssets": true,
+            "pipelineBuild": "mkv-complete-hls-mpegts-v6",
+            "segmenterBuild": "ffmpeg-hls-mpegts-webvtt-v2",
+            "ttlMs": 2592000000,
+            "liveJoin": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "maximumViewersPerProducer": 64,
+              "activeViewers": 0,
+              "topologyGate": "exact-audio-subtitle-graph",
+              "continuityGate": "non-empty-contiguous-hls-window"
+            },
+            "backgroundContinuation": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "demand": "distributed-followers-only",
+              "preemptable": true,
+              "maxMs": 1800000,
+              "active": 0
+            },
+            "producerControl": {
+              "protocol": 1,
+              "active": true,
+              "attached": 3,
+              "pulses": 32,
+              "renewals": 32,
+              "preemptions": 0,
+              "demandStops": 0,
+              "expirations": 0,
+              "completions": 0,
+              "abandons": 2,
+              "failures": 0,
+              "heartbeatMs": 20000
+            },
+            "stats": {
+              "publications": 0,
+              "alreadyReady": 0,
+              "failures": 0,
+              "transientRetries": 0,
+              "callbackFailures": 0,
+              "bytesPublished": 0,
+              "filesPublished": 0,
+              "admissionSkipped": 0,
+              "liveJoinAccepted": 0,
+              "liveJoinRejected": 0,
+              "liveJoinRevoked": 0,
+              "liveJoinReattachedContinuations": 0
+            }
+          }
+        }
+      ]
+    },
+    "real-closed": {
+      "atUtc": "2026-10-09T16:04:34.244491+00:00",
+      "objectCounts": [
+        {
+          "live": 1,
+          "bytes": 479650098,
+          "count": 2,
+          "state": "ready"
+        }
+      ],
+      "ownerBindings": [
+        {
+          "count": 2,
+          "state": "revoked"
+        }
+      ],
+      "ownerLiveClaims": [
+        {
+          "count": 0
+        }
+      ],
+      "testEvents": [
+        {
+          "at": "2026-10-09T15:58:38.620318+00:00",
+          "mode": null,
+          "error": null,
+          "event": "play_requested",
+          "ttffMs": null,
+          "position": 0
+        },
+        {
+          "at": "2026-10-09T15:58:44.245958+00:00",
+          "mode": "gateway-session",
+          "error": null,
+          "event": "first_frame",
+          "ttffMs": 5664,
+          "position": 0
+        },
+        {
+          "at": "2026-10-09T15:58:51.087544+00:00",
+          "mode": "gateway-session",
+          "error": null,
+          "event": "play_started",
+          "ttffMs": null,
+          "position": 0
+        },
+        {
+          "at": "2026-10-09T16:04:22.83701+00:00",
+          "mode": "gateway-session",
+          "error": null,
+          "event": "pause",
+          "ttffMs": null,
+          "position": 297
+        }
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+          "healthy": true,
+          "activeSessions": 0,
+          "rawPumpCount": 0,
+          "encoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          },
+          "boundedHls": {
+            "enabled": true,
+            "admissionProtocol": 1,
+            "admittedProducers": 0,
+            "waitingOutputRequests": 0,
+            "sessionMaxBytes": 536870912,
+            "playlistSegments": 64,
+            "retainedExtraSegments": 16,
+            "retainedSharedCacheMaxBytes": 4294967296,
+            "retainedSharedCacheSourceMaxBytes": 805306368,
+            "retainedSharedCacheDurationMaxSeconds": 3600,
+            "retainedSharedCacheSessions": 0,
+            "sessions": 0,
+            "bytes": 0,
+            "peakSessionBytes": 0,
+            "peakSessionFiles": 0,
+            "paused": 0
+          },
+          "privateResumeHlsCache": {
+            "enabled": true,
+            "recentOwnerScope": "owner-allowlist",
+            "ownerScoped": false,
+            "protocol": 1,
+            "stores": 0,
+            "hits": 0,
+            "misses": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "inputStores": 0,
+            "inputHits": 0,
+            "sampledStores": 0,
+            "sampledHits": 0,
+            "captureRejects": 1,
+            "lastCaptureRejection": "session-ineligible",
+            "entries": 0,
+            "bytes": 0,
+            "reservedBytes": 0,
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "ttlMs": 1800000,
+            "windowSeconds": 48,
+            "recentRevalidation": true,
+            "recentTtlMs": 600000,
+            "scope": "private-owner-source-revision",
+            "revalidation": "current-strong-etag-size-target"
+          },
+          "controlledSessions": [],
+          "shared": {
+            "protocol": 1,
+            "requested": true,
+            "enabled": true,
+            "status": "enabled-private-worker-r2",
+            "scope": "global-private-complete-hls-only",
+            "storageBackend": "r2-via-private-worker",
+            "manifestLast": true,
+            "exactContentSha256": true,
+            "exactAudioTopology": true,
+            "exactSubtitleTopologyInIdentity": true,
+            "embeddedSubtitleAssets": true,
+            "pipelineBuild": "mkv-complete-hls-mpegts-v6",
+            "segmenterBuild": "ffmpeg-hls-mpegts-webvtt-v2",
+            "ttlMs": 2592000000,
+            "liveJoin": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "maximumViewersPerProducer": 64,
+              "activeViewers": 0,
+              "topologyGate": "exact-audio-subtitle-graph",
+              "continuityGate": "non-empty-contiguous-hls-window"
+            },
+            "backgroundContinuation": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "demand": "distributed-followers-only",
+              "preemptable": true,
+              "maxMs": 1800000,
+              "active": 0
+            },
+            "producerControl": {
+              "protocol": 1,
+              "active": true,
+              "attached": 0,
+              "pulses": 0,
+              "renewals": 0,
+              "preemptions": 0,
+              "demandStops": 0,
+              "expirations": 0,
+              "completions": 0,
+              "abandons": 0,
+              "failures": 0,
+              "heartbeatMs": 20000
+            },
+            "stats": {
+              "publications": 0,
+              "alreadyReady": 0,
+              "failures": 0,
+              "transientRetries": 0,
+              "callbackFailures": 0,
+              "bytesPublished": 0,
+              "filesPublished": 0,
+              "admissionSkipped": 0,
+              "liveJoinAccepted": 0,
+              "liveJoinRejected": 0,
+              "liveJoinRevoked": 0,
+              "liveJoinReattachedContinuations": 0
+            }
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+          "healthy": true,
+          "activeSessions": 0,
+          "rawPumpCount": 0,
+          "encoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          },
+          "boundedHls": {
+            "enabled": true,
+            "admissionProtocol": 1,
+            "admittedProducers": 0,
+            "waitingOutputRequests": 0,
+            "sessionMaxBytes": 536870912,
+            "playlistSegments": 64,
+            "retainedExtraSegments": 16,
+            "retainedSharedCacheMaxBytes": 4294967296,
+            "retainedSharedCacheSourceMaxBytes": 805306368,
+            "retainedSharedCacheDurationMaxSeconds": 3600,
+            "retainedSharedCacheSessions": 0,
+            "sessions": 0,
+            "bytes": 0,
+            "peakSessionBytes": 0,
+            "peakSessionFiles": 0,
+            "paused": 0
+          },
+          "privateResumeHlsCache": {
+            "enabled": true,
+            "recentOwnerScope": "owner-allowlist",
+            "ownerScoped": false,
+            "protocol": 1,
+            "stores": 0,
+            "hits": 0,
+            "misses": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "inputStores": 0,
+            "inputHits": 0,
+            "sampledStores": 0,
+            "sampledHits": 0,
+            "captureRejects": 4,
+            "lastCaptureRejection": "session-ineligible",
+            "entries": 0,
+            "bytes": 0,
+            "reservedBytes": 0,
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "ttlMs": 1800000,
+            "windowSeconds": 48,
+            "recentRevalidation": true,
+            "recentTtlMs": 600000,
+            "scope": "private-owner-source-revision",
+            "revalidation": "current-strong-etag-size-target"
+          },
+          "controlledSessions": [],
+          "shared": {
+            "protocol": 1,
+            "requested": true,
+            "enabled": true,
+            "status": "enabled-private-worker-r2",
+            "scope": "global-private-complete-hls-only",
+            "storageBackend": "r2-via-private-worker",
+            "manifestLast": true,
+            "exactContentSha256": true,
+            "exactAudioTopology": true,
+            "exactSubtitleTopologyInIdentity": true,
+            "embeddedSubtitleAssets": true,
+            "pipelineBuild": "mkv-complete-hls-mpegts-v6",
+            "segmenterBuild": "ffmpeg-hls-mpegts-webvtt-v2",
+            "ttlMs": 2592000000,
+            "liveJoin": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "maximumViewersPerProducer": 64,
+              "activeViewers": 0,
+              "topologyGate": "exact-audio-subtitle-graph",
+              "continuityGate": "non-empty-contiguous-hls-window"
+            },
+            "backgroundContinuation": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "demand": "distributed-followers-only",
+              "preemptable": true,
+              "maxMs": 1800000,
+              "active": 0
+            },
+            "producerControl": {
+              "protocol": 1,
+              "active": true,
+              "attached": 3,
+              "pulses": 33,
+              "renewals": 33,
+              "preemptions": 0,
+              "demandStops": 0,
+              "expirations": 0,
+              "completions": 0,
+              "abandons": 3,
+              "failures": 0,
+              "heartbeatMs": 20000
+            },
+            "stats": {
+              "publications": 0,
+              "alreadyReady": 0,
+              "failures": 0,
+              "transientRetries": 0,
+              "callbackFailures": 0,
+              "bytesPublished": 0,
+              "filesPublished": 0,
+              "admissionSkipped": 0,
+              "liveJoinAccepted": 0,
+              "liveJoinRejected": 0,
+              "liveJoinRevoked": 0,
+              "liveJoinReattachedContinuations": 0
+            }
+          }
+        }
+      ]
+    },
+    "real-reopen-wait": {
+      "atUtc": "2026-10-09T16:06:40.093947+00:00",
+      "objectCounts": [
+        {
+          "live": 1,
+          "bytes": 479650098,
+          "count": 2,
+          "state": "ready"
+        }
+      ],
+      "ownerBindings": [
+        {
+          "count": 2,
+          "state": "revoked"
+        }
+      ],
+      "ownerLiveClaims": [
+        {
+          "count": 1
+        }
+      ],
+      "testEvents": [
+        {
+          "at": "2026-10-09T15:58:38.620318+00:00",
+          "mode": null,
+          "error": null,
+          "event": "play_requested",
+          "ttffMs": null,
+          "position": 0
+        },
+        {
+          "at": "2026-10-09T15:58:44.245958+00:00",
+          "mode": "gateway-session",
+          "error": null,
+          "event": "first_frame",
+          "ttffMs": 5664,
+          "position": 0
+        },
+        {
+          "at": "2026-10-09T15:58:51.087544+00:00",
+          "mode": "gateway-session",
+          "error": null,
+          "event": "play_started",
+          "ttffMs": null,
+          "position": 0
+        },
+        {
+          "at": "2026-10-09T16:04:22.83701+00:00",
+          "mode": "gateway-session",
+          "error": null,
+          "event": "pause",
+          "ttffMs": null,
+          "position": 297
+        },
+        {
+          "at": "2026-10-09T16:04:42.579763+00:00",
+          "mode": null,
+          "error": null,
+          "event": "play_requested",
+          "ttffMs": null,
+          "position": 0
+        },
+        {
+          "at": "2026-10-09T16:05:35.037459+00:00",
+          "mode": "gateway-session",
+          "error": null,
+          "event": "first_frame",
+          "ttffMs": 52559,
+          "position": 297
+        }
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+          "healthy": true,
+          "activeSessions": 0,
+          "rawPumpCount": 0,
+          "encoderCapacity": {
+            "limit": 8,
+            "occupied": 1
+          },
+          "boundedHls": {
+            "enabled": true,
+            "admissionProtocol": 1,
+            "admittedProducers": 0,
+            "waitingOutputRequests": 0,
+            "sessionMaxBytes": 536870912,
+            "playlistSegments": 64,
+            "retainedExtraSegments": 16,
+            "retainedSharedCacheMaxBytes": 4294967296,
+            "retainedSharedCacheSourceMaxBytes": 805306368,
+            "retainedSharedCacheDurationMaxSeconds": 3600,
+            "retainedSharedCacheSessions": 0,
+            "sessions": 0,
+            "bytes": 0,
+            "peakSessionBytes": 0,
+            "peakSessionFiles": 0,
+            "paused": 0
+          },
+          "privateResumeHlsCache": {
+            "enabled": true,
+            "recentOwnerScope": "owner-allowlist",
+            "ownerScoped": false,
+            "protocol": 1,
+            "stores": 0,
+            "hits": 0,
+            "misses": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "inputStores": 0,
+            "inputHits": 0,
+            "sampledStores": 0,
+            "sampledHits": 0,
+            "captureRejects": 1,
+            "lastCaptureRejection": "session-ineligible",
+            "entries": 0,
+            "bytes": 0,
+            "reservedBytes": 0,
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "ttlMs": 1800000,
+            "windowSeconds": 48,
+            "recentRevalidation": true,
+            "recentTtlMs": 600000,
+            "scope": "private-owner-source-revision",
+            "revalidation": "current-strong-etag-size-target"
+          },
+          "controlledSessions": [],
+          "shared": {
+            "protocol": 1,
+            "requested": true,
+            "enabled": true,
+            "status": "enabled-private-worker-r2",
+            "scope": "global-private-complete-hls-only",
+            "storageBackend": "r2-via-private-worker",
+            "manifestLast": true,
+            "exactContentSha256": true,
+            "exactAudioTopology": true,
+            "exactSubtitleTopologyInIdentity": true,
+            "embeddedSubtitleAssets": true,
+            "pipelineBuild": "mkv-complete-hls-mpegts-v6",
+            "segmenterBuild": "ffmpeg-hls-mpegts-webvtt-v2",
+            "ttlMs": 2592000000,
+            "liveJoin": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "maximumViewersPerProducer": 64,
+              "activeViewers": 0,
+              "topologyGate": "exact-audio-subtitle-graph",
+              "continuityGate": "non-empty-contiguous-hls-window"
+            },
+            "backgroundContinuation": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "demand": "distributed-followers-only",
+              "preemptable": true,
+              "maxMs": 1800000,
+              "active": 0
+            },
+            "producerControl": {
+              "protocol": 1,
+              "active": true,
+              "attached": 0,
+              "pulses": 0,
+              "renewals": 0,
+              "preemptions": 0,
+              "demandStops": 0,
+              "expirations": 0,
+              "completions": 0,
+              "abandons": 0,
+              "failures": 0,
+              "heartbeatMs": 20000
+            },
+            "stats": {
+              "publications": 0,
+              "alreadyReady": 0,
+              "failures": 0,
+              "transientRetries": 0,
+              "callbackFailures": 0,
+              "bytesPublished": 0,
+              "filesPublished": 0,
+              "admissionSkipped": 0,
+              "liveJoinAccepted": 0,
+              "liveJoinRejected": 0,
+              "liveJoinRevoked": 0,
+              "liveJoinReattachedContinuations": 0
+            }
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+          "healthy": true,
+          "activeSessions": 1,
+          "rawPumpCount": 0,
+          "encoderCapacity": {
+            "limit": 8,
+            "occupied": 1
+          },
+          "boundedHls": {
+            "enabled": true,
+            "admissionProtocol": 1,
+            "admittedProducers": 1,
+            "waitingOutputRequests": 0,
+            "sessionMaxBytes": 536870912,
+            "playlistSegments": 64,
+            "retainedExtraSegments": 16,
+            "retainedSharedCacheMaxBytes": 4294967296,
+            "retainedSharedCacheSourceMaxBytes": 805306368,
+            "retainedSharedCacheDurationMaxSeconds": 3600,
+            "retainedSharedCacheSessions": 0,
+            "sessions": 1,
+            "bytes": 2313199,
+            "peakSessionBytes": 2313199,
+            "peakSessionFiles": 22,
+            "paused": 0
+          },
+          "privateResumeHlsCache": {
+            "enabled": true,
+            "recentOwnerScope": "owner-allowlist",
+            "ownerScoped": false,
+            "protocol": 1,
+            "stores": 0,
+            "hits": 0,
+            "misses": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "inputStores": 0,
+            "inputHits": 0,
+            "sampledStores": 0,
+            "sampledHits": 0,
+            "captureRejects": 4,
+            "lastCaptureRejection": "session-ineligible",
+            "entries": 0,
+            "bytes": 0,
+            "reservedBytes": 0,
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "ttlMs": 1800000,
+            "windowSeconds": 48,
+            "recentRevalidation": true,
+            "recentTtlMs": 600000,
+            "scope": "private-owner-source-revision",
+            "revalidation": "current-strong-etag-size-target"
+          },
+          "controlledSessions": [
+            {
+              "status": "ready",
+              "createdAt": "2026-10-09T16:04:43.758Z",
+              "seek": 297,
+              "audioMode": "transcode",
+              "inputProgress": {
+                "outcome": null,
+                "phase": null,
+                "elapsedMs": null,
+                "receivedBytes": null,
+                "forwardedBytes": null,
+                "openedRanges": null,
+                "reopens": null,
+                "plannedWindowContinuations": null
+              },
+              "timings": {
+                "retainedSharedCacheHlsOutput": false,
+                "fileSizeBytes": 475790063,
+                "ffmpegSpawnCount": 1,
+                "ffmpegReadyMs": 50354,
+                "totalMs": 50378,
+                "providerGetPreopened": false,
+                "providerPreopenRetries": null,
+                "completeHlsCacheHit": null,
+                "privateResumeWindowHit": null,
+                "privateResumeInputSeededBytes": null,
+                "privateResumeValidationMode": null,
+                "privateResumeValidationMs": null,
+                "privateResumeAheadSeconds": null,
+                "retainedSessionHit": null,
+                "retainedSessionTransferMs": null,
+                "finiteMkvSeekBroker": true
+              }
+            }
+          ],
+          "shared": {
+            "protocol": 1,
+            "requested": true,
+            "enabled": true,
+            "status": "enabled-private-worker-r2",
+            "scope": "global-private-complete-hls-only",
+            "storageBackend": "r2-via-private-worker",
+            "manifestLast": true,
+            "exactContentSha256": true,
+            "exactAudioTopology": true,
+            "exactSubtitleTopologyInIdentity": true,
+            "embeddedSubtitleAssets": true,
+            "pipelineBuild": "mkv-complete-hls-mpegts-v6",
+            "segmenterBuild": "ffmpeg-hls-mpegts-webvtt-v2",
+            "ttlMs": 2592000000,
+            "liveJoin": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "maximumViewersPerProducer": 64,
+              "activeViewers": 0,
+              "topologyGate": "exact-audio-subtitle-graph",
+              "continuityGate": "non-empty-contiguous-hls-window"
+            },
+            "backgroundContinuation": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "demand": "distributed-followers-only",
+              "preemptable": true,
+              "maxMs": 1800000,
+              "active": 0
+            },
+            "producerControl": {
+              "protocol": 1,
+              "active": true,
+              "attached": 3,
+              "pulses": 33,
+              "renewals": 33,
+              "preemptions": 0,
+              "demandStops": 0,
+              "expirations": 0,
+              "completions": 0,
+              "abandons": 3,
+              "failures": 0,
+              "heartbeatMs": 20000
+            },
+            "stats": {
+              "publications": 0,
+              "alreadyReady": 0,
+              "failures": 0,
+              "transientRetries": 0,
+              "callbackFailures": 0,
+              "bytesPublished": 0,
+              "filesPublished": 0,
+              "admissionSkipped": 0,
+              "liveJoinAccepted": 0,
+              "liveJoinRejected": 0,
+              "liveJoinRevoked": 0,
+              "liveJoinReattachedContinuations": 0
+            }
+          }
+        }
+      ]
+    },
+    "final": {
+      "atUtc": "2026-10-09T16:07:18.658620+00:00",
+      "objectCounts": [
+        {
+          "live": 1,
+          "bytes": 479650098,
+          "count": 2,
+          "state": "ready"
+        }
+      ],
+      "ownerBindings": [
+        {
+          "count": 2,
+          "state": "revoked"
+        }
+      ],
+      "ownerLiveClaims": [
+        {
+          "count": 0
+        }
+      ],
+      "testEvents": [
+        {
+          "at": "2026-10-09T15:58:38.620318+00:00",
+          "mode": null,
+          "error": null,
+          "event": "play_requested",
+          "ttffMs": null,
+          "position": 0
+        },
+        {
+          "at": "2026-10-09T15:58:44.245958+00:00",
+          "mode": "gateway-session",
+          "error": null,
+          "event": "first_frame",
+          "ttffMs": 5664,
+          "position": 0
+        },
+        {
+          "at": "2026-10-09T15:58:51.087544+00:00",
+          "mode": "gateway-session",
+          "error": null,
+          "event": "play_started",
+          "ttffMs": null,
+          "position": 0
+        },
+        {
+          "at": "2026-10-09T16:04:22.83701+00:00",
+          "mode": "gateway-session",
+          "error": null,
+          "event": "pause",
+          "ttffMs": null,
+          "position": 297
+        },
+        {
+          "at": "2026-10-09T16:04:42.579763+00:00",
+          "mode": null,
+          "error": null,
+          "event": "play_requested",
+          "ttffMs": null,
+          "position": 0
+        },
+        {
+          "at": "2026-10-09T16:05:35.037459+00:00",
+          "mode": "gateway-session",
+          "error": null,
+          "event": "first_frame",
+          "ttffMs": 52559,
+          "position": 297
+        },
+        {
+          "at": "2026-10-09T16:06:43.933028+00:00",
+          "mode": "gateway-session",
+          "error": null,
+          "event": "play_started",
+          "ttffMs": null,
+          "position": 297
+        },
+        {
+          "at": "2026-10-09T16:07:00.691567+00:00",
+          "mode": "gateway-session",
+          "error": null,
+          "event": "pause",
+          "ttffMs": null,
+          "position": 313
+        }
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+          "healthy": true,
+          "activeSessions": 0,
+          "rawPumpCount": 0,
+          "encoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          },
+          "boundedHls": {
+            "enabled": true,
+            "admissionProtocol": 1,
+            "admittedProducers": 0,
+            "waitingOutputRequests": 0,
+            "sessionMaxBytes": 536870912,
+            "playlistSegments": 64,
+            "retainedExtraSegments": 16,
+            "retainedSharedCacheMaxBytes": 4294967296,
+            "retainedSharedCacheSourceMaxBytes": 805306368,
+            "retainedSharedCacheDurationMaxSeconds": 3600,
+            "retainedSharedCacheSessions": 0,
+            "sessions": 0,
+            "bytes": 0,
+            "peakSessionBytes": 0,
+            "peakSessionFiles": 0,
+            "paused": 0
+          },
+          "privateResumeHlsCache": {
+            "enabled": true,
+            "recentOwnerScope": "owner-allowlist",
+            "ownerScoped": false,
+            "protocol": 1,
+            "stores": 0,
+            "hits": 0,
+            "misses": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "inputStores": 0,
+            "inputHits": 0,
+            "sampledStores": 0,
+            "sampledHits": 0,
+            "captureRejects": 1,
+            "lastCaptureRejection": "session-ineligible",
+            "entries": 0,
+            "bytes": 0,
+            "reservedBytes": 0,
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "ttlMs": 1800000,
+            "windowSeconds": 48,
+            "recentRevalidation": true,
+            "recentTtlMs": 600000,
+            "scope": "private-owner-source-revision",
+            "revalidation": "current-strong-etag-size-target"
+          },
+          "controlledSessions": [],
+          "shared": {
+            "protocol": 1,
+            "requested": true,
+            "enabled": true,
+            "status": "enabled-private-worker-r2",
+            "scope": "global-private-complete-hls-only",
+            "storageBackend": "r2-via-private-worker",
+            "manifestLast": true,
+            "exactContentSha256": true,
+            "exactAudioTopology": true,
+            "exactSubtitleTopologyInIdentity": true,
+            "embeddedSubtitleAssets": true,
+            "pipelineBuild": "mkv-complete-hls-mpegts-v6",
+            "segmenterBuild": "ffmpeg-hls-mpegts-webvtt-v2",
+            "ttlMs": 2592000000,
+            "liveJoin": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "maximumViewersPerProducer": 64,
+              "activeViewers": 0,
+              "topologyGate": "exact-audio-subtitle-graph",
+              "continuityGate": "non-empty-contiguous-hls-window"
+            },
+            "backgroundContinuation": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "demand": "distributed-followers-only",
+              "preemptable": true,
+              "maxMs": 1800000,
+              "active": 0
+            },
+            "producerControl": {
+              "protocol": 1,
+              "active": true,
+              "attached": 0,
+              "pulses": 0,
+              "renewals": 0,
+              "preemptions": 0,
+              "demandStops": 0,
+              "expirations": 0,
+              "completions": 0,
+              "abandons": 0,
+              "failures": 0,
+              "heartbeatMs": 20000
+            },
+            "stats": {
+              "publications": 0,
+              "alreadyReady": 0,
+              "failures": 0,
+              "transientRetries": 0,
+              "callbackFailures": 0,
+              "bytesPublished": 0,
+              "filesPublished": 0,
+              "admissionSkipped": 0,
+              "liveJoinAccepted": 0,
+              "liveJoinRejected": 0,
+              "liveJoinRevoked": 0,
+              "liveJoinReattachedContinuations": 0
+            }
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+          "healthy": true,
+          "activeSessions": 0,
+          "rawPumpCount": 0,
+          "encoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          },
+          "boundedHls": {
+            "enabled": true,
+            "admissionProtocol": 1,
+            "admittedProducers": 0,
+            "waitingOutputRequests": 0,
+            "sessionMaxBytes": 536870912,
+            "playlistSegments": 64,
+            "retainedExtraSegments": 16,
+            "retainedSharedCacheMaxBytes": 4294967296,
+            "retainedSharedCacheSourceMaxBytes": 805306368,
+            "retainedSharedCacheDurationMaxSeconds": 3600,
+            "retainedSharedCacheSessions": 0,
+            "sessions": 0,
+            "bytes": 0,
+            "peakSessionBytes": 0,
+            "peakSessionFiles": 0,
+            "paused": 0
+          },
+          "privateResumeHlsCache": {
+            "enabled": true,
+            "recentOwnerScope": "owner-allowlist",
+            "ownerScoped": false,
+            "protocol": 1,
+            "stores": 0,
+            "hits": 0,
+            "misses": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "inputStores": 0,
+            "inputHits": 0,
+            "sampledStores": 0,
+            "sampledHits": 0,
+            "captureRejects": 5,
+            "lastCaptureRejection": "retained-input-interrupted",
+            "entries": 0,
+            "bytes": 0,
+            "reservedBytes": 0,
+            "maxBytes": 268435456,
+            "perFileBytes": 67108864,
+            "ttlMs": 1800000,
+            "windowSeconds": 48,
+            "recentRevalidation": true,
+            "recentTtlMs": 600000,
+            "scope": "private-owner-source-revision",
+            "revalidation": "current-strong-etag-size-target"
+          },
+          "controlledSessions": [],
+          "shared": {
+            "protocol": 1,
+            "requested": true,
+            "enabled": true,
+            "status": "enabled-private-worker-r2",
+            "scope": "global-private-complete-hls-only",
+            "storageBackend": "r2-via-private-worker",
+            "manifestLast": true,
+            "exactContentSha256": true,
+            "exactAudioTopology": true,
+            "exactSubtitleTopologyInIdentity": true,
+            "embeddedSubtitleAssets": true,
+            "pipelineBuild": "mkv-complete-hls-mpegts-v6",
+            "segmenterBuild": "ffmpeg-hls-mpegts-webvtt-v2",
+            "ttlMs": 2592000000,
+            "liveJoin": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "maximumViewersPerProducer": 64,
+              "activeViewers": 0,
+              "topologyGate": "exact-audio-subtitle-graph",
+              "continuityGate": "non-empty-contiguous-hls-window"
+            },
+            "backgroundContinuation": {
+              "protocol": 1,
+              "requested": true,
+              "enabled": true,
+              "demand": "distributed-followers-only",
+              "preemptable": true,
+              "maxMs": 1800000,
+              "active": 0
+            },
+            "producerControl": {
+              "protocol": 1,
+              "active": true,
+              "attached": 3,
+              "pulses": 33,
+              "renewals": 33,
+              "preemptions": 0,
+              "demandStops": 0,
+              "expirations": 0,
+              "completions": 0,
+              "abandons": 3,
+              "failures": 0,
+              "heartbeatMs": 20000
+            },
+            "stats": {
+              "publications": 0,
+              "alreadyReady": 0,
+              "failures": 0,
+              "transientRetries": 0,
+              "callbackFailures": 0,
+              "bytesPublished": 0,
+              "filesPublished": 0,
+              "admissionSkipped": 0,
+              "liveJoinAccepted": 0,
+              "liveJoinRejected": 0,
+              "liveJoinRevoked": 0,
+              "liveJoinReattachedContinuations": 0
+            }
+          }
+        }
+      ]
+    }
+  },
+  "artifactHashes": {
+    "audit.py": "684d6774de2d57e46dd31647aa37e4de0c75877b225ed2db80b9d680bd32e8de",
+    "run-isolated.py": "8ce479707d1aaef806e0aff96736cffe64863b7d21e70aad74c059eb18368c28",
+    "media-cache-conservation-complete.runtime.cjs": "b4998df10cb46ebfc939ce1958ac2dedd7f894ae75e23b3f5b2807e26211177c",
+    "isolated-final.safe.json": "10786973c37e9068b07be973064eb944a721ece77728b35baaa97692610456a4",
+    "browser.safe.json": "4dc397a00cff1d52fa4d975de47e084b9922a290787677a3eb3541ec96720c61",
+    "real-reopen-wait.png": "63ae7a1cf0f1ae8860e7f7dbda06ed3b4d80101b0649ae632d3abed400f30bf2"
+  },
+  "limits": [
+    "no real complete-episode publication",
+    "no real shared-cache browser hit",
+    "no listening validation",
+    "no compression ratio benefit",
+    "no gain on Normal",
+    "private resume excluded for shared-cache producers",
+    "callbacks and storage authority mocked in isolated runtime"
+  ]
+}
