@@ -54,8 +54,20 @@ Une variante `flush_packets=1` a été comparée uniquement sur un fichier synth
 
 À 22:12:39 Paris : les deux sessions sont expirées normalement, zéro claim actif du propriétaire testé, zéro session et zéro raw pump sur chacun des deux Gateways. Les deux sont sains, image `e7520bec…` inchangée. Le contrôleur et le tunnel temporaires sont arrêtés. Aucune garde, limite, quarantaine ou tâche de maintenance modifiée.
 
-Les corrections de cette PR concernent le moteur web. Le lecteur natif Windows publié et la lecture native Android ne sont pas remplacés. Le déploiement web et son contrôle d'empreinte sont à consigner après CI.
+Les corrections de cette PR concernent le moteur web. Le lecteur natif Windows publié et la lecture native Android ne sont pas remplacés. Le déploiement web et son contrôle d'empreinte sont consignés ci-dessous.
 
 ## Intégration
 
 PR752. Le premier contrôle CI a arrêté le parcours sur le manifeste i18n généré devenu obsolète, après 40 assertions SQL réussies. Manifeste régénéré par la commande habituelle et référence HTML calculée sur les octets Git LF ; le code moteur reste identique. Aucun déploiement issu du contrôle échoué.
+
+PR752 fusionnée par `b2269b0b0eecddee64e20afe7fa33d2c6f388275`, tête `e800f4508` : les dix contrôles réussissent, paquets Windows et Android inclus. Suite CI : 6 307 tests, 6 273 réussis, 34 ignorés, zéro échec. Les 85 tests ciblés appartiennent à cette suite ; ils ne s'y ajoutent pas. Aucun nouveau rendu WebView ni lecteur natif modifié : aucune nouvelle matrice émulateur revendiquée.
+
+## Publication web et contrôle indépendant
+
+Cloudflare `37986319029`, tentative 1 : suite de régression réussie et publication achevée à 20:22:30 UTC (22:22 Paris). Le contrôle final échoue ensuite : premier relevé de shell ancien, puis cinq réponses dont les octets diffèrent pour `provider-access-config.js`, fichier inchangé. Attendu `6012a648c52566b8f93cf9b1e1d2ab58b638de8ad1c23f0fdc77ba5dd8159a2a` ; reçu `eac9c55386f87ed3d0cd4ab657642a3baca9cb4b7f5a40da1ffd836e57510436`, 117 501 octets. Le corps inattendu n'est pas conservé par le runner ; sa cause n'est pas établie. Le contrôle reste strict et cet échec n'est pas effacé.
+
+Contrôle indépendant à 22:25–22:26 Paris : le même vérificateur Node valide les 60 fichiers réellement livrés par `norva.tv`. Le manifeste publié est ensuite comparé aux octets Git de la tête intégrée : 60 concordances, sans utiliser uniquement le manifeste distant comme référence. Le shell contient l'URL immuable et l'intégrité attendues du moteur révision 47 ; son contenu livré correspond exactement à Git, SHA-256 `161d18badd601f8e758409168f51c71ffe0539b23752ce8598115ddd1680e8a3`. Le petit fichier de configuration est également conforme en lecture depuis le serveur. Aucune requête fournisseur requise pour ces contrôles.
+
+Une seule relance du workflow est demandée après ces observations favorables. **Tentative 2 réussie**, job `114011380514` : publication à 22:28:03 Paris, vérification du shell et des 60 fichiers réussie à 22:28:04. Nouvelle lecture indépendante à 22:28:58 : empreinte du moteur et manifeste toujours conformes à Git. Aucun changement de code, d'intégrité ou de contrôle pour obtenir ce réessai. La cause de la réponse incorrecte initiale reste inconnue ; le succès ultérieur ne l'efface pas.
+
+À 22:26:55 Paris : les deux Gateways sont sains, zéro session/pompe et zéro claim actif du propriétaire testé ; les sessions d'essai restent expirées. L'onglet et le serveur local de test sont fermés, contrôleur et tunnel déjà arrêtés. Aucun déploiement Gateway. Les lenteurs de Conclave et Abduct restent ouvertes, sans gain réel ni validation à l'écoute revendiqués.
