@@ -3,6 +3,7 @@ const fs = require('fs');
 const http = require('http');
 const net = require('net');
 const path = require('path');
+const { isSameAppOrigin } = require('./desktop/navigation');
 
 const APP_NAME = 'Norva';
 const PORT_START = 3002;
@@ -118,7 +119,7 @@ function createWindow(url, transcoderUrl) {
     });
 
     window.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
-        if (targetUrl.startsWith(url) || isAuthNavigation(targetUrl)) {
+        if (isSameAppOrigin(targetUrl, url) || isAuthNavigation(targetUrl)) {
             return { action: 'allow' };
         }
 
@@ -127,7 +128,7 @@ function createWindow(url, transcoderUrl) {
     });
 
     window.webContents.on('will-navigate', (event, targetUrl) => {
-        if (targetUrl.startsWith(url) || isAuthNavigation(targetUrl)) {
+        if (isSameAppOrigin(targetUrl, url) || isAuthNavigation(targetUrl)) {
             return;
         }
 
