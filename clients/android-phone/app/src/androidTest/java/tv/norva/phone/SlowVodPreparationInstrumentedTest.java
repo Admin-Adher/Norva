@@ -38,7 +38,7 @@ public class SlowVodPreparationInstrumentedTest {
      String path=request.getUrl().getPath();
      // Diagnostic only: same production image box and still asset. The real
      // animated path remains exercised by all non-diagnostic methods.
-     if(staticArtwork && path.equals("/img/watch/norva-loading-60fps.webp"))path="/img/watch/norva-loading-still.webp";
+     if(staticArtwork && "/img/watch/norva-loading-60fps.webp".equals(path))path="/img/watch/norva-loading-still.webp";
      try{return new WebResourceResponse(path.endsWith(".css")?"text/css":path.endsWith(".js")?"text/javascript":path.endsWith(".html")?"text/html":"application/octet-stream","UTF-8",i.getContext().getAssets().open(path.substring(1)));}
      catch(Exception ignored){return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));}
     }
