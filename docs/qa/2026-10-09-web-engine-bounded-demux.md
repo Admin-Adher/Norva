@@ -67,3 +67,14 @@ Les essais ne sont pas simultanés, et la réception varie fortement. On ne peut
 La préparation plus rapide expose aussi plus tôt le lecteur au manque de données. Il reste à comparer, sur une trace de réception contrôlée, la restitution progressive d'une plage entrante avec son attente complète actuelle. Ce parcours devrait conserver un seul transport, des positions exactes, l'annulation et l'exclusion des données partielles du cache durable. **Ce second changement n'est ni implémenté ni validé dans ce rapport.** Aucune promesse qu'il compense une réception durablement inférieure au débit du fichier.
 
 Production inchangée ; aucun déploiement Web, Gateway ou Edge pour ce candidat. CI et nettoyage local seront consignés avant clôture de la préversion.
+
+
+## Préversion et nettoyage
+
+PR756 ouverte **en brouillon**, code `00bc831f0`, sans fusion. Attachement Codex refusé à la limite de 100 ; aucune pièce retirée.
+
+Premier contrôle CI interrompu sur le manifeste i18n d'assets périmé, après 40 contrôles SQL réussis. La suite générale n'avait pas encore été exécutée. Manifeste régénéré ; aucune traduction ni ressource native ne change dans le diff. Les commandes npm n'étaient pas exposées dans ce shell Windows : les mêmes scripts Node ont été appelés directement, avec vérification réussie. Nouvelle CI en attente sur ce complément.
+
+Nettoyage local : **22 fichiers médias/sous-titres synthétiques, 56 680 273 octets**, supprimés du seul répertoire d'essai ; aucune copie média fournisseur n'a été conservée dans ce relevé. Scripts de reproduction, hashes, métriques et résultats sûrs conservés. Onglet de test, serveur local, contrôleur et tunnels arrêtés ; aucun écouteur restant sur les ports locaux de preuve.
+
+À **23:28:36 Paris**, vérification publique par l'outil curl habituel : révision **48** inchangée, SHA-256 `ec21b67c217d6407e0f3d37eaa0d8991fe77cc0f4b5b3e693c096c6b3f007f78`, référence immuable et intégrité du shell correctes, **60 entrées du manifeste conformes** au code précédemment livré. La première requête du client Python avait reçu 403 ; ce refus du client de vérification n'est pas assimilé à une panne du lecteur. Le candidat 49 n'est pas publié.

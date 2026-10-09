@@ -1248,5 +1248,123 @@
     "productionChanged": false,
     "operatorLidAdmissions": 0,
     "listeningValidated": false
+  },
+  "pullRequest": {
+    "number": 756,
+    "url": "https://github.com/Admin-Adher/Norva/pull/756",
+    "draft": true,
+    "merged": false,
+    "attachment": "rejected-100-limit-no-removal"
+  },
+  "cleanup": {
+    "atUtc": "2026-10-09T21:27:46.1425445Z",
+    "deleted": [
+      {
+        "Name": "aac-0-baseline.mp4",
+        "Length": 2842626
+      },
+      {
+        "Name": "aac-0-candidate.mp4",
+        "Length": 2842626
+      },
+      {
+        "Name": "aac-12-baseline.mp4",
+        "Length": 2075672
+      },
+      {
+        "Name": "aac-12-candidate.mp4",
+        "Length": 2075672
+      },
+      {
+        "Name": "aac.mkv",
+        "Length": 2838333
+      },
+      {
+        "Name": "ac3.mkv",
+        "Length": 3074990
+      },
+      {
+        "Name": "ass51-0-baseline.mp4",
+        "Length": 2694814
+      },
+      {
+        "Name": "ass51-0-candidate.mp4",
+        "Length": 2694814
+      },
+      {
+        "Name": "ass51-12-baseline.mp4",
+        "Length": 1972295
+      },
+      {
+        "Name": "ass51-12-candidate.mp4",
+        "Length": 1972295
+      },
+      {
+        "Name": "ass51.mkv",
+        "Length": 2690417
+      },
+      {
+        "Name": "bframes-0-baseline.mp4",
+        "Length": 3150616
+      },
+      {
+        "Name": "bframes-0-candidate.mp4",
+        "Length": 3150616
+      },
+      {
+        "Name": "bframes-12-baseline.mp4",
+        "Length": 2528053
+      },
+      {
+        "Name": "bframes-12-candidate.mp4",
+        "Length": 2528053
+      },
+      {
+        "Name": "bframes.mkv",
+        "Length": 3143601
+      },
+      {
+        "Name": "cues.srt",
+        "Length": 118
+      },
+      {
+        "Name": "lateaac-0-baseline.mp4",
+        "Length": 3102598
+      },
+      {
+        "Name": "lateaac-0-candidate.mp4",
+        "Length": 3102598
+      },
+      {
+        "Name": "lateaac-12-baseline.mp4",
+        "Length": 2307210
+      },
+      {
+        "Name": "lateaac-12-candidate.mp4",
+        "Length": 2308237
+      },
+      {
+        "Name": "lateaac.mkv",
+        "Length": 3584019
+      }
+    ],
+    "remainingMedia": 0
+  },
+  "productionVerification": {
+    "atUtc": "2026-10-09T21:28:36.552678+00:00",
+    "engineVersion": 48,
+    "sourceCommit": "90a1784fc",
+    "sha256": "ec21b67c217d6407e0f3d37eaa0d8991fe77cc0f4b5b3e693c096c6b3f007f78",
+    "publicURL": "https://norva.tv/js/norvaEngine.ec21b67c217d6407.js",
+    "shellReferencesExactAsset": true,
+    "integrityMatches": true,
+    "deliveredBytesMatchGit": true,
+    "allManifestEntriesMatchGit": 60
+  },
+  "ci": {
+    "initialCommit": "00bc831f0",
+    "initialFailure": "i18n asset-manifest stale; SQL 40 passed before stop; full suite not reached",
+    "correction": "Regenerated asset manifest only; application strings unchanged",
+    "correctedRun": "pending"
   }
 }
