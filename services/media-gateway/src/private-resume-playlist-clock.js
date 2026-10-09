@@ -66,6 +66,15 @@ class ResumePlaylistClock {
         return state && typeof text === 'string' && text.length <= 2 * 1024 * 1024
             && state.digest === digest(text) ? state.origin / 1e6 : null;
     }
+    sequenceAt(name, seconds) {
+        const state = this.states.get(name);
+        if (!state || typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return null;
+        const at = Math.round(seconds * 1e6) - state.origin;
+        // Only the current published window can acknowledge playback. History
+        // is an index for optional cache capture, not proof its files survive.
+        const index = state.segments.findIndex(s => at >= s.start && at < s.start + s.duration);
+        return index < 0 ? null : state.sequence + index;
+    }
     captureWindow(name, text) {
         if (this.originFor(name, text) === null) return null;
         const state = this.states.get(name);

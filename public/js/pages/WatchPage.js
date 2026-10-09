@@ -6302,6 +6302,22 @@ class WatchPage {
     /**
      * Play HLS stream using Hls.js
      */
+    gatewayPlaybackPositionUrl(requestUrl, rootUrl) {
+        try {
+            const root = new URL(rootUrl, window.location.href);
+            const request = new URL(requestUrl, root);
+            const scope = root.pathname.slice(0, root.pathname.lastIndexOf('/') + 1);
+            const position = this.video?.readyState >= 2 ? this.video.currentTime : 0;
+            if (!/^https?:$/.test(root.protocol) || !/\/sessions\/[^/]+\/$/.test(scope)
+                || request.origin !== root.origin || request.pathname.slice(0, request.pathname.lastIndexOf('/') + 1) !== scope
+                || !/\/(?:playlist|video)\.m3u8$/.test(request.pathname)
+                || !root.searchParams.get('token') || request.searchParams.get('token') !== root.searchParams.get('token')
+                || !Number.isFinite(position) || position < 0 || position >= 86400) return requestUrl;
+            request.searchParams.set('renderedPosition', String(Math.floor(position * 1000) / 1000));
+            return request.href;
+        } catch (_) { return requestUrl; }
+    }
+
     playHls(url, options = {}) {
         const { autoplay = true } = options;
         const playbackAttemptId = options.playbackAttemptId ?? this._playbackAttemptId;
@@ -6368,6 +6384,16 @@ class WatchPage {
             // edge on the growing EVENT playlist and never loads a fragment).
             ...((isTranscodeSession || isGatewaySession) ? { startPosition: 0 } : {})
         };
+        if (isGatewaySession && this._committedSubtitleStreams) {
+            const positionedUrl = requestUrl => this.isStalePlaybackAttempt(playbackAttemptId) || this.hls !== activeHls
+                ? requestUrl : this.gatewayPlaybackPositionUrl(requestUrl, url);
+            hlsConfig.xhrSetup = (xhr, requestUrl) => {
+                const positioned = positionedUrl(requestUrl);
+                if (positioned !== requestUrl) xhr.open('GET', positioned, true);
+            };
+            hlsConfig.fetchSetup = (context, initParams = {}) =>
+                new Request(positionedUrl(context?.url || context), initParams);
+        }
         if (options.privateMediaCache === true) {
             // Every master/media playlist, audio rendition, subtitle rendition
             // and segment stays private. The short-lived ticket is attached only

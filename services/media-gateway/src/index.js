@@ -13387,10 +13387,27 @@ app.delete('/sessions/:id', requireGatewayAuth, async (req, res) => {
     }));
 });
 
+// Authenticated primary-viewer feedback only. Segment downloads still provide
+// the ordinary prefetch credit; this adds a tighter cap for the retained pilot.
+function reportRetainedPlaybackPosition(req, session) {
+    const value = req.query?.renderedPosition;
+    if (!retainedSubtitleClock(session) || session.retainedSessionState
+        || req.playbackAttachmentId || session.primaryViewerAttached === false
+        || session.expiresAt.getTime() <= Date.now()
+        || !timingSafeEqual(req.playbackToken, session.accessToken)
+        || typeof value !== 'string' || !/^(?:0|[1-9]\d{0,4})(?:\.\d{1,6})?$/.test(value)) return false;
+    const local = Number(value), anchor = session.retainedViewerStartOffset ?? session.actualStartOffset;
+    if (!Number.isFinite(anchor) || !Number.isFinite(session.actualStartOffset)
+        || local >= 86400 || session.sourceTimestamps === true) return false;
+    return session.hlsOutputAdmission?.reportPlaybackPosition('video.m3u8',
+        anchor - session.actualStartOffset + local) === true;
+}
+
 app.get('/sessions/:id/playlist.m3u8', requirePlaybackToken, async (req, res) => {
     const session = sessions.get(req.params.id);
     if (!session) return res.status(404).send('Session not found');
     touchViewerSessionClientAccess(session);
+    reportRetainedPlaybackPosition(req, session);
 
     try {
         if (session.lastError) throw new Error(session.lastError);
@@ -13447,6 +13464,7 @@ app.get('/sessions/:id/:file', requirePlaybackToken, async (req, res) => {
         return res.status(404).send('Segment not available');
     if (/^committed_/i.test(requested) || /\.commit$/i.test(requested))
         return res.status(404).send('Segment not found');
+    if (requested === 'video.m3u8') reportRetainedPlaybackPosition(req, session);
     const isGrowingSubtitle = requested.toLowerCase().endsWith('.vtt');
     if (requested.toLowerCase().endsWith('.m3u8') && !isAllowedSessionPlaylistName(session, requested)) {
         return res.status(404).send('Segment not found');
@@ -13952,6 +13970,7 @@ async function startSessionWithProviderRetry(session, abortSignal = null) {
             session.hlsOutputAdmission = await createHlsOutputAdmission({
                 root: session.outputDir, targetSeconds: session.hlsTargetSeconds || 4,
                 maxBytes: session.hlsOutputMaxBytes,
+                trackPlaybackPosition: retainedSubtitleClock(session),
                 resumeRetentionBytes: canUseRecentResumeSamples(session.ownerKey)
                     && privateResumeHlsBindingForSession(session) && !multiAudioHlsEnabled(session)
                     ? privateResumeHlsCache.perFileBytes : 0,

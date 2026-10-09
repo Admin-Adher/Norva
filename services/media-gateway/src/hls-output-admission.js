@@ -39,7 +39,7 @@ async function* completedRequestBody(req) {
 // room for the next segment. No timer/SIGSTOP or elapsed-time credit can let
 // a fast remuxer overwrite the unread HLS window while JS is delayed/paused.
 async function createHlsOutputAdmission({ root, targetSeconds = 4, aheadSeconds = 64,
-    maxBytes = 512 * 1024 ** 2, resumeRetentionBytes = 0, onFailure = () => {}, io = fsp }) {
+    maxBytes = 512 * 1024 ** 2, resumeRetentionBytes = 0, trackPlaybackPosition = false, onFailure = () => {}, io = fsp }) {
     const capability = crypto.randomBytes(32).toString('hex');
     const rootPath = path.resolve(root);
     const ahead = Math.max(4, Math.ceil(aheadSeconds / targetSeconds));
@@ -49,6 +49,10 @@ async function createHlsOutputAdmission({ root, targetSeconds = 4, aheadSeconds 
     const retained = new Map(); let retainedBytes = 0;
     let stopped = false, failed = false, finishing = false, active = false, consumed = -1, produced = -1, bytes = 0, peakBytes = 0;
     let logRemainder = '', discardLogRemainder = false;
+    let renderedSequence = null;
+    // The unchanged playlist has 64 entries. Keep two entries behind the
+    // last reported rendered segment, independently of browser prefetch.
+    const withinRenderedWindow = number => renderedSequence === null || number - renderedSequence < 62;
     let admissionWaits = 0, admittedSegments = 0, closePromise = null, finishPromise = null;
     // Never reuse an old producer's HLS window, including after a failed retry
     // cleanup. Other pre-existing regular files (e.g. subtitles) consume budget.
@@ -137,7 +141,7 @@ async function createHlsOutputAdmission({ root, targetSeconds = 4, aheadSeconds 
         // A blocked next-segment request cannot hold up playlist publication or
         // deletion of already-consumed files on another rendition's connection.
         const index = queue.findIndex(entry => entry.number === null || entry.req.method === 'DELETE'
-            || entry.number - consumed < ahead);
+            || (entry.number - consumed < ahead && withinRenderedWindow(entry.number)));
         if (index < 0) return;
         const entry = queue.splice(index, 1)[0];
         if (entry.req.destroyed || entry.res.destroyed) { drain(); return; }
@@ -208,6 +212,16 @@ async function createHlsOutputAdmission({ root, targetSeconds = 4, aheadSeconds 
                 consumed = Math.max(consumed, Number(match[2])); drain();
             }
         },
+        reportPlaybackPosition(name, seconds) {
+            if (!trackPlaybackPosition || stopped || finishing) return false;
+            const sequence = resumePlaylistClock.sequenceAt(name, seconds);
+            if (sequence === null || (sequence > consumed && sequence !== 0)) return false;
+            // Late/backward reports may reduce credit, never fabricate forward
+            // progress. A client that never negotiates this stays unchanged.
+            renderedSequence = sequence;
+            drain();
+            return true;
+        },
         stop, finish, resumePlaylistClock,
         redact,
         redactLogChunk(chunk, flush = false) {
@@ -228,7 +242,7 @@ async function createHlsOutputAdmission({ root, targetSeconds = 4, aheadSeconds 
             return redact(text.slice(0, end));
         },
         snapshot() { return { protocol: HLS_OUTPUT_ADMISSION_PROTOCOL, consumed, produced, bytes, peakBytes, maxBytes,
-            aheadSegments: ahead, admissionWaits, admittedSegments, pending: queue.length, stopped,
+            aheadSegments: ahead, renderedSequence, admissionWaits, admittedSegments, pending: queue.length, stopped,
             resumeRetainedBytes: retainedBytes, resumeRetainedFiles: retained.size }; },
     };
 }
