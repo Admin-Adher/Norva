@@ -11,7 +11,7 @@ function privateResumeProfile({ format, audio, audioMode, clientAudioPassthrough
     const mode = String(audioMode || '').toLowerCase();
     if (mode && !['auto', 'copy', 'transcode', 'encode'].includes(mode)) return null;
     if (subtitleClock !== undefined && subtitleClock !== 'source-pes-v1') return null;
-    if (subtitleInputClock !== undefined && (subtitleInputClock !== 'absolute-v1'
+    if (subtitleInputClock !== undefined && (!['absolute-v1', 'absolute-v2'].includes(subtitleInputClock)
         || subtitleClock !== 'source-pes-v1')) return null;
     return JSON.stringify({ protocol: 'hls-window-2', format, audioIndex: audio.index,
         audioMode: mode === 'encode' ? 'transcode' : (mode === 'auto' ? '' : mode),

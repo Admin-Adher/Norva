@@ -926,3 +926,45 @@ La CI du code PR727 réussit **6 155 tests, 31 ignorés, zéro échec**, groupes
 Le premier tunnel de cette série s'est arrêté avant la seconde navigation de diagnostic et a donné une page locale inaccessible; il a été recréé une fois avec heartbeat SSH. L'onglet final de lecture est fermé; la fermeture explicite de l'ancien onglet d'erreur est refusée par la politique d'URL de l'outil, sans accès réseau restant. Cet incident du montage ne constitue pas un échec média supplémentaire.
 
 **Conservation du décodeur toujours désactivée en production, cache récent limité au propriétaire, aucun déploiement Gateway ou examen Google Play.** Le correctif intégré ne constitue pas une activation. Attachement PR727 refusé à la limite de cent pièces, aucune pièce retirée. Reçus : `.codex-artifacts/retained-real-window-20261009/`, notamment `summary.safe.json`, `clock-baseline.txt`, `clock-tests.txt`, `ci-contracts.log`, `conclave-clock-start-failed.jpg` et `receipts/` (premier résultat réel, deux échecs séparés, tests synthétiques, contrôles matériels, audio et clôture).
+
+
+## 9 octobre, 08:12–08:36 Paris — origine AAC corrigée et sous-titres réels après transfert (PR728)
+
+### Diagnostic sur la préparation
+
+Un démarrage borné de Conclave avec le code PR727 échoue encore après le plafond de préparation de 60 s, à **08:21:50 Paris**, sans segment vidéo finalisé. Une instrumentation du seul candidat mesure le temps passé dans `reader.read()` : une plage de 2 Mio prend **15,939 s**, dont **15,653 s en attente du corps**; la suivante reçoit 1 897 876 octets avec 24,732 s cumulées dans cette attente. Cela confirme une contribution de la réception lente, sans départager livraison et relais, ni lui attribuer toute la préparation.
+
+Le diagnostic de sous-titres initial comporte aussi une erreur de fixture : `readCommittedSubtitle` renvoie du texte WebVTT, pas un objet `cues`. L'erreur affichée après ce retour ne prouve donc pas un refus de publication. Le lecteur de diagnostic est corrigé, sans changer le lecteur strict du produit.
+
+### Régression du prototype reproduite puis corrigée
+
+L'entrée `-copyts` ajoutée en PR727 conserve l'horloge source, mais le vrai convertisseur AAC utilisait encore `aresample=48000:async=1:first_pts=0`. En isolation matérielle, après un saut à 10 s, l'audio commence à **−0,021333 s**, tandis que la vidéo commence à **10,041667 s**. À 2 s, le même écart d'origine apparaît. **La fixture matérielle de PR727 omettait ce filtre réel** et le test du graphe remplaçait le constructeur des arguments audio; leurs résultats précédents ne couvraient pas cette interaction.
+
+Le correctif **`f9022e337`** retire seulement `first_pts=0` dans le graphe admis de conservation avec sous-titres exacts. Il conserve AAC-LC, 48 kHz, stéréo, 160 kbit/s et la compensation existante. Copie audio, graphes ordinaires, plusieurs pistes et cache complet gardent leurs paramètres. La clé `subtitleInputClock=absolute-v2` distingue les sorties précédentes. Aucun délai, réserve, quota, route ou contrôle d'identité n'est réduit.
+
+Une régression échoue avant correction. Après correction : **191 tests ciblés réussis, deux ignorés**. Le test `startFfmpeg` utilise désormais la fonction audio réelle. Six contrôles matériels, réseau isolé et encodeur partagé réservé normalement, couvrent H264/HEVC 10 bits, AAC stéréo/E-AC3 5.1 et sauts à 2/10 s. L'audio commence à **9,978667 s** au saut de 10 s; l'écart avec le premier paquet vidéo reste au plus **63 ms**, pas zéro. Les répliques gardent exactement leurs temps source; décodage sans erreur. Deux avertissements AMD déjà connus subsistent dans chaque contrôle. Aucune validation perceptuelle déduite.
+
+### Conclave : transfert réel et publication avant EOF
+
+Un nouveau candidat temporaire, avec les sources corrigées, utilise les réservations Edge ordinaires et le même fichier exact. WatchPage et HLS.js 1.7.3 sont utilisés; ce n'est pas le chemin public de production Edge → Gateway.
+
+| Mesure depuis l'action | Démarrage à 600 s | Reprise à 625,145431 s |
+|---|---:|---:|
+| Première image | 34,371 s | 8,285 s |
+| Lecture effective | **137,179 s** | **58,006 s** |
+
+La pause conserve le décodeur en **2,507 s**, avec **zéro connexion source** au relevé de pause. Une nouvelle réservation ordinaire revalide le fichier en **3,827 s**; transfert **3,832 s**, même PID FFmpeg, aucune nouvelle instance. Après reprise, la lecture avance de **149,170903 s**, sans événement `waiting` après reprise ni intervalle d'images supérieur à 250 ms mesuré. Deux `levelLoadTimeOut` non fatals sont conservés, un pendant chaque phase : ce n'est pas une lecture dépourvue de tout incident réseau.
+
+La piste SDH est réellement sélectionnée dans le menu avant et après transfert. Le lecteur strict accepte ses paquets **avant EOF**; le navigateur reçoit jusqu'à **67 répliques**, avec huit relevés de répliques actives après reprise et aucun doublon d'horodatage dans le dernier ensemble. L'origine HLS reste identique après transfert, **599,957666667 s**. Une réplique source à 601,268 s correspond exactement au temps navigateur 1,310333333 s après soustraction de cette origine. Cela valide les répliques observées, pas toute la piste du film ni une appréciation à l'écoute. La piste forcée n'avait encore aucun paquet au premier contrôle : son état `SUBTITLE_SNAPSHOT_PENDING` n'est pas compté comme une corruption.
+
+L'extrait au raccord couvre **622,038–628,032 s**, donc la position 625,145431 s, avec 144 paquets H264 et 281 paquets AAC-LC stéréo 48 kHz. Décodage sans erreur, aucun trou supérieur à 100 ms; pas maximal vidéo 42 ms et audio 21,334 ms. Un autre extrait de six secondes avant transfert passe également. Navigateur muet, **qualité à l'écoute toujours non validée**.
+
+La préparation initiale mesurait une production de 0,455×. Après transfert, l'ancienne mesure n'est pas réutilisée et la réserve de repli reste 96 s. Les positions et conditions de réception diffèrent des essais précédents : **ni gain causal de 124 à 58 s, ni démarrage rapide fiable ne sont revendiqués**. Normal n'a pas été relu durant ce contrôle.
+
+### CI et clôture
+
+Les contrats CI du code réussissent **6 157 tests, 31 ignorés, zéro échec**, groupes recoupés avec les tests ciblés. Aucun changement UI ni nouveau replay Android. À **08:36:10 Paris**, les deux claims du candidat corrigé sont expirés normalement; le claim du premier candidat avait déjà été fermé à 08:21:50. Ce sont trois admissions, pas trois requêtes fournisseur. Aucun échec de heartbeat.
+
+Les deux candidats, contrôleurs et le tunnel sont arrêtés/supprimés, médias et sous-titres privés temporaires effacés, zéro fichier média de preuve restant. Les deux Gateways sont sains, image et démarrages de production inchangés, zéro session et zéro encodeur réservé à la clôture; dispatcher actif, **161 219 747 840 octets** libres. Conservation du décodeur toujours désactivée, cache récent toujours limité au propriétaire. **Aucun déploiement Gateway ni nouveau gain sur Normal.** Attachement PR728 refusé à la limite de cent pièces, aucune pièce retirée.
+
+Reçus : `.codex-artifacts/retained-preparation-20261009/` pour la reproduction et les contrôles matériels, puis `.codex-artifacts/retained-audio-fix-20261009/` pour le rejeu corrigé, `summary.safe.json`, `ci-contracts.log`, la capture `conclave-resumed` et les reçus de fermeture. La suite doit réduire l'attente sur une preuve fraîche de débit sans confondre données conservées et arrivée courante, puis valider d'autres copies et l'écoute avant activation.
