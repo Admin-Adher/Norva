@@ -1,5 +1,41 @@
 /* Shared by Node and the Android WebView runtime gate. No network or provider. */
 async function verifyGatewayLateRecovery(WatchPage, Hls, tick) {
+    // Recommencer from an evicted position replaces the Gateway graph. The
+    // button expresses Play intent; it must not bypass the new graph's gate.
+    for (const paused of [false, true]) for (const outcome of ['ready', 'paused', 'stale', 'failed']) {
+        let plays = 0, releaseGate;
+        const gate = new Promise(resolve => { releaseGate = resolve; });
+        const page = Object.create(WatchPage.prototype);
+        Object.assign(page, {
+            currentPlaybackMode: 'gateway-session', _playbackAttemptId: 1,
+            _gatewayUserPaused: paused,
+            video: { currentTime: 0, paused, play() { plays++; this.paused = false; return Promise.resolve(); }, pause() { this.paused = true; } },
+            canRestartForSeek: () => true,
+            isGatewayPlaybackUrl: () => true,
+            isStalePlaybackAttempt: id => id !== page._playbackAttemptId,
+            gatewayStartupBufferOptions: () => ({ minimumSeconds: 96 }),
+            waitForGatewayStartupBuffer: () => gate,
+            _reattachAiTrackIfActive() {}, updateAudioTracks() {},
+            restorePendingAudioPreference() {}, showLoading() {}, hideLoading() {}, showOverlay() {},
+            releasePlaybackPipelineForRetry: async () => {}, showPlaybackError() {},
+            async seekToTime(target) {
+                if (target !== 0) throw Error('restart changed its target');
+                const autoplay = this.captureGatewaySeekAutoplayIntent();
+                this.video.pause();
+                this.playHls('/gateway/test/playlist.m3u8', { playbackAttemptId: 1, autoplay });
+            },
+        });
+        await page.restartFromStart();
+        if (plays) throw Error('restart bypassed the replacement startup gate');
+        const parsed = page.hls.emit(Hls.Events.MANIFEST_PARSED, {});
+        await tick();
+        if (plays) throw Error('restart played before its reserve was ready');
+        if (outcome === 'paused') page._gatewayUserPaused = true;
+        if (outcome === 'stale') page._playbackAttemptId++;
+        releaseGate(outcome !== 'failed');
+        await parsed;
+        if (plays !== (outcome === 'ready' ? 1 : 0)) throw Error('restart ignored readiness or current viewer intent: ' + outcome);
+    }
     // Runtime regression for the observed Bolt resume: a paused origin at zero
     // with 18 seconds buffered from 0.880333 must not wait until timeout.
     const startup = Object.create(WatchPage.prototype);
