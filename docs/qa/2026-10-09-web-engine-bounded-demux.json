@@ -1,0 +1,1252 @@
+{
+  "atUtc": "2026-10-09T21:26:46.218646+00:00",
+  "status": "draft-not-deployed",
+  "productionEngineRevision": 48,
+  "candidateEngineRevision": 49,
+  "targetedTests": {
+    "total": 114,
+    "passed": 114,
+    "failed": 0
+  },
+  "realRuns": [
+    {
+      "candidate": 48,
+      "firstFrameMs": 6731.7000001430515,
+      "events": [
+        {
+          "name": "error",
+          "ms": 953.9000000953674,
+          "time": 0,
+          "error": 4
+        },
+        {
+          "name": "waiting",
+          "ms": 6724.900000095367,
+          "time": 0
+        },
+        {
+          "name": "playing",
+          "ms": 6732.5,
+          "time": 0.002579
+        },
+        {
+          "name": "waiting",
+          "ms": 7071.900000095367,
+          "time": 0.300088
+        },
+        {
+          "name": "playing",
+          "ms": 11133.400000095367,
+          "time": 0.342518
+        },
+        {
+          "name": "waiting",
+          "ms": 17094.60000014305,
+          "time": 6.261456
+        },
+        {
+          "name": "playing",
+          "ms": 50566.90000009537,
+          "time": 6.316205
+        },
+        {
+          "name": "waiting",
+          "ms": 63706.60000014305,
+          "time": 19.414753
+        },
+        {
+          "name": "playing",
+          "ms": 72180,
+          "time": 19.459477
+        },
+        {
+          "name": "waiting",
+          "ms": 77198.10000014305,
+          "time": 24.436103
+        },
+        {
+          "name": "playing",
+          "ms": 78189.70000004768,
+          "time": 24.493292
+        },
+        {
+          "name": "error",
+          "ms": 99490.30000019073,
+          "time": 0,
+          "error": 4
+        }
+      ],
+      "gaps": [
+        {
+          "ms": 11525.40000014305,
+          "gap": 4793.699999999999,
+          "from": 0.656,
+          "to": 0.698,
+          "hidden": false
+        },
+        {
+          "ms": 50574.20000014305,
+          "gap": 33497.1,
+          "from": 6.245,
+          "to": 6.287,
+          "hidden": false
+        },
+        {
+          "ms": 72186.10000014305,
+          "gap": 8514.5,
+          "from": 19.383,
+          "to": 19.425,
+          "hidden": false
+        },
+        {
+          "ms": 78210.40000014305,
+          "gap": 1024.199999999997,
+          "from": 24.43,
+          "to": 24.471,
+          "hidden": false
+        }
+      ],
+      "lastSample": {
+        "ms": 99056.20000004768,
+        "time": 45.319613,
+        "paused": false,
+        "ready": 4,
+        "hidden": false,
+        "buffer": [
+          [
+            0,
+            84.922
+          ]
+        ]
+      },
+      "timings": {
+        "startupDeadlineMs": 15000,
+        "initialWindowKB": 512,
+        "startupWindowMaxKB": 1024,
+        "fetchWindows": [
+          {
+            "start": 0,
+            "requestedBytes": 524288,
+            "bytes": 524288,
+            "ms": 2424,
+            "outcome": "ok"
+          },
+          {
+            "start": 3093965715,
+            "requestedBytes": 1304,
+            "bytes": 1304,
+            "ms": 1066,
+            "outcome": "ok"
+          },
+          {
+            "start": 524288,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 2238,
+            "outcome": "ok"
+          },
+          {
+            "start": 1541253,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 4164,
+            "outcome": "ok"
+          },
+          {
+            "start": 5711338,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 39256,
+            "outcome": "ok"
+          },
+          {
+            "start": 9876510,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 21150,
+            "outcome": "ok"
+          },
+          {
+            "start": 14066531,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 5920,
+            "outcome": "ok"
+          },
+          {
+            "start": 18233443,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 3687,
+            "outcome": "ok"
+          },
+          {
+            "start": 22399836,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 2410,
+            "outcome": "ok"
+          }
+        ],
+        "fetchAttempts": 9,
+        "startupFetchWindows": [
+          {
+            "start": 0,
+            "requestedBytes": 524288,
+            "bytes": 524288,
+            "ms": 2424,
+            "outcome": "ok"
+          },
+          {
+            "start": 3093965715,
+            "requestedBytes": 1304,
+            "bytes": 1304,
+            "ms": 1066,
+            "outcome": "ok"
+          },
+          {
+            "start": 524288,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 2238,
+            "outcome": "ok"
+          }
+        ],
+        "wasmMs": 54,
+        "probeMs": 2371,
+        "demuxHeaderMs": 1074,
+        "demuxHeaderParameters": [
+          {
+            "index": 0,
+            "codec": 27,
+            "type": 0,
+            "tb": [
+              1,
+              1000
+            ],
+            "width": 1280,
+            "height": 720,
+            "rate": 0,
+            "channels": 0,
+            "profile": -99,
+            "level": -99,
+            "format": -1,
+            "extradataBytes": 47
+          },
+          {
+            "index": 1,
+            "codec": 86018,
+            "type": 1,
+            "tb": [
+              1,
+              1000
+            ],
+            "width": 0,
+            "height": 0,
+            "rate": 48000,
+            "channels": 2,
+            "profile": -99,
+            "level": -99,
+            "format": -1,
+            "extradataBytes": 5
+          },
+          {
+            "index": 2,
+            "codec": 94230,
+            "type": 3,
+            "tb": [
+              1,
+              1000
+            ],
+            "width": 0,
+            "height": 0,
+            "rate": 0,
+            "channels": 0,
+            "profile": -99,
+            "level": -99,
+            "format": -1,
+            "extradataBytes": 520
+          },
+          {
+            "index": 3,
+            "codec": 94230,
+            "type": 3,
+            "tb": [
+              1,
+              1000
+            ],
+            "width": 0,
+            "height": 0,
+            "rate": 0,
+            "channels": 0,
+            "profile": -99,
+            "level": -99,
+            "format": -1,
+            "extradataBytes": 520
+          }
+        ],
+        "demuxProbeMode": "bounded-header",
+        "demuxStreamInfoMs": 13,
+        "demuxProbedParameters": [
+          {
+            "index": 0,
+            "codec": 27,
+            "type": 0,
+            "tb": [
+              1,
+              1000
+            ],
+            "width": 1280,
+            "height": 720,
+            "rate": 0,
+            "channels": 0,
+            "profile": 100,
+            "level": 31,
+            "format": -1,
+            "extradataBytes": 47
+          },
+          {
+            "index": 1,
+            "codec": 86018,
+            "type": 1,
+            "tb": [
+              1,
+              1000
+            ],
+            "width": 0,
+            "height": 0,
+            "rate": 48000,
+            "channels": 2,
+            "profile": 1,
+            "level": -99,
+            "format": 8,
+            "extradataBytes": 5
+          },
+          {
+            "index": 2,
+            "codec": 94230,
+            "type": 3,
+            "tb": [
+              1,
+              1000
+            ],
+            "width": 0,
+            "height": 0,
+            "rate": 0,
+            "channels": 0,
+            "profile": -99,
+            "level": -99,
+            "format": -1,
+            "extradataBytes": 520
+          },
+          {
+            "index": 3,
+            "codec": 94230,
+            "type": 3,
+            "tb": [
+              1,
+              1000
+            ],
+            "width": 0,
+            "height": 0,
+            "rate": 0,
+            "channels": 0,
+            "profile": -99,
+            "level": -99,
+            "format": -1,
+            "extradataBytes": 520
+          }
+        ],
+        "openInputMs": 1092,
+        "detectMimeMs": 0,
+        "mediaSourceMs": 1,
+        "encoderMs": 0,
+        "firstAppendMs": 3520,
+        "muxerMs": 7,
+        "seekMs": 0,
+        "loadTotalMs": 3524,
+        "fetches": 2,
+        "fetchMB": 0.5,
+        "fetchMs": 3490,
+        "audio": "copy",
+        "video": "h264",
+        "engineVersion": 48,
+        "firstUsableAppendMs": 5777,
+        "firstMediaAppendMs": 5777,
+        "firstMediaAppendFetches": 3,
+        "firstMediaAppendSuccessfulFetches": 3,
+        "firstMediaAppendFetchKB": 1537
+      },
+      "subtitleCounts": [
+        {
+          "index": 2,
+          "codec": "ass",
+          "cueCount": 0
+        },
+        {
+          "index": 3,
+          "codec": "ass",
+          "cueCount": 1
+        }
+      ]
+    },
+    {
+      "candidate": 49,
+      "firstFrameMs": 12432.199999904633,
+      "events": [
+        {
+          "name": "error",
+          "ms": 708.7999999523163,
+          "time": 0,
+          "error": 4
+        },
+        {
+          "name": "waiting",
+          "ms": 12428.700000047684,
+          "time": 0
+        },
+        {
+          "name": "playing",
+          "ms": 12432.5,
+          "time": 0.00112
+        },
+        {
+          "name": "waiting",
+          "ms": 12772.5,
+          "time": 0.300082
+        },
+        {
+          "name": "playing",
+          "ms": 57936.39999985695,
+          "time": 0.342594
+        },
+        {
+          "name": "waiting",
+          "ms": 63896.799999952316,
+          "time": 6.261478
+        },
+        {
+          "name": "error",
+          "ms": 72902.09999990463,
+          "time": 0,
+          "error": 4
+        }
+      ],
+      "gaps": [
+        {
+          "ms": 58329.29999990463,
+          "gap": 45897.1,
+          "from": 0.656,
+          "to": 0.698,
+          "hidden": false
+        }
+      ],
+      "lastSample": {
+        "ms": 72674.09999990463,
+        "time": 6.261478,
+        "paused": false,
+        "ready": 2,
+        "hidden": false,
+        "buffer": [
+          [
+            0,
+            6.97
+          ]
+        ]
+      },
+      "timings": {
+        "startupDeadlineMs": 15000,
+        "initialWindowKB": 512,
+        "startupWindowMaxKB": 1024,
+        "fetchWindows": [
+          {
+            "start": 0,
+            "requestedBytes": 524288,
+            "bytes": 524288,
+            "ms": 3657,
+            "outcome": "ok"
+          },
+          {
+            "start": 3093965715,
+            "requestedBytes": 1304,
+            "bytes": 1304,
+            "ms": 792,
+            "outcome": "ok"
+          },
+          {
+            "start": 524288,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 7189,
+            "outcome": "ok"
+          },
+          {
+            "start": 1541253,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 45248,
+            "outcome": "ok"
+          },
+          {
+            "start": 5711338,
+            "requestedBytes": 4194304,
+            "bytes": 0,
+            "ms": 14867,
+            "outcome": "network_error"
+          }
+        ],
+        "fetchAttempts": 5,
+        "startupFetchWindows": [
+          {
+            "start": 0,
+            "requestedBytes": 524288,
+            "bytes": 524288,
+            "ms": 3657,
+            "outcome": "ok"
+          },
+          {
+            "start": 3093965715,
+            "requestedBytes": 1304,
+            "bytes": 1304,
+            "ms": 792,
+            "outcome": "ok"
+          },
+          {
+            "start": 524288,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 7189,
+            "outcome": "ok"
+          }
+        ],
+        "wasmMs": 34,
+        "probeMs": 3624,
+        "demuxHeaderMs": 810,
+        "demuxProbeMode": "bounded-header",
+        "demuxStreamInfoMs": 18,
+        "openInputMs": 838,
+        "detectMimeMs": 1,
+        "mediaSourceMs": 1,
+        "encoderMs": 0,
+        "firstAppendMs": 4500,
+        "muxerMs": 7,
+        "seekMs": 0,
+        "loadTotalMs": 4504,
+        "fetches": 2,
+        "fetchMB": 0.5,
+        "fetchMs": 4449,
+        "audio": "copy",
+        "video": "h264",
+        "engineVersion": 49,
+        "firstUsableAppendMs": 11720,
+        "firstMediaAppendMs": 11720,
+        "firstMediaAppendFetches": 3,
+        "firstMediaAppendSuccessfulFetches": 3,
+        "firstMediaAppendFetchKB": 1537
+      },
+      "subtitleCounts": [
+        {
+          "index": 2,
+          "codec": "ass",
+          "cueCount": 0
+        },
+        {
+          "index": 3,
+          "codec": "ass",
+          "cueCount": 0
+        }
+      ]
+    }
+  ],
+  "syntheticMuxComparisons": [
+    {
+      "name": "aac",
+      "position": 0,
+      "mode": "baseline",
+      "outputBytes": 2842626,
+      "outputHash": "cc33b92425e0ff59c97b3ee7e4459c99135a1089e4286ef191e6d88321a1cbeb",
+      "ended": true,
+      "errors": [],
+      "videoDtsMode": "pts-monotonic",
+      "subtitles": [
+        {
+          "index": 2,
+          "cues": [
+            {
+              "start": 0,
+              "end": 2,
+              "text": "FIRST"
+            },
+            {
+              "start": 9,
+              "end": 14,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26,
+              "end": 29,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": true
+    },
+    {
+      "name": "aac",
+      "position": 0,
+      "mode": "candidate",
+      "outputBytes": 2842626,
+      "outputHash": "cc33b92425e0ff59c97b3ee7e4459c99135a1089e4286ef191e6d88321a1cbeb",
+      "ended": true,
+      "errors": [],
+      "videoDtsMode": "pts-monotonic",
+      "subtitles": [
+        {
+          "index": 2,
+          "cues": [
+            {
+              "start": 0,
+              "end": 2,
+              "text": "FIRST"
+            },
+            {
+              "start": 9,
+              "end": 14,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26,
+              "end": 29,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": true
+    },
+    {
+      "name": "aac",
+      "position": 12,
+      "mode": "baseline",
+      "outputBytes": 2075672,
+      "outputHash": "a026df63d3ba9d1f6dd5e231ea7e7144f3ceb9f8238396ae4b8881676e7baafa",
+      "ended": true,
+      "errors": [],
+      "videoDtsMode": "source",
+      "subtitles": [
+        {
+          "index": 2,
+          "cues": [
+            {
+              "start": 9,
+              "end": 14,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26,
+              "end": 29,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": true
+    },
+    {
+      "name": "aac",
+      "position": 12,
+      "mode": "candidate",
+      "outputBytes": 2075672,
+      "outputHash": "a026df63d3ba9d1f6dd5e231ea7e7144f3ceb9f8238396ae4b8881676e7baafa",
+      "ended": true,
+      "errors": [],
+      "videoDtsMode": "source",
+      "subtitles": [
+        {
+          "index": 2,
+          "cues": [
+            {
+              "start": 9,
+              "end": 14,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26,
+              "end": 29,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": true
+    },
+    {
+      "name": "bframes",
+      "position": 0,
+      "mode": "baseline",
+      "outputBytes": 3150616,
+      "outputHash": "c1a36163d61aab74892bf94ed227445d006c5a8d638ad5daf9b4ba5981fdd9cc",
+      "ended": true,
+      "errors": [],
+      "videoDtsMode": "reconstructed",
+      "subtitles": [
+        {
+          "index": 2,
+          "cues": [
+            {
+              "start": 0,
+              "end": 2,
+              "text": "FIRST"
+            },
+            {
+              "start": 9,
+              "end": 14,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26,
+              "end": 29,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": true
+    },
+    {
+      "name": "bframes",
+      "position": 0,
+      "mode": "candidate",
+      "outputBytes": 3150616,
+      "outputHash": "c1a36163d61aab74892bf94ed227445d006c5a8d638ad5daf9b4ba5981fdd9cc",
+      "ended": true,
+      "errors": [],
+      "videoDtsMode": "reconstructed",
+      "subtitles": [
+        {
+          "index": 2,
+          "cues": [
+            {
+              "start": 0,
+              "end": 2,
+              "text": "FIRST"
+            },
+            {
+              "start": 9,
+              "end": 14,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26,
+              "end": 29,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": true
+    },
+    {
+      "name": "bframes",
+      "position": 12,
+      "mode": "baseline",
+      "outputBytes": 2528053,
+      "outputHash": "91b4a762a4119d6026fd53fa1bf78eb27298aa9ecf8f1bff5d88d5d4a3a32d78",
+      "ended": true,
+      "errors": [],
+      "videoDtsMode": "reconstructed",
+      "subtitles": [
+        {
+          "index": 2,
+          "cues": [
+            {
+              "start": 9,
+              "end": 14,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26,
+              "end": 29,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": true
+    },
+    {
+      "name": "bframes",
+      "position": 12,
+      "mode": "candidate",
+      "outputBytes": 2528053,
+      "outputHash": "91b4a762a4119d6026fd53fa1bf78eb27298aa9ecf8f1bff5d88d5d4a3a32d78",
+      "ended": true,
+      "errors": [],
+      "videoDtsMode": "reconstructed",
+      "subtitles": [
+        {
+          "index": 2,
+          "cues": [
+            {
+              "start": 9,
+              "end": 14,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26,
+              "end": 29,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": true
+    },
+    {
+      "name": "lateaac",
+      "position": 0,
+      "mode": "baseline",
+      "outputBytes": 3102598,
+      "outputHash": "962ec9fdb5e538294982a2d91a2fb2a9706ce11bee1d96f518dbba812f6ab09d",
+      "audioIndex": 2,
+      "ended": true,
+      "errors": [],
+      "videoDtsMode": "reconstructed",
+      "subtitles": [
+        {
+          "index": 3,
+          "cues": [
+            {
+              "start": 0,
+              "end": 2,
+              "text": "FIRST"
+            },
+            {
+              "start": 9,
+              "end": 14,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26,
+              "end": 29,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": true
+    },
+    {
+      "name": "lateaac",
+      "position": 0,
+      "mode": "candidate",
+      "outputBytes": 3102598,
+      "outputHash": "dc38d4b70ab1a7b7117b511c4ef5e0dcf2550d91770c84ff407832feb8da83af",
+      "audioIndex": 2,
+      "ended": true,
+      "errors": [],
+      "probeMode": "full-fallback",
+      "videoDtsMode": "reconstructed",
+      "subtitles": [
+        {
+          "index": 3,
+          "cues": [
+            {
+              "start": 0,
+              "end": 2,
+              "text": "FIRST"
+            },
+            {
+              "start": 9,
+              "end": 14,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26,
+              "end": 29,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": false
+    },
+    {
+      "name": "lateaac",
+      "position": 12,
+      "mode": "baseline",
+      "outputBytes": 2307210,
+      "outputHash": "d43353290ad58ead6102562541d0fbfc464c0c737023f451c0a1cd0cbb01e401",
+      "audioIndex": 2,
+      "ended": true,
+      "errors": [],
+      "videoDtsMode": "reconstructed",
+      "subtitles": [
+        {
+          "index": 3,
+          "cues": [
+            {
+              "start": 9.023,
+              "end": 14.023,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26.022999999999996,
+              "end": 29.022999999999996,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": true
+    },
+    {
+      "name": "lateaac",
+      "position": 12,
+      "mode": "candidate",
+      "outputBytes": 2308237,
+      "outputHash": "c74a498cc3b4ceef7a6d26660c67585924a11364e868a631794ad9b303a66f3f",
+      "audioIndex": 2,
+      "ended": true,
+      "errors": [],
+      "probeMode": "full-fallback",
+      "videoDtsMode": "reconstructed",
+      "subtitles": [
+        {
+          "index": 3,
+          "cues": [
+            {
+              "start": 9.023,
+              "end": 14.023,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26.022999999999996,
+              "end": 29.022999999999996,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": false
+    },
+    {
+      "name": "ass51",
+      "position": 0,
+      "mode": "baseline",
+      "outputBytes": 2694814,
+      "outputHash": "5cde36720299379d347144bf44c5bd209ef9c004d592d543cf8d4f148528644e",
+      "audioIndex": 1,
+      "ended": true,
+      "errors": [],
+      "videoDtsMode": "reconstructed",
+      "subtitles": [
+        {
+          "index": 2,
+          "cues": [
+            {
+              "start": 0,
+              "end": 2,
+              "text": "FIRST"
+            },
+            {
+              "start": 9,
+              "end": 14,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26,
+              "end": 29,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": true
+    },
+    {
+      "name": "ass51",
+      "position": 0,
+      "mode": "candidate",
+      "outputBytes": 2694814,
+      "outputHash": "5cde36720299379d347144bf44c5bd209ef9c004d592d543cf8d4f148528644e",
+      "audioIndex": 1,
+      "ended": true,
+      "errors": [],
+      "probeMode": "bounded-header",
+      "videoDtsMode": "reconstructed",
+      "subtitles": [
+        {
+          "index": 2,
+          "cues": [
+            {
+              "start": 0,
+              "end": 2,
+              "text": "FIRST"
+            },
+            {
+              "start": 9,
+              "end": 14,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26,
+              "end": 29,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": true
+    },
+    {
+      "name": "ass51",
+      "position": 12,
+      "mode": "baseline",
+      "outputBytes": 1972295,
+      "outputHash": "4ab5843715c1ac6e9c67013dd5a1ed7d22cb4e5504fea3e4ee42bf8bd0b34acb",
+      "audioIndex": 1,
+      "ended": true,
+      "errors": [],
+      "videoDtsMode": "reconstructed",
+      "subtitles": [
+        {
+          "index": 2,
+          "cues": [
+            {
+              "start": 9.023,
+              "end": 14.023,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26.022999999999996,
+              "end": 29.022999999999996,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": true
+    },
+    {
+      "name": "ass51",
+      "position": 12,
+      "mode": "candidate",
+      "outputBytes": 1972295,
+      "outputHash": "4ab5843715c1ac6e9c67013dd5a1ed7d22cb4e5504fea3e4ee42bf8bd0b34acb",
+      "audioIndex": 1,
+      "ended": true,
+      "errors": [],
+      "probeMode": "bounded-header",
+      "videoDtsMode": "reconstructed",
+      "subtitles": [
+        {
+          "index": 2,
+          "cues": [
+            {
+              "start": 9.023,
+              "end": 14.023,
+              "text": "CROSSING"
+            },
+            {
+              "start": 26.022999999999996,
+              "end": 29.022999999999996,
+              "text": "LAST"
+            }
+          ]
+        }
+      ],
+      "matchesBaselineBytes": true
+    }
+  ],
+  "audioDecode": [
+    {
+      "file": "aac-0-candidate.mp4",
+      "exit": 0,
+      "diagnostics": "",
+      "metadata": {
+        "programs": [],
+        "streams": [
+          {
+            "codec_name": "aac",
+            "profile": "LC",
+            "sample_rate": "48000",
+            "channels": 2
+          }
+        ]
+      }
+    },
+    {
+      "file": "aac-12-candidate.mp4",
+      "exit": 0,
+      "diagnostics": "",
+      "metadata": {
+        "programs": [],
+        "streams": [
+          {
+            "codec_name": "aac",
+            "profile": "LC",
+            "sample_rate": "48000",
+            "channels": 2
+          }
+        ]
+      }
+    },
+    {
+      "file": "ass51-0-candidate.mp4",
+      "exit": 0,
+      "diagnostics": "",
+      "metadata": {
+        "programs": [],
+        "streams": [
+          {
+            "codec_name": "aac",
+            "profile": "LC",
+            "sample_rate": "48000",
+            "channels": 6
+          }
+        ]
+      }
+    },
+    {
+      "file": "ass51-12-candidate.mp4",
+      "exit": 0,
+      "diagnostics": "",
+      "metadata": {
+        "programs": [],
+        "streams": [
+          {
+            "codec_name": "aac",
+            "profile": "LC",
+            "sample_rate": "48000",
+            "channels": 6
+          }
+        ]
+      }
+    },
+    {
+      "file": "bframes-0-candidate.mp4",
+      "exit": 0,
+      "diagnostics": "",
+      "metadata": {
+        "programs": [],
+        "streams": [
+          {
+            "codec_name": "aac",
+            "profile": "LC",
+            "sample_rate": "44100",
+            "channels": 2
+          }
+        ]
+      }
+    },
+    {
+      "file": "bframes-12-candidate.mp4",
+      "exit": 0,
+      "diagnostics": "",
+      "metadata": {
+        "programs": [],
+        "streams": [
+          {
+            "codec_name": "aac",
+            "profile": "LC",
+            "sample_rate": "44100",
+            "channels": 2
+          }
+        ]
+      }
+    },
+    {
+      "file": "lateaac-0-candidate.mp4",
+      "exit": 0,
+      "diagnostics": "",
+      "metadata": {
+        "programs": [],
+        "streams": [
+          {
+            "codec_name": "aac",
+            "profile": "LC",
+            "sample_rate": "48000",
+            "channels": 2
+          }
+        ]
+      }
+    },
+    {
+      "file": "lateaac-12-candidate.mp4",
+      "exit": 0,
+      "diagnostics": "",
+      "metadata": {
+        "programs": [],
+        "streams": [
+          {
+            "codec_name": "aac",
+            "profile": "LC",
+            "sample_rate": "48000",
+            "channels": 2
+          }
+        ]
+      }
+    }
+  ],
+  "health": {
+    "atUtc": "2026-10-09T21:25:40.267587+00:00",
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "ok": true,
+        "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815",
+        "activeSessions": 0,
+        "rawPumpCount": 0
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "ok": true,
+        "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815",
+        "activeSessions": 0,
+        "rawPumpCount": 0
+      }
+    ],
+    "sessions": [
+      {
+        "case": "4-engine-header-probe-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T21:17:48.442552+00:00",
+            "expiresAt": "2026-10-09T21:19:28.012+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      },
+      {
+        "case": "4-engine-header-final-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T21:23:59.335519+00:00",
+            "expiresAt": "2026-10-09T21:25:12.268+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      }
+    ],
+    "ownerLiveClaims": [
+      {
+        "count": 0
+      }
+    ]
+  },
+  "scope": {
+    "providerTests": 2,
+    "simultaneousProviderConnections": 1,
+    "productionChanged": false,
+    "operatorLidAdmissions": 0,
+    "listeningValidated": false
+  }
+}

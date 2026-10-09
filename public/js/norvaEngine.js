@@ -280,7 +280,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 48;
+  const ENGINE_VERSION = 49;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -911,6 +911,116 @@
       return size;
     }
 
+    async _readDemuxStreams(fmtCtx) {
+      const lib = this.lib, streams = [];
+      const count = await lib.AVFormatContext_nb_streams(fmtCtx);
+      for (let index = 0; index < count; index++) {
+        const ptr = await lib.AVFormatContext_streams_a(fmtCtx, index);
+        const codecpar = await lib.AVStream_codecpar(ptr);
+        const parameters = await lib.ff_copyout_codecpar(codecpar);
+        const time_base_num = await lib.AVStream_time_base_num(ptr);
+        const time_base_den = await lib.AVStream_time_base_den(ptr);
+        const duration_time_base = to64(await lib.AVStream_duration(ptr), await lib.AVStream_durationhi(ptr));
+        streams.push({ ptr, index, codecpar, codec_type: parameters.codec_type, codec_id: parameters.codec_id,
+          time_base_num, time_base_den, duration_time_base,
+          duration: duration_time_base * time_base_num / time_base_den, parameters });
+      }
+      return streams;
+    }
+
+    async _canBoundMatroskaProbe(streams, probed = false) {
+      if (!streams.length || streams.length > 64) return false;
+      let videos = 0, audios = 0;
+      for (const stream of streams) {
+        const cp = stream.parameters, ed = cp.extradata;
+        if (!(stream.time_base_num > 0 && stream.time_base_den > 0)) return false;
+        if (stream.codec_type === 0) {
+          videos++;
+          if (cp.codec_id !== 27 || !(cp.width > 0 && cp.height > 0) || !ed || ed.length < 8 || ed[0] !== 1) return false;
+          // Require complete AVC SPS/PPS arrays, not just an avcC signature.
+          let offset = 6;
+          const spsCount = ed[5] & 31;
+          if (!spsCount) return false;
+          for (let group = 0; group < 2; group++) {
+            if (group === 1 && offset >= ed.length) return false;
+            const count = group === 0 ? spsCount : ed[offset++];
+            if (!count) return false;
+            for (let i = 0; i < count; i++) {
+              if (offset + 2 > ed.length) return false;
+              const size = ed[offset] * 256 + ed[offset + 1]; offset += 2;
+              if (!size || offset + size > ed.length || (ed[offset] & 31) !== (group === 0 ? 7 : 8)) return false;
+              offset += size;
+            }
+          }
+          if (probed && !(cp.profile >= 0 && cp.level >= 0)) return false;
+        } else if (stream.codec_type === 1) {
+          audios++;
+          // Only self-described AAC-LC. HE-AAC, PCE layouts and audio requiring
+          // transcoding retain the full probe, including its decoder discovery.
+          if (cp.codec_id !== 86018 || !ed || ed.length < 2 || ed[0] >> 3 !== 2) return false;
+          const rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+          const rate = rates[((ed[0] & 7) << 1) | (ed[1] >> 7)];
+          const layout = (ed[1] >> 3) & 15;
+          if (!rate || layout < 1 || layout > 7 || cp.sample_rate !== rate || cp.channels !== (layout === 7 ? 8 : layout)) return false;
+          if (probed && !(cp.format >= 0 && cp.profile === 1 && cp.channel_layoutmask > 0)) return false;
+        } else if (stream.codec_type === 3) {
+          if (!TEXT_SUB_CODECS.has(await this.lib.avcodec_get_name(cp.codec_id))) return false;
+        } else return false;
+      }
+      return videos === 1 && audios > 0;
+    }
+
+    _demuxHeadersMatch(before, after) {
+      if (before.length !== after.length) return false;
+      return before.every((old, i) => {
+        const current = after[i];
+        if (old.index !== current.index || old.time_base_num !== current.time_base_num || old.time_base_den !== current.time_base_den) return false;
+        for (const key of ['codec_type', 'codec_id', 'width', 'height', 'sample_rate', 'channels']) {
+          if (old.parameters[key] !== current.parameters[key]) return false;
+        }
+        const a = old.parameters.extradata || [], b = current.parameters.extradata || [];
+        return a.length === b.length && a.every((value, n) => value === b[n]);
+      });
+    }
+
+    async _initDemuxer() {
+      const lib = this.lib, head = this._raCache.find(w => w.start === 0)?.buf;
+      // Other containers retain the vendored helper unchanged. In Matroska,
+      // complete H.264/AAC headers can avoid the default multi-second packet
+      // analysis. We still run FFmpeg's parsers/decoder discovery; never skip it.
+      if (!head || head[0] !== 0x1a || head[1] !== 0x45 || head[2] !== 0xdf || head[3] !== 0xa3) {
+        this.timings.demuxProbeMode = 'full';
+        return lib.ff_init_demuxer_file('input');
+      }
+      const started = performance.now();
+      const fmtCtx = await lib.avformat_open_input_js('input', null, null);
+      if (!fmtCtx) throw new Error('Could not open source file');
+      this.fmtCtx = fmtCtx; // destroy() owns it even if the probe later fails.
+      this.timings.demuxHeaderMs = Math.round(performance.now() - started);
+      const before = await this._readDemuxStreams(fmtCtx);
+      const bounded = await this._canBoundMatroskaProbe(before);
+      this.timings.demuxProbeMode = bounded ? 'bounded-header' : 'full';
+      if (bounded && await lib.av_opt_set(fmtCtx, 'probesize', '65536', 0) !== 0) throw new Error('DEMUX_PROBE_OPTION_FAILED');
+      const probeStarted = performance.now();
+      const result = await lib.avformat_find_stream_info(fmtCtx, 0);
+      if (this._lastReadError) throw this._lastReadError;
+      let streams = await this._readDemuxStreams(fmtCtx);
+      if (bounded) {
+        // Restore the vendored FFmpeg default before any fallback. Both calls
+        // keep FFmpeg's packet buffer; no packet, subtitle or audio is discarded.
+        if (await lib.av_opt_set(fmtCtx, 'probesize', '5000000', 0) !== 0) throw new Error('DEMUX_PROBE_RESTORE_FAILED');
+        if (result < 0 || !this._demuxHeadersMatch(before, streams) || !await this._canBoundMatroskaProbe(streams, true)) {
+          this.timings.demuxProbeMode = 'full-fallback';
+          await lib.avformat_find_stream_info(fmtCtx, 0);
+          if (this._lastReadError) throw this._lastReadError;
+          streams = await this._readDemuxStreams(fmtCtx);
+        }
+      }
+      this.timings.demuxStreamInfoMs = Math.round(performance.now() - probeStarted);
+      for (const stream of streams) delete stream.parameters;
+      return [fmtCtx, streams];
+    }
+
     async _openInput() {
       const lib = this.lib, url = this.url, size = this.size;
       await lib.mkblockreaderdev('input', size);
@@ -937,7 +1047,7 @@
       // existing fallback re-routes it to the gateway transcode.
       let fmtCtx, streams;
       try {
-        [fmtCtx, streams] = await lib.ff_init_demuxer_file('input');
+        [fmtCtx, streams] = await this._initDemuxer();
       } catch (e) {
         // A real read error (RANGE_UNSUPPORTED / BLOCK_HTTP_xxx) wins — surface it verbatim.
         if (this._lastReadError) throw new Error(String(this._lastReadError.message || this._lastReadError));
