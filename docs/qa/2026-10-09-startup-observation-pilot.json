@@ -1,0 +1,457 @@
+{
+  "date": "2026-10-09",
+  "timeZone": "Europe/Paris",
+  "title": "Qualification des rafales au démarrage — pilote uniquement",
+  "code": {
+    "pr": 738,
+    "head": "46dcd5954ae4163f5e4bebd796383cf47110edbc",
+    "merge": "a74920cd1b29d249546fbea8d685fab3666ac869",
+    "gatewaySourceCommit": "6e32c622098fd5f4d27671c7ce760bccf3518aa8",
+    "defaultEnabled": false,
+    "productionPilotOwners": 1,
+    "minGatewayProductionSpanMs": 6000,
+    "clientConsecutiveIntervals": 2,
+    "clientMinimumIntervalMs": 3000,
+    "clientMinimumGrowthRateX": 2,
+    "clientIntervalFormula": "max(3000, longestSegmentSeconds * 500)",
+    "adaptiveBufferUnchanged": "max(12 seconds, two longest segments)"
+  },
+  "validation": {
+    "localFocused": {
+      "pass": 95,
+      "skip": 1
+    },
+    "fullCI": {
+      "pass": 6176,
+      "skip": 31,
+      "fail": 0
+    },
+    "headChecks": [
+      {
+        "name": "Build Android TV APK",
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Windows Portable",
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Android Phone APK",
+        "conclusion": "success"
+      },
+      {
+        "name": "Android Phone compile and tests",
+        "conclusion": "success"
+      },
+      {
+        "name": "Android TV compile and tests",
+        "conclusion": "success"
+      },
+      {
+        "name": "Contracts and Edge type-check",
+        "conclusion": "success"
+      },
+      {
+        "name": "Mocked Web and mobile journey",
+        "conclusion": "success"
+      },
+      {
+        "name": "Notification channel policy",
+        "conclusion": "success"
+      },
+      {
+        "name": "Disposable Supabase database",
+        "conclusion": "success"
+      },
+      {
+        "name": "Phone API 35 (three-button, font 1.3)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Android TV API 34 (font 1.0)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Phone API 35 (gesture, font 1.3)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Phone API 35 (gesture, font 1.0)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Phone API 35 (three-button, font 1.0)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Android TV API 34 (font 1.3)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Verify cloud contracts",
+        "conclusion": "success"
+      }
+    ],
+    "androidMatrix": {
+      "run": 37924042240,
+      "configurationsPassed": 6
+    },
+    "canary": {
+      "network": "none",
+      "uid": 1000,
+      "gpu": true,
+      "providerRequests": 0,
+      "pass": 9,
+      "notSelected": 59,
+      "removed": true
+    },
+    "newAudioDecodeCheck": false,
+    "audibleAcceptance": false
+  },
+  "deployment": {
+    "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+    "sourceTree": "207bcbae32fff6286bf3120c6ac8ffd2e21852c573f554c83c310f532830585a",
+    "gatewayFilesCompared": 94,
+    "gatewayFilesChanged": 1,
+    "edgeFilesUnchanged": 194,
+    "admissionPauseStartUtc": "2026-10-09T11:44:40.615427Z",
+    "admissionPauseEndUtc": "2026-10-09T11:45:01.581212Z",
+    "pauseSeconds": 20.965785,
+    "forcedLease": false,
+    "cloudflareRun": 37925610025,
+    "cloudflareCompletedUtc": "2026-10-09T11:46:50Z",
+    "browserWatchPage": "WatchPage.4d38af8388afddc7.js",
+    "hlsVersion": "1.7.3"
+  },
+  "trials": [
+    {
+      "label": "en-before",
+      "clickUtc": "2026-10-09T11:36:57.061Z",
+      "startOffsetSeconds": 0,
+      "elapsedFromClickSeconds": {
+        "first_frame": 4.201173,
+        "play_started": 4.107377
+      },
+      "lastObservationElapsedSeconds": 147.134,
+      "samples": [
+        {
+          "label": "en-before",
+          "at": "2026-10-09T11:37:19.341Z",
+          "error": null,
+          "paused": false,
+          "ranges": [
+            [
+              0.042333,
+              56.057333
+            ]
+          ],
+          "ready": 4,
+          "time": 18.166414
+        },
+        {
+          "label": "en-before",
+          "at": "2026-10-09T11:38:27.709Z",
+          "error": null,
+          "paused": false,
+          "ranges": [
+            [
+              56.057333,
+              208.082333
+            ]
+          ],
+          "ready": 4,
+          "time": 86.533909
+        },
+        {
+          "label": "en-before",
+          "at": "2026-10-09T11:39:24.195Z",
+          "error": null,
+          "paused": false,
+          "ranges": [
+            [
+              112.071333,
+              264.056333
+            ]
+          ],
+          "ready": 4,
+          "time": 143.019876
+        }
+      ],
+      "startupPolicy": {
+        "protocol": 2,
+        "eligible": true,
+        "pipeline": "video-transcode",
+        "targetBufferSeconds": 6,
+        "minimumEncodeRateX": 2,
+        "observedEncodeRateX": 20,
+        "reason": "vaapi-transcode-ready"
+      },
+      "gatewayTimings": {
+        "totalMs": 2001,
+        "ffmpegReadyMs": 509,
+        "playlistProductionSpanMs": 258.989990234375,
+        "playlistBufferSeconds": 8.008,
+        "playlistSegmentCount": 4,
+        "fileSizeBytes": 475790063,
+        "providerProxySlot": 1,
+        "videoEncoder": "vaapi",
+        "videoDecode": "vaapi"
+      }
+    },
+    {
+      "label": "en-after",
+      "clickUtc": "2026-10-09T11:48:08.892Z",
+      "startOffsetSeconds": 0,
+      "elapsedFromClickSeconds": {
+        "first_frame": 6.059506,
+        "play_started": 12.138324
+      },
+      "lastObservationElapsedSeconds": 146.863,
+      "samples": [
+        {
+          "label": "en-after",
+          "at": "2026-10-09T11:48:48.386Z",
+          "error": null,
+          "paused": false,
+          "ranges": [
+            [
+              0.042333,
+              106.065333
+            ]
+          ],
+          "ready": 4,
+          "time": 27.57215
+        },
+        {
+          "label": "en-after",
+          "at": "2026-10-09T11:49:38.783Z",
+          "error": null,
+          "paused": false,
+          "ranges": [
+            [
+              46.047333,
+              198.072333
+            ]
+          ],
+          "ready": 4,
+          "time": 77.969626
+        },
+        {
+          "label": "en-after",
+          "at": "2026-10-09T11:50:35.755Z",
+          "error": null,
+          "paused": false,
+          "ranges": [
+            [
+              104.063333,
+              256.048333
+            ]
+          ],
+          "ready": 4,
+          "time": 134.940959
+        }
+      ],
+      "startupPolicy": {
+        "protocol": 2,
+        "eligible": false,
+        "pipeline": "video-transcode",
+        "targetBufferSeconds": null,
+        "minimumEncodeRateX": 2,
+        "observedEncodeRateX": 20,
+        "reason": "encode-rate-observation-too-short"
+      },
+      "gatewayTimings": {
+        "totalMs": 3342,
+        "ffmpegReadyMs": 529,
+        "playlistProductionSpanMs": 255.989990234375,
+        "playlistBufferSeconds": 8.008,
+        "playlistSegmentCount": 4,
+        "fileSizeBytes": 475790063,
+        "providerProxySlot": 1,
+        "videoEncoder": "vaapi",
+        "videoDecode": "vaapi"
+      }
+    },
+    {
+      "label": "max-after",
+      "clickUtc": "2026-10-09T11:51:57.064Z",
+      "startOffsetSeconds": 0,
+      "elapsedFromClickSeconds": {
+        "first_frame": 4.500153,
+        "play_started": null
+      },
+      "lastObservationElapsedSeconds": 130.821,
+      "samples": [
+        {
+          "label": "max-after",
+          "at": "2026-10-09T11:52:13.996Z",
+          "error": null,
+          "paused": true,
+          "ranges": [
+            [
+              0.021333,
+              24.044333
+            ]
+          ],
+          "ready": 4,
+          "time": 0
+        },
+        {
+          "label": "max-after",
+          "at": "2026-10-09T11:53:09.420Z",
+          "error": null,
+          "paused": true,
+          "ranges": [
+            [
+              0.021333,
+              28.048333
+            ]
+          ],
+          "ready": 4,
+          "time": 0
+        },
+        {
+          "label": "max-after",
+          "at": "2026-10-09T11:54:07.885Z",
+          "error": null,
+          "paused": true,
+          "ranges": [
+            [
+              0.021333,
+              44.024333
+            ]
+          ],
+          "ready": 4,
+          "time": 0
+        }
+      ],
+      "startupPolicy": {
+        "protocol": 2,
+        "eligible": false,
+        "pipeline": "video-transcode",
+        "targetBufferSeconds": null,
+        "minimumEncodeRateX": 2,
+        "observedEncodeRateX": 19.344,
+        "reason": "encode-rate-observation-too-short"
+      },
+      "gatewayTimings": {
+        "totalMs": 2743,
+        "ffmpegReadyMs": 517,
+        "playlistProductionSpanMs": 206.991943359375,
+        "playlistBufferSeconds": 6.006,
+        "playlistSegmentCount": 3,
+        "fileSizeBytes": 4679005577,
+        "providerProxySlot": 1,
+        "videoEncoder": "vaapi",
+        "videoDecode": "vaapi"
+      }
+    }
+  ],
+  "exactCopyComparison": [
+    {
+      "state": "expired",
+      "createdAt": "2026-10-09T11:36:58.016549+00:00",
+      "sameMaxItem": false,
+      "sameMaxSource": false,
+      "sameEnglishItem": true,
+      "sameEnglishSource": true,
+      "sameFileAsMaxBaseline": false,
+      "sameFileAsEnglishBaseline": true
+    },
+    {
+      "state": "expired",
+      "createdAt": "2026-10-09T11:48:09.820716+00:00",
+      "sameMaxItem": false,
+      "sameMaxSource": false,
+      "sameEnglishItem": true,
+      "sameEnglishSource": true,
+      "sameFileAsMaxBaseline": false,
+      "sameFileAsEnglishBaseline": true
+    },
+    {
+      "state": "expired",
+      "createdAt": "2026-10-09T11:51:57.766903+00:00",
+      "sameMaxItem": true,
+      "sameMaxSource": true,
+      "sameEnglishItem": false,
+      "sameEnglishSource": false,
+      "sameFileAsMaxBaseline": true,
+      "sameFileAsEnglishBaseline": false
+    }
+  ],
+  "maxTransportInterval": {
+    "startUtc": "2026-10-09T11:52:07.821709+00:00",
+    "endUtc": "2026-10-09T11:54:19.388923+00:00",
+    "receivedBytesDelta": 42457984,
+    "elapsedMsDelta": 131572.529,
+    "megabitsPerSecond": 2.581571355218079,
+    "phaseMsDelta": {
+      "local": 464.44100000000003,
+      "provider-open": 0,
+      "provider-read": 130836.95000000001,
+      "downstream-write": 271.13699999999994,
+      "provider-close": 0,
+      "retry-wait": 0,
+      "flush": 0,
+      "cleanup": 0
+    },
+    "providerVersusRelayAttribution": "unresolved"
+  },
+  "closeout": {
+    "atUtc": "2026-10-09T11:54:59.018383+00:00",
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "healthy": true,
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+        "startedAt": "2026-10-09T11:44:57.29458119Z",
+        "onlyStartupObservationEnvAdded": true,
+        "sharedVideoEncoderCapacity": {
+          "limit": 8,
+          "occupied": 0
+        }
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "healthy": true,
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+        "startedAt": "2026-10-09T11:44:59.842646692Z",
+        "onlyStartupObservationEnvAdded": true,
+        "sharedVideoEncoderCapacity": {
+          "limit": 8,
+          "occupied": 0
+        }
+      }
+    ],
+    "pilotOwnerCount": 1,
+    "audibleAcceptance": false,
+    "ownerLiveClaims": 0,
+    "admissions": {
+      "paused": false,
+      "cron": true
+    },
+    "dispatcherRunning": true,
+    "workerRunning": true,
+    "canaryAbsent": true
+  },
+  "conclusions": {
+    "briefBurstRejected": true,
+    "maxPlaybackRepaired": false,
+    "healthySubTenSecondStartupPreserved": false,
+    "newCacheBenefitDemonstrated": false,
+    "generalRollout": false,
+    "maxOutcome": "No playback at 130.821 seconds; only 44.024333 seconds buffered.",
+    "englishOutcome": "12.138324 seconds to playback versus 4.107377 before; 134.940959 seconds observed progress after.",
+    "limitations": [
+      "Sequential trials, not randomized A/B",
+      "Transport can vary between trials",
+      "Short observation, not whole-episode certification",
+      "No new audible or AAC decode acceptance"
+    ]
+  },
+  "artifacts": ".codex-artifacts/startup-observation-pilot-20261009/"
+}
