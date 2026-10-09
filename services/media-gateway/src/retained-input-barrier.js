@@ -10,6 +10,7 @@ class RetainedInputBarrier {
     #now; #ttl; #onClose; #setTimer; #clearTimer;
     #validationController = null;
     #validationDone = Promise.resolve();
+    #interruptors = new Set();
 
     constructor({ scope, ttlMs = 5000, onClose, now = Date.now,
         setTimer = setTimeout, clearTimer = clearTimeout }) {
@@ -51,12 +52,13 @@ class RetainedInputBarrier {
 
     // Called synchronously under the existing mono-provider mutex. A pause
     // racing with queue acquisition must release that mutex and wait again.
-    enter() {
+    enter(interrupt = null) {
         this.#expire();
         if (this.#state !== 'active') return null;
         this.#active++;
+        if (interrupt) this.#interruptors.add(interrupt);
         let released = false;
-        return () => { if (!released) { released = true; this.#active--; this.#notify(); } };
+        return () => { if (!released) { released = true; this.#interruptors.delete(interrupt); this.#active--; this.#notify(); } };
     }
 
     async park(scope, drainTransport) {
@@ -69,6 +71,10 @@ class RetainedInputBarrier {
         }, this.#ttl);
         this.#timer?.unref?.();
         try {
+            // The private broker may cancel an unfinished upstream window while
+            // keeping its local decoder response open. It still owns the slot
+            // until teardown completes; cancellation alone is not a drain.
+            for (const interrupt of this.#interruptors) interrupt();
             if (this.#active) await new Promise(resolve => this.#idle.add(resolve));
             this.#expire();
             if (this.#state !== 'parking') return null;

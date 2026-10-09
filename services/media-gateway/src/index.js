@@ -6016,7 +6016,7 @@ function maybePublishFiniteMkvResumePrefix(context) {
     }
 }
 
-async function acquireFiniteMkvSeekProviderSlot(context, signal) {
+async function acquireFiniteMkvSeekProviderSlot(context, signal, interrupt = null) {
     if (context.retainedInputBarrier) await context.retainedInputBarrier.wait(signal);
     let releaseSlot = null;
     const slot = new Promise((resolve) => { releaseSlot = resolve; });
@@ -6049,10 +6049,10 @@ async function acquireFiniteMkvSeekProviderSlot(context, signal) {
         );
     }
     if (context.retainedInputBarrier) {
-        const releaseWindow = context.retainedInputBarrier.enter();
+        const releaseWindow = context.retainedInputBarrier.enter(interrupt);
         if (!releaseWindow) {
             release();
-            return acquireFiniteMkvSeekProviderSlot(context, signal);
+            return acquireFiniteMkvSeekProviderSlot(context, signal, interrupt);
         }
         return () => { releaseWindow(); release(); };
     }
@@ -6211,6 +6211,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
         let finiteWindowRange = null;
         let finiteProviderRange = null;
         let finiteBufferedBytes = 0;
+        let finiteUnsentBytes = 0;
         let finiteWindowIsWarmup = false;
         let forwarded = 0;
         let reconnects = 0;
@@ -6317,6 +6318,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 finiteBufferedBytes = 0;
             }
             let releaseFiniteProviderSlot = null;
+            const retainedPause = context.retainedInputBarrier ? new AbortController() : null;
             try {
             if (finiteSeek) {
                 // Let libav's next cue/close settle before speculative TS
@@ -6329,7 +6331,10 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     await new Promise(resolve => setTimeout(resolve, continuationGraceMs));
                     if (attempt.localClosed || controller.signal.aborted) break;
                 }
-                releaseFiniteProviderSlot = await acquireFiniteMkvSeekProviderSlot(context, controller.signal);
+                releaseFiniteProviderSlot = await acquireFiniteMkvSeekProviderSlot(context, controller.signal, retainedPause ? () => {
+                    retainedPause.abort(new Error('RETAINED_INPUT_PAUSE'));
+                    attempt.upstreamController?.abort(retainedPause.signal.reason);
+                } : null);
                 // The pre-queue grace may have elapsed while a newer cue was
                 // still fetching. Libav cannot close its old socket until that
                 // cue is delivered. Give only an older continuation the same
@@ -6369,6 +6374,9 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             }
             await waitForStrictLidBrokerSlot(context, controller.signal);
             if (finiteSeek && finiteSeekDemandClosed(context, attempt, res)) break;
+            // Pause may have raced with the queue or the ordinary release grace.
+            // No upstream request has opened yet, so release this slot and wait.
+            if (retainedPause?.signal.aborted) continue;
             if (controller.signal.aborted) {
                 throw controller.signal.reason || new Error('strict LID provider read stopped');
             }
@@ -6414,6 +6422,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     // is already closed here. Renew an ageing CONNECT tunnel at
                     // this safe boundary without ever changing proxy slot/IP.
                     await refreshStrictLidBrokerDispatcher(context, false);
+                    if (retainedPause?.signal.aborted) throw retainedPause.signal.reason;
                     if (finiteSeekDemandClosed(context, attempt, res)) {
                         finishFiniteMkvSeekWindowTrace(context, finiteWindowTrace, 'avoided-closed');
                         await closeStrictLidBrokerProviderFetch(context, attempt, 'not-opened');
@@ -6703,6 +6712,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         // only until that provider window is fully drained.
                         const atomicWindow = context.finiteAtomicWindowBytes > 0
                             && finiteProviderRange.end - finiteProviderRange.start + 1 <= context.finiteAtomicWindowBytes;
+                        if (atomicWindow) finiteUnsentBytes += localChunk.length;
                         if (!atomicWindow && localChunk.length && !responseStarted) {
                             startFiniteMkvSeekResponse(context, res, range);
                             responseStarted = true;
@@ -6807,6 +6817,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         }
                         const localPayload = payload.subarray(Math.max(0, range.start - finiteProviderRange.start));
                         if (localPayload.length && !res.write(localPayload)) finiteLocalBackpressured = true;
+                        finiteUnsentBytes = 0;
                     }
                     if (
                         finiteLocalBackpressured
@@ -6829,13 +6840,31 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             } catch (error) {
                 const progressBytes = receivedBytes;
                 const timeoutKind = attempt.deadline?.timeoutKind || null;
+                const interruptedForRetention = retainedPause?.signal.aborted
+                    && upstreamController.signal.reason === retainedPause.signal.reason
+                    && !controller.signal.aborted && !context.closed && !attempt.localClosed
+                    && !context.terminalError && !timeoutKind;
                 finishFiniteMkvSeekWindowTrace(
                     context,
                     finiteWindowTrace,
-                    attempt.stopReason === 'superseded'
+                    interruptedForRetention ? 'retained-pause' : attempt.stopReason === 'superseded'
                         ? 'superseded'
                         : (timeoutKind ? `timeout-${timeoutKind}` : (error?.code || 'failed')),
                 );
+                if (interruptedForRetention) {
+                    await closeStrictLidBrokerProviderFetch(context, attempt, 'retained-pause');
+                    // Never publish a partial window or join it to a later
+                    // response. Streaming bytes already sent stay sent; atomic
+                    // bytes still held locally must be read again after fresh
+                    // source validation. The local Content-Length stays open.
+                    forwarded -= finiteUnsentBytes;
+                    finiteUnsentBytes = 0;
+                    bufferedChunks.length = 0;
+                    finiteBufferedBytes = 0;
+                    finiteWindowRange = null;
+                    finiteProviderRange = null;
+                    continue;
+                }
                 const intentionallyStopped = controller.signal.aborted
                     || context.closed
                     || attempt.localClosed
