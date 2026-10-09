@@ -18,6 +18,21 @@ test('a drained capability waits for the in-flight window and transport disposal
     release(); release(); await Promise.resolve(); assert.equal(drains, 1); assert.equal(settled, false);
     transport.resolve(); assert.ok(await parked); assert.equal(gate.status().activeWindows, 0); gate.close();
 });
+test('cancelling a window is not a drain receipt and released callbacks cannot be reused', async () => {
+    const {gate,scope}=setup();let cancelled=0,drains=0;
+    const stale=gate.enter(()=>assert.fail('released window must not be interrupted'));stale();
+    const release=gate.enter(()=>{cancelled++;});
+    const pending=gate.park(scope,async()=>{drains++;});
+    assert.equal(cancelled,1);assert.equal(drains,0);assert.equal(gate.status().state,'parking');
+    release();const token=await pending;assert.ok(token);assert.equal(drains,1);
+    assert.equal(await gate.resume(token,scope,async()=>true,()=>true),true);
+    assert.ok(await gate.park(scope,async()=>{}));assert.equal(cancelled,1);gate.close();
+});
+test('failed interruption never certifies a drained input', async () => {
+    const {gate,scope,closed}=setup();const release=gate.enter(()=>{throw Error('cannot cancel');});
+    assert.equal(await gate.park(scope,async()=>assert.fail()),null);
+    release();assert.deepEqual(closed,['drain-failed']);
+});
 test('queued input stays closed through fresh validation and transport restart', async () => {
     const { gate, scope } = setup(), validation = deferred();
     const token = await gate.park(scope, async () => {}); let read = false, opened = 0;

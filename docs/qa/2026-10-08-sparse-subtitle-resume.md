@@ -809,3 +809,45 @@ Une admission Normal à 05:49 Paris avait renvoyé HTTP 503 avant production mé
 À **06:18:57 Paris**, les neuf claims de test sont expirés par fermeture ordinaire, le candidat et le conteneur sans réseau sont absents, le serveur de contrôle est arrêté; les médias et clés éphémères sont supprimés. Le tunnel et l'onglet de lecture sont ensuite fermés. Les deux Gateways restent sains, même image PR706 et mêmes démarrages du 8 octobre à 14:25 UTC, zéro session active à ce relevé et zéro encodeur réservé dans le registre partagé. Dispatcher actif; **161 425 727 488 octets libres**. Conservation inactive et cache récent limité au propriétaire.
 
 **Aucun nouveau gain sur Normal ni validation des reprises réelles n'est acquis.** Les résultats synthétiques précédents restent valables dans leur périmètre; ils ne suffisent pas à une activation. Aucun nouvel examen Google Play, déploiement Gateway ou replay Android n'est effectué. Reçus : `.codex-artifacts/retained-real-sources-20261009/`, notamment `summary.safe.json`, `startup-alignment.safe.json`, les observations horodatées, `normal-aligned-trace.safe.json`, les trois reçus d'échec finaux, `audio-041030.safe.json`, `hardware-offline.safe.json` et `cleanup.safe.json`.
+
+## Fermeture d'une plage lente sans perdre le décodeur — 9 octobre, 06:35 Paris
+
+Les cinq contrôles de PR724 passent désormais, paquets compris. La suite porte sur le blocage de drainage identifié dans le code, en réseau isolé, sans nouvel appel fournisseur. Elle ne réattribue pas rétroactivement l'échec de Normal : le reçu de stationnement manquant lors de cet essai reste manquant.
+
+### Reproduction et correctif
+
+Un serveur HTTP local renvoie un en-tête exact, puis 4 Kio, et ne termine jamais sa réponse. Avant correction, la barrière attend toute cette plage; le test expire sans capacité de conservation. Le délai de fixture est d'une seconde pour borner la reproduction; le plafond produit de dix secondes reste inchangé.
+
+La barrière peut maintenant demander l'annulation de la seule requête amont active. Le mutex reste détenu jusqu'à son nettoyage. Le transport privé est ensuite détruit et la grâce normale de libération est attendue avant émission de la capacité. La connexion locale du décodeur conserve son `Content-Length` et reste ouverte. Aucune requête source ne repart avant revalidation et adoption ordinaires.
+
+- Les octets déjà transmis au décodeur restent transmis; la requête suivante commence exactement après eux.
+- Les petites plages MP4 traitées en bloc peuvent contenir des octets reçus mais pas encore transmis : ils sont abandonnés et relus, sans sauter ce préfixe.
+- Aucun fragment de la réponse interrompue n'est publié comme fenêtre complète, conservé dans le cache de reprise ou joint à une nouvelle réponse pour former une fenêtre complète.
+- Une erreur terminale, un timeout réseau, une révocation ou une fermeture de session ne sont pas convertis en pause réussie. L'annulation doit correspondre au signal interne de la conservation.
+- Expiration, validation courante, identité de fichier, piste, propriétaire, route et connexion unique restent requis. L'annulation n'est pas comptée comme une panne/reconnexion fournisseur; la trace porte `retained-pause`.
+
+Le changement ne s'applique qu'au broker privé déjà muni de la capacité de conservation; aucune activation, réduction de réserve, extension de TTL, modification de taille des plages ou de concurrence n'est ajoutée.
+
+### Preuves du broker et du décodeur
+
+**307 tests ciblés réussis, six ignorés**, zéro échec dans la série finale. Ils couvrent notamment la pause avant les en-têtes, pendant une réponse partielle diffusée, pendant une plage atomique, les demandes locales recoupées, le refus de revalidation, la révocation, l'expiration et les protections existantes des caches/claims/transferts. Le test de reproduction échouait avant correction. Une erreur de fixture intermédiaire appelait un accesseur inexistant `stats()`; elle a été corrigée en utilisant le compteur public `providerBytes`, sans changer le produit pour faire passer le test.
+
+Un second essai utilise le vrai broker extrait du code courant et **un FFmpeg conservé**, dans un conteneur UID1000, réseau `none`, système de fichiers en lecture seule avec espace temporaire borné. Le serveur de fixture n'écoute qu'en loopback. Le fichier synthétique dure quatre minutes, avec vidéo H264, AAC stéréo et deux pistes de sous-titres. Une réponse est volontairement interrompue après 64 Kio, au-delà des quatre premiers Mio complets.
+
+- Stationnement en **254 ms**, incluant la grâce de **250 ms configurée pour cette fixture**; ce n'est pas le délai de grâce ou un temps de reprise mesuré en production.
+- Pendant 1,5 seconde observée : zéro requête et zéro socket source, même décodeur, playlist inchangée/non finale, zéro tick CPU supplémentaire observé.
+- **Quatre échantillons frais** sont relus séquentiellement par le validateur réel avant réouverture. Maximum une requête/socket source sur l'ensemble de l'essai.
+- Les **60 segments HLS** sont identiques octet par octet au témoin continu. Les deux fichiers WebVTT, cinq répliques au total dont la traversante et la future, sont identiques.
+- L'audio décodé en PCM possède la même empreinte SHA-256 que le témoin continu; aucune erreur FFmpeg. Le premier nouveau segment apparaît 24 ms après revalidation sur loopback : ce n'est pas un délai clic-vers-lecture.
+
+Cette preuve couvre l'interruption amont dans le broker avec le décodeur réel. Elle ne rejoue pas la chaîne authentifiée complète de PR723, les claims de production, le navigateur ou les fournisseurs. Aucune acceptation à l'écoute ni accélération de Normal n'est revendiquée.
+
+### Clôture et limites
+
+À **06:35:12 Paris**, le conteneur de preuve est absent; son stockage temporaire et les médias synthétiques sont détruits. Les deux Gateways sont sains, mêmes image PR706 et démarrages du 8 octobre à 14:25 UTC. Dispatcher actif, conservation du décodeur désactivée, cache récent limité au propriétaire. Aucun déploiement Gateway, lecture fournisseur, mutation de production, nouvel examen Play ou test Android dans ce passage backend.
+
+Le correctif supprime la dépendance à la fin d'une plage lente pour stationner le décodeur en test isolé. Il n'améliore pas le débit reçu après la reprise. **La fluidité et le transfert sur les copies réelles restent à valider avant activation**, ainsi que la qualité à l'écoute. Les échecs Abduct/MP4 et l'attente initiale de Normal du relevé précédent restent ouverts.
+
+Reçus : `.codex-artifacts/retained-slow-window-20261009/`, notamment `baseline-test.txt`, `expanded-final-tests.txt`, `slow-broker-proof.safe.json`, `runtime-check.safe.json` et `summary.safe.json`. Les sources du montage et les tests de non-régression sont conservés; aucun secret fournisseur n'y est nécessaire.
+
+La première CI de ce changement échoue sur une observation du test de lecteurs recoupés : 6 148 réussis, un échec, 31 ignorés. Avec une grâce artificielle nulle, le test vérifiait le compteur du serveur avant que sa boucle ait reçu l'événement `close`, alors que le dispatcher client était fermé. Le test attend désormais explicitement cet événement et prouve aussi que le second lecteur est réellement arrivé; les fixtures atomiques utilisent la même observation. Aucun délai ni code de production n'est modifié pour cet ajustement. L'échec initial reste conservé dans `ci-failure.log`.

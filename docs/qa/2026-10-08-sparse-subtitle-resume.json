@@ -10634,5 +10634,150 @@
     ],
     "nextExperiment": "Evaluate bounded delivery-window completion versus ten-second retention deadline using isolated controlled slow transport before any further provider replay; keep timeouts, exact validation, claims and source/subtitle preservation unchanged.",
     "artifacts": ".codex-artifacts/retained-real-sources-20261009/"
+  },
+  "slowWindowRetention20261009": {
+    "atUtc": "2026-10-09T04:35:12.734913+00:00",
+    "productionChanged": false,
+    "gatewayDeployed": false,
+    "activated": false,
+    "scope": "Slow partial upstream cancellation in private retained broker; isolated loopback HTTP and actual FFmpeg; no production claims, browser or real provider replay",
+    "tests": {
+      "passed": 307,
+      "skipped": 6,
+      "failed": 0,
+      "baselineExpectedFailure": "stalled body expires retention"
+    },
+    "implementation": {
+      "streaming": "Resume after the exact last delivered byte",
+      "atomic": "Discard and reread bytes not delivered to local decoder",
+      "partialCacheAdmission": false,
+      "ttlReserveRoutesConcurrencyChanged": false
+    },
+    "proof": {
+      "atUtc": "2026-10-09T04:32:55.640Z",
+      "productionChanged": false,
+      "externalProviderRequests": 0,
+      "stalledPartialResponse": true,
+      "parkElapsedMs": 254,
+      "localFixtureRequests": 18,
+      "maxActive": 1,
+      "active": 0,
+      "maxSockets": 1,
+      "keptSameDecoderProcess": true,
+      "providerNetworkRequestsDuringPark": 0,
+      "providerSocketsDuringPark": 0,
+      "upstreamConnectionCloseUsed": false,
+      "privateDispatcherDestroyed": true,
+      "networkDeadlinePausedByOverride": false,
+      "observedParkMs": 1500,
+      "configuredParkTtlMs": 5000,
+      "parked": {
+        "rssKiB": 80772,
+        "cpuTicks": 125,
+        "state": "S"
+      },
+      "afterPark": {
+        "rssKiB": 80772,
+        "cpuTicks": 125,
+        "state": "S"
+      },
+      "cpuTicksDuringObservation": 0,
+      "parkedPlaylistEndSeconds": 76,
+      "parkedPlaylistUnchanged": true,
+      "parkedPlaylistFinal": false,
+      "validationRequests": 4,
+      "firstNewSegmentMs": 24,
+      "finalSegments": 60,
+      "allTransportStreamBytesEqualReference": true,
+      "subtitles": [
+        {
+          "name": "forced.vtt",
+          "count": 2,
+          "cues": [
+            {
+              "start": 70.023,
+              "end": 75.023
+            },
+            {
+              "start": 150.023,
+              "end": 155.023
+            }
+          ],
+          "hash": "3eed5073dc605bf093e34928d5be9968ffaaeae327ab9cf5fe553d2fbf3207a0"
+        },
+        {
+          "name": "full.vtt",
+          "count": 3,
+          "cues": [
+            {
+              "start": 2.023,
+              "end": 14.023
+            },
+            {
+              "start": 60.023,
+              "end": 110.023
+            },
+            {
+              "start": 190.023,
+              "end": 195.023
+            }
+          ],
+          "hash": "9fcff15e1a817237b221551064bcb5a9f323981a9cc3b059b4806e235007eac0"
+        }
+      ],
+      "decodedPcmHash": "SHA256=76020d4817f5b3529cf79c550f6e2db9268cb35b598d3f868f2daf36fd04b0e8",
+      "decodedPcmEqualsUninterruptedReference": true,
+      "stderr": "",
+      "scope": "slow incomplete response cancelled; integrated broker barrier; retains loopback connection and process; no real account claim release/transfer or authenticated session handoff",
+      "productionAdmissionProven": false,
+      "audibleAcceptance": false
+    },
+    "runtime": {
+      "atUtc": "2026-10-09T04:35:12.734913+00:00",
+      "productionChanged": false,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "healthy": true,
+          "retainedEnabled": false,
+          "recentOwnerScope": "owner-allowlist"
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "healthy": true,
+          "retainedEnabled": false,
+          "recentOwnerScope": "owner-allowlist"
+        }
+      ],
+      "dispatcherRunning": true,
+      "proofContainerAbsent": true
+    },
+    "pr724Checks": "all five successful, including packages",
+    "remaining": [
+      "Real-source retention and playback",
+      "Production claims replay with slow response",
+      "Initial preparation failures of Abduct and MP4",
+      "Normal ongoing delivery throughput",
+      "Audible acceptance"
+    ],
+    "sourceHashes": {
+      "services/media-gateway/src/index.js": "e5e7d2eabba6c866202df38a88bba0d8e28f688cd793e0bea1c2c985293b40b6",
+      "services/media-gateway/src/retained-input-barrier.js": "09102b3a8de1b083455aab91467255ca676d00c32f28966b1095dfd41f1e3358"
+    },
+    "initialCiFailure": {
+      "run": 37884690543,
+      "head": "5d61bbb57e2673946fa7b8eafb52b3fa93de15cd",
+      "passed": 6148,
+      "failed": 1,
+      "skipped": 31,
+      "test": "overlapping decoder ranges remain serialized through a pause inside a partial window",
+      "observed": "remote active count 1 before its asynchronous close event in zero-grace fixture",
+      "fix": "await explicit first remote close event; require second local reader actually queued",
+      "productionCodeChangedForFix": false
+    }
   }
 }

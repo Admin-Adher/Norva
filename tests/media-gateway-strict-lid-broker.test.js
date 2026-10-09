@@ -184,24 +184,122 @@ test('retained finite input parks outside network deadlines and destroys its pri
   assert.equal(factories,2);assert.equal(calls,before+1);assert.equal(await broker.resumeRetainedInput(token,scope,async()=>true),false);
 });
 
-test('retained pause waits for an active provider body and the normal release grace', async t => {
-  const N=65536,data=Buffer.alloc(8*N,7),scope={};let releaseBody,entered;
+test('retained pause interrupts a stalled streaming window without caching partial bytes or truncating the local reader', async t => {
+  const N=65536,data=Buffer.from(Array.from({length:8*N},(_,i)=>(i*13+Math.floor(i/N))%251)),scope={};
+  let opened;const first=new Promise(r=>opened=r);let active=0,maxActive=0;const ranges=[],closed=[];
+  const provider=http.createServer((req,res)=>{
+    const [start,end]=req.headers.range.slice(6).split('-').map(Number);ranges.push([start,end]);
+    active++;maxActive=Math.max(maxActive,active);res.on('close',()=>{active--;closed.push(Date.now());});
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1,ETag:'"fixture"'});
+    if(ranges.length===1){res.write(data.subarray(start,start+4096));opened();} // Tail deliberately never arrives.
+    else res.end(data.subarray(start,end+1));
+  });
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const h=brokerHarness(),broker=await h.createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,pathPrefix:'finite-mkv-seek',
+    finiteWindowBytes:N,finiteWarmupWindowBytes:0,finiteCacheBytes:8*N,releaseDelayMs:60,completedReleaseDelayMs:0,
+    retainedInputScope:scope,retainedInputTtlMs:1000,
+    dispatcherFactory:()=>new(require('undici').Agent)({connections:1,pipelining:1})});t.after(()=>broker.close());
+  let ended=false;const response=fetch(broker.inputUrl,{headers:{Range:`bytes=0-${2*N-1}`}});
+  await first;const reader=(await response).body.getReader(),chunks=[];
+  const initial=await reader.read();chunks.push(Buffer.from(initial.value));assert.equal(initial.done,false);
+  const pending=reader.read().then(value=>{ended=value.done;return value;});
+  const token=await broker.parkRetainedInput(scope);assert.ok(token,'slow body must not consume the retained lifetime');
+  assert.equal(active,0);assert.equal(ended,false);assert.equal(ranges.length,1);
+  assert.ok(Date.now()-closed[0]>=45,'ordinary release grace must finish');
+  assert.equal(broker.snapshotRecentInput().length,0,'interrupted bytes cannot enter the completed cache');
+  assert.equal(await broker.resumeRetainedInput(token,scope,async()=>{assert.equal(active,0);return true;}),true);
+  let item=await pending;while(!item.done){chunks.push(Buffer.from(item.value));item=await reader.read();}
+  assert.deepEqual(Buffer.concat(chunks),data.subarray(0,2*N));
+  assert.equal(ranges[1][0],initial.value.length,'resume at exact last transmitted byte');
+  assert.equal(maxActive,1);assert.equal(broker.terminalError,null);
+});
+
+test('retained pause before response headers drains the request and resumes the same pending reader', async t => {
+  const N=65536,data=Buffer.alloc(8*N,7),scope={};let entered;
   const started=new Promise(r=>entered=r);let active=0,maxActive=0,calls=0;
   const provider=http.createServer((req,res)=>{
-    calls++;active++;maxActive=Math.max(maxActive,active);res.on('finish',()=>active--);
+    calls++;active++;maxActive=Math.max(maxActive,active);res.on('close',()=>active--);
     const [start,end]=req.headers.range.slice(6).split('-').map(Number);
     res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1});
-    releaseBody=()=>res.end(data.subarray(start,end+1));entered();
+    if(calls===1)entered();else res.end(data.subarray(start,end+1));
   });
   const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
   const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,pathPrefix:'finite-mkv-seek',
-    finiteWindowBytes:N,finiteCacheBytes:N,completedReleaseDelayMs:100,retainedInputScope:scope,
+    finiteWindowBytes:N,finiteCacheBytes:N,releaseDelayMs:100,completedReleaseDelayMs:0,retainedInputScope:scope,
     dispatcherFactory:()=>new(require('undici').Agent)({connections:1,pipelining:1})});t.after(()=>broker.close());
   const read=fetch(broker.inputUrl,{headers:{Range:`bytes=0-${N-1}`}}).then(r=>r.arrayBuffer());await started;
   let parked=false;const p=broker.parkRetainedInput(scope).then(x=>{parked=true;return x;});
-  await new Promise(r=>setTimeout(r,20));assert.equal(parked,false);assert.equal(active,1);
-  releaseBody();await read;await new Promise(r=>setTimeout(r,20));assert.equal(parked,false);
-  assert.ok(await p);assert.equal(active,0);assert.equal(calls,1);assert.equal(maxActive,1);
+  await new Promise(r=>setTimeout(r,20));assert.equal(parked,false);
+  const token=await p;assert.ok(token);assert.equal(active,0);assert.equal(calls,1);
+  assert.equal(await broker.resumeRetainedInput(token,scope,async()=>true),true);
+  assert.deepEqual(Buffer.from(await read),data.subarray(0,N));assert.equal(calls,2);assert.equal(maxActive,1);
+});
+
+test('overlapping decoder ranges remain serialized through a pause inside a partial window',{timeout:3000},async t=>{
+  const N=65536,data=Buffer.from(Array.from({length:8*N},(_,i)=>i%251)),scope={};let active=0,maxActive=0,calls=0;
+  let remoteClosed;const firstRemoteClose=new Promise(r=>remoteClosed=r);
+  const provider=http.createServer((req,res)=>{
+    const first=++calls===1;active++;maxActive=Math.max(maxActive,active);
+    res.on('close',()=>{active--;if(first)remoteClosed();});
+    const [start,end]=req.headers.range.slice(6).split('-').map(Number);
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1});
+    if(calls===1)res.write(data.subarray(start,start+4096));else res.end(data.subarray(start,end+1));
+  });
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,pathPrefix:'finite-mkv-seek',
+    finiteWindowBytes:N,finiteWarmupWindowBytes:0,finiteCacheBytes:8*N,releaseDelayMs:0,completedReleaseDelayMs:0,
+    retainedInputScope:scope,retainedInputTtlMs:1000,
+    dispatcherFactory:()=>new(require('undici').Agent)({connections:1,pipelining:1})});t.after(()=>broker.close());
+  const response=await fetch(broker.inputUrl,{headers:{Range:`bytes=0-${2*N-1}`}});
+  const one=response.arrayBuffer();
+  const two=fetch(broker.inputUrl,{headers:{Range:`bytes=${N}-${3*N-1}`}}).then(r=>r.arrayBuffer());
+  for(let i=0;i<100 && broker.maxQueuedRequests<2;i++)await new Promise(r=>setTimeout(r,2));
+  assert.equal(broker.maxQueuedRequests,2);
+  const token=await broker.parkRetainedInput(scope);assert.ok(token);
+  // The client-side dispatcher has closed. With this zero-grace fixture,
+  // observe the remote event explicitly instead of assuming its loop tick ran.
+  await firstRemoteClose;assert.equal(active,0);assert.equal(calls,1);
+  assert.equal(await broker.resumeRetainedInput(token,scope,async()=>true),true);
+  assert.deepEqual(Buffer.from(await one),data.subarray(0,2*N));
+  assert.deepEqual(Buffer.from(await two),data.subarray(N,3*N));
+  assert.equal(maxActive,1);assert.equal(broker.terminalError,null);
+});
+
+for(const disposition of ['resume','refused','revoked','expired']) test(`partial atomic retained window: ${disposition}`,{timeout:3000},async t=>{
+  const N=65536,data=Buffer.from(Array.from({length:8*N},(_,i)=>i%251)),scope={};let entered;
+  const started=new Promise(r=>entered=r),ranges=[];let active=0,maxActive=0;
+  let remoteClosed;const firstRemoteClose=new Promise(r=>remoteClosed=r);
+  const provider=http.createServer((req,res)=>{
+    const [start,end]=req.headers.range.slice(6).split('-').map(Number);ranges.push([start,end]);
+    const first=ranges.length===1;active++;maxActive=Math.max(maxActive,active);
+    res.on('close',()=>{active--;if(first)remoteClosed();});
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1,ETag:'"fixture"'});
+    if(ranges.length===1){res.write(data.subarray(start,start+4096));entered();}
+    else res.end(data.subarray(start,end+1));
+  });
+  const sourceUrl=await listen(provider);t.after(()=>closeServer(provider));
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,pathPrefix:'finite-mkv-seek',
+    finiteWindowBytes:N,finiteWarmupWindowBytes:0,finiteAtomicWindowBytes:N,finiteCacheBytes:8*N,
+    releaseDelayMs:0,completedReleaseDelayMs:0,retainedInputScope:scope,retainedInputTtlMs:disposition==='expired'?150:1000,
+    dispatcherFactory:()=>new(require('undici').Agent)({connections:1,pipelining:1})});t.after(()=>broker.close());
+  const read=fetch(broker.inputUrl,{headers:{Range:`bytes=0-${N-1}`}}).then(async r=>({status:r.status,body:Buffer.from(await r.arrayBuffer())})).catch(()=>({status:0}));
+  await started;
+  // Wait for actual broker progress, not just the provider's write callback.
+  for(let i=0;i<100 && !broker.providerBytes;i++)await new Promise(r=>setTimeout(r,5));
+  assert.equal(broker.providerBytes,4096);
+  const token=await broker.parkRetainedInput(scope);assert.ok(token);await firstRemoteClose;assert.equal(active,0);
+  assert.equal(broker.snapshotRecentInput().length,0);
+  if(disposition==='resume'){
+    assert.equal(await broker.resumeRetainedInput(token,scope,async()=>true),true);
+    const result=await read;assert.equal(result.status,206);assert.deepEqual(result.body,data.subarray(0,N));
+    assert.equal(ranges[1][0],0,'unpublished atomic prefix is re-read, not skipped');
+  }else{
+    if(disposition==='refused')assert.equal(await broker.resumeRetainedInput(token,scope,async()=>false),false);
+    else if(disposition==='revoked')await broker.close();
+    else await new Promise(r=>setTimeout(r,200));
+    assert.notEqual((await read).status,206);assert.equal(ranges.length,1);
+  }
+  assert.equal(maxActive,1);
 });
 
 for(const reason of ['expired','validation-refused','revoked']) test(`retained broker ${reason} cannot reopen pending input`,async t=>{
