@@ -10767,6 +10767,17 @@
     "sourceHashes": {
       "services/media-gateway/src/index.js": "e5e7d2eabba6c866202df38a88bba0d8e28f688cd793e0bea1c2c985293b40b6",
       "services/media-gateway/src/retained-input-barrier.js": "09102b3a8de1b083455aab91467255ca676d00c32f28966b1095dfd41f1e3358"
+    },
+    "initialCiFailure": {
+      "run": 37884690543,
+      "head": "5d61bbb57e2673946fa7b8eafb52b3fa93de15cd",
+      "passed": 6148,
+      "failed": 1,
+      "skipped": 31,
+      "test": "overlapping decoder ranges remain serialized through a pause inside a partial window",
+      "observed": "remote active count 1 before its asynchronous close event in zero-grace fixture",
+      "fix": "await explicit first remote close event; require second local reader actually queued",
+      "productionCodeChangedForFix": false
     }
   }
 }

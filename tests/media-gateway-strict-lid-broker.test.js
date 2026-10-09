@@ -235,10 +235,12 @@ test('retained pause before response headers drains the request and resumes the 
   assert.deepEqual(Buffer.from(await read),data.subarray(0,N));assert.equal(calls,2);assert.equal(maxActive,1);
 });
 
-test('overlapping decoder ranges remain serialized through a pause inside a partial window',async t=>{
+test('overlapping decoder ranges remain serialized through a pause inside a partial window',{timeout:3000},async t=>{
   const N=65536,data=Buffer.from(Array.from({length:8*N},(_,i)=>i%251)),scope={};let active=0,maxActive=0,calls=0;
+  let remoteClosed;const firstRemoteClose=new Promise(r=>remoteClosed=r);
   const provider=http.createServer((req,res)=>{
-    calls++;active++;maxActive=Math.max(maxActive,active);res.on('close',()=>active--);
+    const first=++calls===1;active++;maxActive=Math.max(maxActive,active);
+    res.on('close',()=>{active--;if(first)remoteClosed();});
     const [start,end]=req.headers.range.slice(6).split('-').map(Number);
     res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1});
     if(calls===1)res.write(data.subarray(start,start+4096));else res.end(data.subarray(start,end+1));
@@ -251,20 +253,26 @@ test('overlapping decoder ranges remain serialized through a pause inside a part
   const response=await fetch(broker.inputUrl,{headers:{Range:`bytes=0-${2*N-1}`}});
   const one=response.arrayBuffer();
   const two=fetch(broker.inputUrl,{headers:{Range:`bytes=${N}-${3*N-1}`}}).then(r=>r.arrayBuffer());
-  for(let i=0;i<100 && broker.maxQueuedProviderWindows<1;i++)await new Promise(r=>setTimeout(r,2));
-  const token=await broker.parkRetainedInput(scope);assert.ok(token);assert.equal(active,0);assert.equal(calls,1);
+  for(let i=0;i<100 && broker.maxQueuedRequests<2;i++)await new Promise(r=>setTimeout(r,2));
+  assert.equal(broker.maxQueuedRequests,2);
+  const token=await broker.parkRetainedInput(scope);assert.ok(token);
+  // The client-side dispatcher has closed. With this zero-grace fixture,
+  // observe the remote event explicitly instead of assuming its loop tick ran.
+  await firstRemoteClose;assert.equal(active,0);assert.equal(calls,1);
   assert.equal(await broker.resumeRetainedInput(token,scope,async()=>true),true);
   assert.deepEqual(Buffer.from(await one),data.subarray(0,2*N));
   assert.deepEqual(Buffer.from(await two),data.subarray(N,3*N));
   assert.equal(maxActive,1);assert.equal(broker.terminalError,null);
 });
 
-for(const disposition of ['resume','refused','revoked','expired']) test(`partial atomic retained window: ${disposition}`,async t=>{
+for(const disposition of ['resume','refused','revoked','expired']) test(`partial atomic retained window: ${disposition}`,{timeout:3000},async t=>{
   const N=65536,data=Buffer.from(Array.from({length:8*N},(_,i)=>i%251)),scope={};let entered;
   const started=new Promise(r=>entered=r),ranges=[];let active=0,maxActive=0;
+  let remoteClosed;const firstRemoteClose=new Promise(r=>remoteClosed=r);
   const provider=http.createServer((req,res)=>{
     const [start,end]=req.headers.range.slice(6).split('-').map(Number);ranges.push([start,end]);
-    active++;maxActive=Math.max(maxActive,active);res.on('close',()=>active--);
+    const first=ranges.length===1;active++;maxActive=Math.max(maxActive,active);
+    res.on('close',()=>{active--;if(first)remoteClosed();});
     res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1,ETag:'"fixture"'});
     if(ranges.length===1){res.write(data.subarray(start,start+4096));entered();}
     else res.end(data.subarray(start,end+1));
@@ -279,7 +287,7 @@ for(const disposition of ['resume','refused','revoked','expired']) test(`partial
   // Wait for actual broker progress, not just the provider's write callback.
   for(let i=0;i<100 && !broker.providerBytes;i++)await new Promise(r=>setTimeout(r,5));
   assert.equal(broker.providerBytes,4096);
-  const token=await broker.parkRetainedInput(scope);assert.ok(token);assert.equal(active,0);
+  const token=await broker.parkRetainedInput(scope);assert.ok(token);await firstRemoteClose;assert.equal(active,0);
   assert.equal(broker.snapshotRecentInput().length,0);
   if(disposition==='resume'){
     assert.equal(await broker.resumeRetainedInput(token,scope,async()=>true),true);
