@@ -7450,8 +7450,15 @@ async function createStrictLidBroker(options = {}) {
         get retainedInputStatus() { return context.retainedInputBarrier?.status() || null; },
         inputUrl: `http://127.0.0.1:${address.port}${expectedPath}`,
         get recentDeliveryTargetUsed() { return Boolean(recentDelivery); },
-        retainDeliveryTarget({ ownerKey, routeKey }) {
-            if (!context.captureRecentSamples || !context.drainCompleted || context.terminalError
+        retainDeliveryTarget({ ownerKey, routeKey, retainedInputScope = null }) {
+            // A parked decoder has drained its transport without closing its
+            // local input. Only its private scope can attest this alternative
+            // lifecycle; an active, draining or expired input cannot mint it.
+            const retained = retainedInputScope && retainedInputScope === options.retainedInputScope
+                ? context.retainedInputBarrier?.status() : null;
+            const parkedDrained = retained && ['parked', 'validating'].includes(retained.state)
+                && retained.activeWindows === 0 && !context.dispatcher && !context.closed;
+            if (!context.captureRecentSamples || !(context.drainCompleted || parkedDrained) || context.terminalError
                 || context.completedProviderFetches < 1) return null;
             return retainRecentDeliveryTarget({ ownerKey, routeKey, sourceUrl,
                 userAgent: context.userAgent, fileSizeBytes, targetUrl: context.strictResolvedSourceUrl,
@@ -15689,9 +15696,17 @@ async function tryResumeRetainedSession({ lookup, binding, playbackSessionId, ex
                 return retainedSessionPositionAvailable(session, lookup.seekOffset);
             },
             validate: async (session, validationSignal) => {
-                const plan = sampleProof(session.finiteMkvSeekBroker.snapshotRecentSamples(),
+                const proof = sampleProof(session.finiteMkvSeekBroker.snapshotRecentSamples(),
                     fileSizeBytesForSession(session), session.vodInputEffectiveUrlIdentitySha256);
-                if (!plan || signal.aborted) return false;
+                if (!proof || signal.aborted) return false;
+                // Entry URLs may issue a new temporary target on every open.
+                // Revalidate the same drained target using the existing opaque
+                // one-use hint; all four samples and exact URL/validator checks
+                // below still apply, within the unchanged retained lifetime.
+                const plan = { ...proof, deliveryTarget: session.finiteMkvSeekBroker.retainDeliveryTarget?.({
+                    ownerKey: session.ownerKey, routeKey: recentDeliveryRouteKey(session),
+                    retainedInputScope: session.retainedInputScope,
+                }) || null };
                 // Separate uncached broker under this new authenticated request's
                 // ordinary provider claim. The parked broker stays closed.
                 lookup.startupTimings = {};
