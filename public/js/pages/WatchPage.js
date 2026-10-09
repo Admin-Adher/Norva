@@ -6284,12 +6284,13 @@ class WatchPage {
                 // A short server burst needs two later observation intervals.
                 // A front-loaded burst followed by silence must not qualify on
                 // its average alone. The full resident reserve above still wins.
-                if (growth && options.sustainedObservation === true && elapsedMs >= 3000 && !growth.midpoint) {
+                const intervalMs = Math.max(3000, longestSegment * 500);
+                if (growth && options.sustainedObservation === true && elapsedMs >= intervalMs && !growth.midpoint) {
                     growth.midpoint = { at: now, buffer: bufferedAhead };
                 }
                 const midpoint = growth?.midpoint;
                 const sustained = options.sustainedObservation !== true || (midpoint
-                    && elapsedMs >= 6000 && now - midpoint.at >= 3000
+                    && elapsedMs >= intervalMs * 2 && now - midpoint.at >= intervalMs
                     && (midpoint.buffer - growth.buffer) * 1000 / (midpoint.at - growth.at) >= 2
                     && (bufferedAhead - midpoint.buffer) * 1000 / (now - midpoint.at) >= 2);
                 if (growth && sustained && elapsedMs >= 2000 && growth.appends >= 3 && addedSeconds >= 8

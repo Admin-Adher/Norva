@@ -171,6 +171,9 @@ test('twelve-second segments produced at 2x retain evidence across their six-sec
     assert.equal(fast.result, true); assert.equal(fast.now, 18000); assert.equal(fast.evidence.rateX, 2);
     const slow = await gate(t => 12 + 12 * Math.floor(t / 12000), longSegments, { timeoutMs: 25000 });
     assert.equal(slow.result, false); assert.equal(slow.evidence, null);
+    const observed = await gate(t => 12 + 12 * Math.floor(t / 6000), longSegments,
+        { timeoutMs: 25000, sustainedObservation: true });
+    assert.equal(observed.result, true); assert.equal(observed.now, 18000);
 });
 
 test('a fresh server preroll at 15 seconds earns the unchanged growth proof', async () => {
