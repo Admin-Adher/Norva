@@ -12281,5 +12281,213 @@
     ],
     "evidenceDirectory": ".codex-artifacts/retained-audio-fix-20261009",
     "attachmentRefusedAtLimit100": true
+  },
+  "retainedStartupWindowObservation20261009": {
+    "atUtc": "2026-10-09T07:00:45.419593+00:00",
+    "codeRevision": "f9022e337152dcb65cb686e99cbd87b1a1ffe211",
+    "kind": "diagnostic-only",
+    "productionChanged": false,
+    "retainedEnabledInProduction": false,
+    "normalRetested": false,
+    "normalPerformanceGainDemonstrated": false,
+    "realAdmissions": 1,
+    "realResumeAdmission": false,
+    "scope": "Real ordinary direct claim and temporary Gateway with WatchPage, hidden in-app browser and SSH loopback adapter; no full production Edge-to-Gateway replay",
+    "conclave": {
+      "observationAtUtc": "2026-10-09T06:54:25.235207+00:00",
+      "sequence": 78,
+      "originSeconds": 156.03099999999998,
+      "durationSeconds": 128.00299999999987,
+      "missingSegmentsBeforeOrigin": [],
+      "lastBrowserSample": {
+        "phase": "initial",
+        "wallMs": 177713.90000009537,
+        "buffered": [
+          [
+            70.087334,
+            222.072334
+          ]
+        ],
+        "at": 101.214496,
+        "paused": false,
+        "ready": 4,
+        "origin": 599.9576666666667,
+        "selected": 2,
+        "showing": 1
+      },
+      "initial": {
+        "firstFrameMs": 17840.000000143053,
+        "lastMediaTime": 101.451334,
+        "frames": 2341,
+        "playingMs": 19459.400000095367
+      },
+      "errors": [
+        {
+          "phase": "initial",
+          "atMs": 49590.40000009537,
+          "type": "networkError",
+          "details": "levelLoadTimeOut",
+          "fatal": false
+        },
+        {
+          "phase": "initial",
+          "atMs": 92278.79999995232,
+          "type": "mediaError",
+          "details": "bufferStalledError",
+          "fatal": false
+        },
+        {
+          "phase": "initial",
+          "atMs": 104158.90000009537,
+          "type": "mediaError",
+          "details": "bufferStalledError",
+          "fatal": false
+        },
+        {
+          "phase": "initial",
+          "atMs": 111926.5,
+          "type": "mediaError",
+          "details": "bufferStalledError",
+          "fatal": false
+        },
+        {
+          "phase": "initial",
+          "atMs": 154179.20000004768,
+          "type": "mediaError",
+          "details": "bufferStalledError",
+          "fatal": false
+        }
+      ],
+      "waits": [
+        {
+          "phase": "initial",
+          "at": 0.058334
+        }
+      ],
+      "frameGapCount": 63,
+      "frameGapMaxSeconds": 5.018100000000006,
+      "frameGapInterpretation": "callback timing in hidden IAB tab, not isolated decoder output timing",
+      "resumeRejected": true,
+      "productionChanged": false
+    },
+    "httpLocal": {
+      "playlist": {
+        "count": 92,
+        "statusCodes": [
+          200
+        ],
+        "maxHeadersMs": 3,
+        "maxBodyReadyMs": 3,
+        "maxWriteCompleteMs": 3
+      },
+      "segment": {
+        "count": 111,
+        "statusCodes": [
+          200
+        ],
+        "maxHeadersMs": 10,
+        "maxBodyReadyMs": 10,
+        "maxWriteCompleteMs": 10
+      },
+      "subtitle": {
+        "count": 30,
+        "statusCodes": [
+          503
+        ],
+        "maxHeadersMs": 3,
+        "maxBodyReadyMs": 3,
+        "maxWriteCompleteMs": 3
+      }
+    },
+    "httpLimits": [
+      "Only responses completing the local downstream write are logged",
+      "No matching request ID or absolute client timestamp for the browser timeout",
+      "503 forced-subtitle bodies and journals not captured before ordinary session deletion; cause unknown"
+    ],
+    "reproduction": {
+      "productionChanged": false,
+      "providerRequests": 0,
+      "functionSourceSha256": "a0d58bdfdb243be760337c60cf43e417dd8dd154c56a8c80bd58c7fd6d13f6e0",
+      "method": "Exact product predicate over a playlist reconstructed from all observed segment durations, not original manifest bytes",
+      "checks": 3,
+      "passed": 3,
+      "windowOriginSeconds": 156.031,
+      "windowDurationSeconds": 128.00299999999987,
+      "requestSamplesRejected": [
+        701.214496,
+        702
+      ],
+      "inWindowControlAccepted": 760,
+      "otherGuardsNotIsolated": true,
+      "physicalRetentionOutsideCurrentManifestNotEstablished": true
+    },
+    "codeReview": {
+      "rollingPlaylistSegments": 64,
+      "targetSegmentSeconds": 2,
+      "serverAheadSeconds": 64,
+      "browserForwardBufferSeconds": 120,
+      "serverAcknowledges": "HTTP segment response finish, not rendered playhead",
+      "priorPolicyNotReusedAfterTransfer": true,
+      "fallbackStartupReserveSeconds": 96,
+      "remedyNotImplemented": "Protect a bounded playable window around the rendered position during transfer, without weakening byte/TTL/access limits"
+    },
+    "browserFrameTimingLimits": "Hidden-tab callback timing does not isolate browser scheduling from decoder quality; four HLS bufferStalledError events remain factual",
+    "audibleAcceptance": false,
+    "newAudioDecodeCheck": false,
+    "cleanup": {
+      "atUtc": "2026-10-09T07:00:45.419593+00:00",
+      "productionChanged": false,
+      "claims": [
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T06:51:27.731347+00:00",
+          "expiresAt": "2026-10-09T06:54:27.41+00:00"
+        }
+      ],
+      "testClaimsOrdinarilyClosed": true,
+      "candidateRemoved": true,
+      "controlStopped": true,
+      "removedTemporaryData": [
+        "output",
+        "candidate.private.env",
+        "candidate.private.json",
+        "control.pid"
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "activeSessions": 0,
+          "retainedEnabled": false,
+          "recentOwnerScope": "owner-allowlist",
+          "sharedVideoEncoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "activeSessions": 0,
+          "retainedEnabled": false,
+          "recentOwnerScope": "owner-allowlist",
+          "sharedVideoEncoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          }
+        }
+      ],
+      "dispatcherActive": true,
+      "freeDiskBytes": 160934293504,
+      "offlineContainerAbsent": true,
+      "hardwareClockContainerAbsent": true,
+      "remainingMediaFiles": []
+    },
+    "evidenceDirectory": ".codex-artifacts/retained-startup-observation-20261009"
   }
 }
