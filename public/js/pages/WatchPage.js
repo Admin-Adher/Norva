@@ -1008,7 +1008,8 @@ class WatchPage {
     }
 
     hasCommittedSubtitleTrack(index) {
-        return Number.isInteger(Number(index)) && this._committedSubtitleStreams?.has(Number(index)) === true;
+        return index !== null && index !== undefined && index !== ''
+            && Number.isInteger(Number(index)) && this._committedSubtitleStreams?.has(Number(index)) === true;
     }
 
     acceptCommittedSubtitleClock(data) {
@@ -13453,11 +13454,12 @@ class WatchPage {
             }));
         } else if (probeSubtitleTracks.length) {
             options = probeSubtitleTracks.map((track, index) => {
-                const active = Number(track.index) === Number(this.selectedSubtitleStreamIndex);
+                const unprepared = this._committedSubtitleStreams && !this.hasCommittedSubtitleTrack(track.index);
+                const active = !unprepared && Number(track.index) === Number(this.selectedSubtitleStreamIndex);
                 anyActive = anyActive || active;
                 return {
-                    source: this._committedSubtitleStreams && !this.hasCommittedSubtitleTrack(track.index)
-                        ? 'unprepared-hls' : 'probe',
+                    source: unprepared ? 'unprepared-hls' : 'probe',
+                    ...(unprepared ? { requiresRestart: true } : {}),
                     index,
                     streamIndex: track.index,
                     label: this.getSubtitleMenuLabel(track, probeSubtitleTracks, index, probeSubtitleTracks.length > 1 ? (globalThis.NorvaI18n ? globalThis.NorvaI18n.t("ui_web_182da8bf4542", {defaultValue: "Subtitles {{p0}}", p0:(index + 1)}) : `Subtitles ${index + 1}`) : (globalThis.NorvaI18n?.t("ui_web_0ee695bdeb26", { defaultValue: "Subtitles" }) ?? 'Subtitles')),
