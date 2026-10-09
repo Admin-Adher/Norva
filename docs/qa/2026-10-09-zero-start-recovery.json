@@ -1770,5 +1770,881 @@
     "canaryAbsent": true
   },
   "reliabilityRestored": false,
-  "newCachedResumeSuccess": false
+  "newCachedResumeSuccess": false,
+  "resourceContentionFollowup": {
+    "baseline": {
+      "samples": 4,
+      "first": {
+        "atUtc": "2026-10-09T10:22:31.062239+00:00",
+        "gateways": [
+          {
+            "name": "main",
+            "ok": true,
+            "activeSessions": 0,
+            "rawPumpCount": 0,
+            "playbackPreparationPendingCount": 0,
+            "viewerStartupReservations": 0,
+            "viewerSessionStartupAdmissions": 0,
+            "viewerSessionStartupWaiters": 0,
+            "viewerPlaybackActiveLocally": false,
+            "backgroundCpuProcessCount": 0,
+            "whisperInferenceActive": 0,
+            "backgroundWhisperInferenceActive": 0,
+            "activeStrictLidBrokers": 1,
+            "transcribeQueueDepth": 0,
+            "transcribeBusy": false,
+            "ocrQueueDepth": 0,
+            "ocrBusy": false,
+            "sharedVideoEncoderCapacity": {
+              "limit": 8,
+              "occupied": 6
+            },
+            "languageBackgroundCapacity": {
+              "protocol": 1,
+              "maxWorkers": 2,
+              "reason": "capacity-available",
+              "observedAt": "2026-10-09T10:22:31.074Z"
+            },
+            "languageMetadataCapacity": {
+              "protocol": 1,
+              "maxWorkers": 2,
+              "reason": "capacity-available",
+              "observedAt": "2026-10-09T10:22:31.074Z"
+            },
+            "providerProxyTransport": "http"
+          },
+          {
+            "name": "pilot",
+            "ok": true,
+            "activeSessions": 0,
+            "rawPumpCount": 0,
+            "playbackPreparationPendingCount": 0,
+            "viewerStartupReservations": 0,
+            "viewerSessionStartupAdmissions": 0,
+            "viewerSessionStartupWaiters": 0,
+            "viewerPlaybackActiveLocally": false,
+            "backgroundCpuProcessCount": 0,
+            "whisperInferenceActive": 0,
+            "backgroundWhisperInferenceActive": 0,
+            "activeStrictLidBrokers": 0,
+            "transcribeQueueDepth": 0,
+            "transcribeBusy": false,
+            "ocrQueueDepth": 0,
+            "ocrBusy": false,
+            "sharedVideoEncoderCapacity": {
+              "limit": 8,
+              "occupied": 6
+            },
+            "languageBackgroundCapacity": {
+              "protocol": 1,
+              "maxWorkers": 2,
+              "reason": "capacity-available",
+              "observedAt": "2026-10-09T10:22:31.075Z"
+            },
+            "languageMetadataCapacity": {
+              "protocol": 1,
+              "maxWorkers": 2,
+              "reason": "capacity-available",
+              "observedAt": "2026-10-09T10:22:31.076Z"
+            },
+            "providerProxyTransport": "http"
+          }
+        ]
+      },
+      "last": {
+        "atUtc": "2026-10-09T10:22:55.085274+00:00",
+        "gateways": [
+          {
+            "name": "main",
+            "ok": true,
+            "activeSessions": 0,
+            "rawPumpCount": 0,
+            "playbackPreparationPendingCount": 0,
+            "viewerStartupReservations": 0,
+            "viewerSessionStartupAdmissions": 0,
+            "viewerSessionStartupWaiters": 0,
+            "viewerPlaybackActiveLocally": false,
+            "backgroundCpuProcessCount": 0,
+            "whisperInferenceActive": 0,
+            "backgroundWhisperInferenceActive": 0,
+            "activeStrictLidBrokers": 1,
+            "transcribeQueueDepth": 0,
+            "transcribeBusy": false,
+            "ocrQueueDepth": 0,
+            "ocrBusy": false,
+            "sharedVideoEncoderCapacity": {
+              "limit": 8,
+              "occupied": 6
+            },
+            "languageBackgroundCapacity": {
+              "protocol": 1,
+              "maxWorkers": 2,
+              "reason": "capacity-available",
+              "observedAt": "2026-10-09T10:22:55.086Z"
+            },
+            "languageMetadataCapacity": {
+              "protocol": 1,
+              "maxWorkers": 2,
+              "reason": "capacity-available",
+              "observedAt": "2026-10-09T10:22:55.086Z"
+            },
+            "providerProxyTransport": "http"
+          },
+          {
+            "name": "pilot",
+            "ok": true,
+            "activeSessions": 0,
+            "rawPumpCount": 0,
+            "playbackPreparationPendingCount": 0,
+            "viewerStartupReservations": 0,
+            "viewerSessionStartupAdmissions": 0,
+            "viewerSessionStartupWaiters": 0,
+            "viewerPlaybackActiveLocally": false,
+            "backgroundCpuProcessCount": 0,
+            "whisperInferenceActive": 0,
+            "backgroundWhisperInferenceActive": 0,
+            "activeStrictLidBrokers": 0,
+            "transcribeQueueDepth": 0,
+            "transcribeBusy": false,
+            "ocrQueueDepth": 0,
+            "ocrBusy": false,
+            "sharedVideoEncoderCapacity": {
+              "limit": 8,
+              "occupied": 6
+            },
+            "languageBackgroundCapacity": {
+              "protocol": 1,
+              "maxWorkers": 2,
+              "reason": "capacity-available",
+              "observedAt": "2026-10-09T10:22:55.087Z"
+            },
+            "languageMetadataCapacity": {
+              "protocol": 1,
+              "maxWorkers": 2,
+              "reason": "capacity-available",
+              "observedAt": "2026-10-09T10:22:55.087Z"
+            },
+            "providerProxyTransport": "http"
+          }
+        ]
+      }
+    },
+    "reservationAudit": {
+      "atUtc": "2026-10-09T10:28:41.485423+00:00",
+      "slots": [
+        {
+          "slot": "slot-0",
+          "createdOrChangedUtc": "2026-10-09T08:21:51.930096+00:00",
+          "mtimeUtc": "2026-10-09T08:21:51.930096+00:00",
+          "fileCount": 1,
+          "fileSizes": [
+            0
+          ],
+          "nonceHashes": [
+            "45feca23e37fceb7512f1db7c21ca209d2e5b94514f5cc05495565a64645403a"
+          ]
+        },
+        {
+          "slot": "slot-1",
+          "createdOrChangedUtc": "2026-10-09T08:23:22.956538+00:00",
+          "mtimeUtc": "2026-10-09T08:23:22.956538+00:00",
+          "fileCount": 1,
+          "fileSizes": [
+            0
+          ],
+          "nonceHashes": [
+            "1ecaf5b31e6298cbb68318c86686d46a29d9173e7499b9c9d560838a5fe83264"
+          ]
+        },
+        {
+          "slot": "slot-2",
+          "createdOrChangedUtc": "2026-10-09T08:28:03.726561+00:00",
+          "mtimeUtc": "2026-10-09T08:28:03.726561+00:00",
+          "fileCount": 1,
+          "fileSizes": [
+            0
+          ],
+          "nonceHashes": [
+            "a60cb4cbf9760e7bc7523d924f298dd261d7f3866765b1bfbdbea7538a93e26b"
+          ]
+        },
+        {
+          "slot": "slot-3",
+          "createdOrChangedUtc": "2026-10-09T09:03:59.691226+00:00",
+          "mtimeUtc": "2026-10-09T09:03:59.691226+00:00",
+          "fileCount": 1,
+          "fileSizes": [
+            0
+          ],
+          "nonceHashes": [
+            "f947a840141838a2b9b93182a39a0635e1a0c12bf5cca75fb812bc5409e09dd1"
+          ]
+        },
+        {
+          "slot": "slot-4",
+          "createdOrChangedUtc": "2026-10-09T09:51:14.573058+00:00",
+          "mtimeUtc": "2026-10-09T09:51:14.573058+00:00",
+          "fileCount": 1,
+          "fileSizes": [
+            0
+          ],
+          "nonceHashes": [
+            "35d714bfbaa2e0fedd0fa49e8755da41d9d73adb2340a11afdaad78251140b5b"
+          ]
+        },
+        {
+          "slot": "slot-5",
+          "createdOrChangedUtc": "2026-10-09T09:52:33.786904+00:00",
+          "mtimeUtc": "2026-10-09T09:52:33.786904+00:00",
+          "fileCount": 1,
+          "fileSizes": [
+            0
+          ],
+          "nonceHashes": [
+            "7afdcde378b383c34cb60e65597ceec4e9f928143b65914ba5239f6754868703"
+          ]
+        }
+      ],
+      "mountConsumers": [
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "running": true,
+          "startedAt": "2026-10-09T08:50:26.384927991Z",
+          "finishedAt": "0001-01-01T00:00:00Z",
+          "processNames": [
+            "start",
+            "sh",
+            "node",
+            "flock",
+            "sh",
+            "cat"
+          ]
+        },
+        {
+          "name": "norva-media-gateway",
+          "running": true,
+          "startedAt": "2026-10-09T08:50:23.807354823Z",
+          "finishedAt": "0001-01-01T00:00:00Z",
+          "processNames": [
+            "docker-init",
+            "start",
+            "sh",
+            "node",
+            "flock",
+            "sh",
+            "cat",
+            "ffmpeg"
+          ]
+        }
+      ],
+      "mediaProcesses": [
+        {
+          "pid": 3056158,
+          "comm": "ffmpeg",
+          "disableVideo": false,
+          "codecs": [
+            "pcm_s16le"
+          ],
+          "maps": [
+            "0:1"
+          ]
+        }
+      ],
+      "recentCapacityRefusals": 0
+    },
+    "firstRecoveryAttempt": {
+      "startedAtUtc": "2026-10-09T10:26:18.965654+00:00",
+      "removed": [],
+      "viewerInterrupted": false,
+      "limitsChanged": false,
+      "completed": false,
+      "failure": "URLError",
+      "release": {
+        "norva-media-gateway": true,
+        "norva-resume-cache-pilot-20260916": true
+      },
+      "endedAtUtc": "2026-10-09T10:28:05.647579+00:00",
+      "observationCount": 20,
+      "firstObservation": {
+        "atUtc": "2026-10-09T10:26:19.429589+00:00",
+        "mediaProcesses": 2,
+        "gateways": [
+          {
+            "name": "norva-media-gateway",
+            "activeSessions": 0,
+            "rawPumpCount": 0,
+            "encoders": 0,
+            "pending": 0,
+            "strictBrokers": 2
+          },
+          {
+            "name": "norva-resume-cache-pilot-20260916",
+            "activeSessions": 0,
+            "rawPumpCount": 0,
+            "encoders": 0,
+            "pending": 0,
+            "strictBrokers": 0
+          }
+        ]
+      },
+      "lastObservation": {
+        "atUtc": "2026-10-09T10:27:57.641221+00:00",
+        "mediaProcesses": 1,
+        "gateways": [
+          {
+            "name": "norva-media-gateway",
+            "activeSessions": 0,
+            "rawPumpCount": 0,
+            "encoders": 0,
+            "pending": 0,
+            "strictBrokers": 1
+          },
+          {
+            "name": "norva-resume-cache-pilot-20260916",
+            "activeSessions": 0,
+            "rawPumpCount": 0,
+            "encoders": 0,
+            "pending": 0,
+            "strictBrokers": 0
+          }
+        ]
+      }
+    },
+    "recovery": {
+      "startedAtUtc": "2026-10-09T10:29:35.346443+00:00",
+      "removed": [
+        "slot-0",
+        "slot-1",
+        "slot-2",
+        "slot-3",
+        "slot-4",
+        "slot-5"
+      ],
+      "observations": [
+        {
+          "atUtc": "2026-10-09T10:29:35.836057+00:00",
+          "mediaProcesses": 0,
+          "gateways": [
+            {
+              "name": "norva-media-gateway",
+              "activeSessions": 0,
+              "rawPumpCount": 0,
+              "encoders": 0,
+              "pending": 0,
+              "strictBrokers": 0
+            },
+            {
+              "name": "norva-resume-cache-pilot-20260916",
+              "activeSessions": 0,
+              "rawPumpCount": 0,
+              "encoders": 0,
+              "pending": 0,
+              "strictBrokers": 0
+            }
+          ]
+        },
+        {
+          "atUtc": "2026-10-09T10:29:36.292713+00:00",
+          "mediaProcesses": 0,
+          "gateways": [
+            {
+              "name": "norva-media-gateway",
+              "activeSessions": 0,
+              "rawPumpCount": 0,
+              "encoders": 0,
+              "pending": 0,
+              "strictBrokers": 0
+            },
+            {
+              "name": "norva-resume-cache-pilot-20260916",
+              "activeSessions": 0,
+              "rawPumpCount": 0,
+              "encoders": 0,
+              "pending": 0,
+              "strictBrokers": 0
+            }
+          ]
+        },
+        {
+          "atUtc": "2026-10-09T10:29:36.739470+00:00",
+          "mediaProcesses": 0,
+          "gateways": [
+            {
+              "name": "norva-media-gateway",
+              "activeSessions": 0,
+              "rawPumpCount": 0,
+              "encoders": 0,
+              "pending": 0,
+              "strictBrokers": 0
+            },
+            {
+              "name": "norva-resume-cache-pilot-20260916",
+              "activeSessions": 0,
+              "rawPumpCount": 0,
+              "encoders": 0,
+              "pending": 0,
+              "strictBrokers": 0
+            }
+          ]
+        }
+      ],
+      "viewerInterrupted": false,
+      "limitsChanged": false,
+      "after": [
+        {
+          "name": "norva-media-gateway",
+          "capacity": {
+            "limit": 8,
+            "occupied": 0
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "capacity": {
+            "limit": 8,
+            "occupied": 0
+          }
+        }
+      ],
+      "completed": true,
+      "release": {
+        "norva-media-gateway": true,
+        "norva-resume-cache-pilot-20260916": true
+      },
+      "endedAtUtc": "2026-10-09T10:29:36.745409+00:00"
+    },
+    "operatorCleanup": {
+      "sha256": {
+        "helpers.py": "1442857858eb7f50a96cbcd414c3d061529cf9da9bfbd18b1eba19892da823ea",
+        "history-current.remote.py": "131a4a411c150cd95abf77c653fae162403ad19576418ed500eb4a7933d015c9",
+        "history-trial.remote.py": "fe87b083257300eb7f31a6a113089187a58756f2c5ff075cb65eb1122e38692b",
+        "trial.remote.py": "ca6b65d14077a0aacacd13ce523e5c709700a6a51d5e89c5ea27ab6218135a05",
+        "zero-legacy-trial.remote.py": "18ba66832c5e01ca72b6d83b63d4c81dbc2f179425c8178c10e26efea2e9050a",
+        "zero-trial.remote.py": "8fc6708d1ec7b345ca54f058d07da7412eafa07d31312390eaeaa51035d056e0"
+      },
+      "remoteMatches": {
+        "helpers.py": true,
+        "history-current.remote.py": true,
+        "history-trial.remote.py": true,
+        "trial.remote.py": true,
+        "zero-legacy-trial.remote.py": true,
+        "zero-trial.remote.py": true
+      },
+      "isolatedHelperChecks": {
+        "normal": true,
+        "urgent": true,
+        "cleanupFailure": true,
+        "foreignSession": true
+      },
+      "sharedPoolExistingTests": {
+        "passed": 2,
+        "failed": 0
+      },
+      "consumedAdmissionsReplayed": false
+    },
+    "deferredBackgroundWindow": {
+      "startedAtUtc": "2026-10-09T10:30:56.262931+00:00",
+      "maxSeconds": 330,
+      "ready": true,
+      "readyAtUtc": "2026-10-09T10:30:58.311282+00:00",
+      "failure": "URLError",
+      "released": true,
+      "endedAtUtc": "2026-10-09T10:33:08.729433+00:00",
+      "observationCount": 63,
+      "firstObservation": {
+        "atUtc": "2026-10-09T10:30:56.294703+00:00",
+        "held": true,
+        "metadata": 1,
+        "strictBrokers": 0,
+        "transcribeBusy": false,
+        "backgroundWhisper": 0,
+        "pilotSessions": 0,
+        "pilotPumps": 0,
+        "encoderOccupied": 0
+      },
+      "lastObservation": {
+        "atUtc": "2026-10-09T10:33:01.718387+00:00",
+        "held": true,
+        "metadata": 0,
+        "strictBrokers": 0,
+        "transcribeBusy": false,
+        "backgroundWhisper": 0,
+        "pilotSessions": 1,
+        "pilotPumps": 0,
+        "encoderOccupied": 1
+      },
+      "quietObservationCount": 62
+    },
+    "publicPlayback": {
+      "copy": "FR Severance S1E1, Strng",
+      "clickAtUtc": "2026-10-09T10:31:32.875Z",
+      "firstFrameAtUtc": "2026-10-09T10:32:25.141665Z",
+      "clickToFirstFrameMs": 52266.665,
+      "ttffTelemetryMs": 52005,
+      "actualPlaybackStarted": false,
+      "observation": {
+        "atUtc": "2026-10-09T10:32:48.759259+00:00",
+        "sessions": [
+          {
+            "error": null,
+            "state": "pending",
+            "createdAt": "2026-10-09T10:31:33.556586+00:00",
+            "events": [
+              {
+                "at": "2026-10-09T10:32:25.141665+00:00",
+                "code": null,
+                "event": "first_frame",
+                "ttffMs": 52005,
+                "position": 0
+              }
+            ]
+          }
+        ],
+        "gatewaySession": {
+          "status": "ready",
+          "createdAt": "2026-10-09T10:31:33.919Z",
+          "requestedSeekOffset": 0,
+          "actualStartOffset": 0,
+          "localSeekTarget": 0,
+          "startupPolicy": {
+            "protocol": 2,
+            "eligible": false,
+            "pipeline": "video-transcode",
+            "targetBufferSeconds": null,
+            "minimumEncodeRateX": 2,
+            "observedEncodeRateX": 0.119,
+            "reason": "encode-rate-below-minimum"
+          },
+          "startupTimings": {
+            "admissionWaitMs": 0,
+            "ownerProviderLockWaitMs": 0,
+            "adaptiveRouteLookupMs": 23,
+            "adaptiveRouteControlStatus": "fallback",
+            "adaptiveRouteSelectionReason": "shadow-mode",
+            "cleanupMs": 0,
+            "slotReleaseWaitMs": 0,
+            "stoppedConflictingSessions": 0,
+            "globalBackgroundExtractionPreemptions": 0,
+            "globalBackgroundWhisperPreemptions": 0,
+            "globalBackgroundCpuPreemptions": 0,
+            "codecProfileMs": 0,
+            "codecProfileProbeRan": true,
+            "codecProfileProbeReleaseWaitMs": 0,
+            "boundedMkvInputPump": true,
+            "fileSizeBytes": 5006492901,
+            "fileSizeProbeRan": false,
+            "fileSizeProbeMs": 0,
+            "fileSizeProbeReleaseWaitMs": 0,
+            "ffmpegReadyMs": 48413,
+            "playlistSegmentCount": 3,
+            "playlistBufferSeconds": 6.006,
+            "firstSegmentBytes": 10152,
+            "playlistSegmentBytes": 88924,
+            "startOffsetProbeMs": 0,
+            "totalMs": 50272,
+            "ffmpegSpawnCount": 1,
+            "analyzerSpawnCount": 0,
+            "providerValidatorEvidence": "weak-or-absent",
+            "providerFullBodyAtZero": false,
+            "providerFullBodyBoundary": null,
+            "providerGetPreopened": true,
+            "providerPreopenRetries": 0,
+            "providerNodeTransport": "http",
+            "providerProxySlot": 1,
+            "fileSizeDiscoveredFromPlaybackGet": false,
+            "fileSizePendingFullBodyEof": false,
+            "providerGetPreopenMs": 1834,
+            "multiAudioHls": {
+              "protocol": 1,
+              "enabled": true,
+              "reason": "enabled",
+              "maxAudioRenditions": 12,
+              "sourceTrackCount": 2,
+              "preparedTrackCount": 2,
+              "masterPlaylist": "playlist.m3u8",
+              "videoPlaylist": "video.m3u8",
+              "defaultHlsIndex": 0,
+              "defaultStreamIndex": 1,
+              "ready": true,
+              "video": {
+                "segmentCount": 3,
+                "bufferSeconds": 6.006,
+                "firstSegmentBytes": 10152,
+                "playlistSegmentBytes": 88924
+              },
+              "audio": [
+                {
+                  "hlsIndex": 0,
+                  "streamIndex": 1,
+                  "segmentCount": 3,
+                  "bufferSeconds": 6.016,
+                  "firstSegmentBytes": 7332,
+                  "playlistSegmentBytes": 23500
+                },
+                {
+                  "hlsIndex": 1,
+                  "streamIndex": 2,
+                  "segmentCount": 3,
+                  "bufferSeconds": 6.016,
+                  "firstSegmentBytes": 7332,
+                  "playlistSegmentBytes": 23500
+                }
+              ]
+            },
+            "exactSubtitleHls": {
+              "protocol": 1,
+              "enabled": true,
+              "cacheEligible": true,
+              "reason": "enabled",
+              "maxRenditions": 8,
+              "maxCacheableRenditions": 8,
+              "sourceTrackCount": 3,
+              "preparedTrackCount": 3
+            },
+            "vaapiFastReadiness": true,
+            "vaapiFastReadinessBufferSeconds": 6,
+            "beforeFfmpegMs": 1859,
+            "retainedSharedCacheHlsOutput": false,
+            "hlsDiskReservationMs": 2,
+            "finiteTsFastInput": false,
+            "finiteTsDurationScanSkipped": false,
+            "finiteTsResumeAligned": false,
+            "finiteMp4ResumeAligned": false,
+            "exactSubtitleBootstrap": {
+              "protocol": 1,
+              "preparedTrackCount": 3,
+              "firstMediaSequence": 1
+            },
+            "ffmpegSpawnDelayMs": 11,
+            "videoEncoder": "vaapi",
+            "videoDecode": "vaapi",
+            "vaapiHardwareDecodeFallbacks": 0,
+            "firstSegmentReadyMs": 14486.115966796875,
+            "playlistProductionSpanMs": 33729.675048828125,
+            "playlistPostFirstBufferSeconds": 4.004,
+            "sustainedMediaProductionRateX": 0.119,
+            "mediaProductionRateX": 0.119,
+            "inputProbeMode": "known-fast",
+            "fastInputProbeFallbacks": 0
+          },
+          "finiteMkvSeekBroker": null,
+          "vodInputProgress": {
+            "protocol": 1,
+            "outcome": "active",
+            "phase": "provider-read",
+            "elapsedMs": 73037.845,
+            "phaseMs": {
+              "local": 59.27,
+              "provider-open": 0,
+              "provider-read": 72952.364,
+              "downstream-write": 26.21,
+              "provider-close": 0,
+              "retry-wait": 0,
+              "flush": 0,
+              "cleanup": 0
+            },
+            "receivedBytes": 2107243,
+            "preloadedBytes": 1147,
+            "forwardedBytes": 2107243,
+            "openedRanges": 0,
+            "reopens": 0,
+            "plannedWindowContinuations": 0
+          }
+        }
+      },
+      "lastVisiblePlayer": {
+        "id": "watch-video",
+        "observedAtUtc": "2026-10-09T10:33:23.997Z",
+        "currentTime": 0,
+        "paused": true,
+        "readyState": 4,
+        "error": null,
+        "buffered": [
+          [
+            0,
+            13.994666
+          ]
+        ],
+        "clickElapsedMs": 111122,
+        "afterAdmissionRestored": true
+      },
+      "normalClose": true,
+      "finalEvents": [
+        {
+          "error": null,
+          "state": "expired",
+          "createdAt": "2026-10-09T10:31:33.556586+00:00",
+          "events": [
+            {
+              "at": "2026-10-09T10:32:25.141665+00:00",
+              "code": null,
+              "event": "first_frame",
+              "ttffMs": 52005,
+              "position": 0
+            }
+          ]
+        }
+      ]
+    },
+    "controlHealthFollowup": {
+      "atUtc": "2026-10-09T10:34:55.860121+00:00",
+      "nodes": [
+        {
+          "name": "norva-media-gateway",
+          "restartCount": 0,
+          "startedAt": "2026-10-09T08:50:23.807354823Z",
+          "markers": {
+            "listening": 0,
+            "heap out of memory": 0,
+            "FATAL ERROR": 0,
+            "uncaught": 0,
+            "unhandled": 0,
+            "ECONNRESET": 0,
+            "EADDRINUSE": 0,
+            "SIGTERM": 0
+          },
+          "health": {
+            "ok": true,
+            "activeSessions": 0,
+            "videoEncoderCapacity": {
+              "protocol": 1,
+              "active": 0,
+              "maxActive": 8
+            },
+            "sharedVideoEncoderCapacity": {
+              "limit": 8,
+              "occupied": 0
+            }
+          },
+          "healthMs": 14
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "restartCount": 0,
+          "startedAt": "2026-10-09T08:50:26.384927991Z",
+          "markers": {
+            "listening": 0,
+            "heap out of memory": 0,
+            "FATAL ERROR": 0,
+            "uncaught": 0,
+            "unhandled": 0,
+            "ECONNRESET": 0,
+            "EADDRINUSE": 0,
+            "SIGTERM": 0
+          },
+          "health": {
+            "ok": true,
+            "activeSessions": 0,
+            "videoEncoderCapacity": {
+              "protocol": 1,
+              "active": 0,
+              "maxActive": 8
+            },
+            "sharedVideoEncoderCapacity": {
+              "limit": 8,
+              "occupied": 0
+            }
+          },
+          "healthMs": 2
+        }
+      ]
+    },
+    "closeout": {
+      "atUtc": "2026-10-09T10:37:02.151053+00:00",
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "activeSessions": 0,
+          "rawPumpCount": 0,
+          "image": "sha256:9e6f0849014864b13c756b2a4c79a6ce000f089273021fa4f85fb582760775f5",
+          "startedAt": "2026-10-09T08:50:23.807354823Z",
+          "environmentUnchanged": true,
+          "sharedVideoEncoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "activeSessions": 0,
+          "rawPumpCount": 0,
+          "image": "sha256:9e6f0849014864b13c756b2a4c79a6ce000f089273021fa4f85fb582760775f5",
+          "startedAt": "2026-10-09T08:50:26.384927991Z",
+          "environmentUnchanged": true,
+          "sharedVideoEncoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          }
+        }
+      ],
+      "pilotOwnerCount": 1,
+      "audibleAcceptance": false,
+      "ownerLiveClaims": 0,
+      "admissions": {
+        "paused": false,
+        "cron": true
+      },
+      "dispatcherRunning": true,
+      "workerRunning": true,
+      "canaryAbsent": true
+    },
+    "support": {
+      "checkedAtUtc": "2026-10-09T10:39:30.581783+00:00",
+      "lastOctober8FollowupSeen": true,
+      "newTechnicalResponseAfterFollowup": false,
+      "newMessageSent": false
+    },
+    "conclusions": {
+      "abandonedCapacityRecovered": true,
+      "publicStartupRepaired": false,
+      "norvaTransportFullyExcluded": false,
+      "providerVersusRelayRootCauseEstablished": false,
+      "applicationDeployment": false,
+      "audibleAcceptance": false
+    },
+    "localEvidence": [
+      {
+        "name": "contention-baseline.safe.json",
+        "sha256": "1bdd10278c86209d0ddec9ddf11612fc595bac73bef5a30573d004d572377d86"
+      },
+      {
+        "name": "encoder-reservations.safe.json",
+        "sha256": "444e2433e8ce4f1a63da0da36276379271e612f26487b2ec3bf756c0860d60a5"
+      },
+      {
+        "name": "encoder-recovery-attempt1.safe.json",
+        "sha256": "0b72f52e00db82c29027bb7bbfca3ed99810a806661821614ecfd1af211d4952"
+      },
+      {
+        "name": "encoder-recovery.safe.json",
+        "sha256": "15ff673319367f13f437fabfe45797a01b95ac06cfdd1a9d2ae31b08eeb0e181"
+      },
+      {
+        "name": "contention-window.safe.json",
+        "sha256": "c1a167c33ca2d273ff32d67ca58abd42c7e250a3d7063b86e3cc3f2c1dd54234"
+      },
+      {
+        "name": "contention-progress.safe.json",
+        "sha256": "c20a963a2c0ac5470475287aa8a93bf940a4255ad568957192e63949876b9c82"
+      },
+      {
+        "name": "contention-final.safe.json",
+        "sha256": "ae806d6675aaa81c05ae6cfffb45a8ce50967da3287e0f9d601ee9831df24460"
+      },
+      {
+        "name": "operator-cleanup-verification.safe.json",
+        "sha256": "a03547565713b1ca21ec5d64b4396adbe35d3e5d80d978bfbfd9f6bcf1f7db10"
+      },
+      {
+        "name": "control-health-followup.safe.json",
+        "sha256": "6fc5ac2e018f04d20e452decb1e0e3a51b8a0d34eb05c6f52b6c91814b4ecfe8"
+      },
+      {
+        "name": "severance-background-deferred.png",
+        "sha256": "e28c3639e5171363cbc8ddc86750054eab59c77427602153e07fcab57e8eb860"
+      }
+    ]
+  }
 }

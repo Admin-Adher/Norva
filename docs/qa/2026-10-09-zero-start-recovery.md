@@ -121,8 +121,104 @@ Une réouverture publique supplémentaire de la copie Vice-versa 2 déjà utilis
 
 ## Clôture après les comparaisons historiques
 
-À **11:58:01 Paris** (09:58:01 UTC), les deux Gateways sont sains, sans session média ni pompe active ; zéro claim vivant pour le compte testé. Images, environnements et dates de démarrage inchangés. Six réservations d'encodeur globales sur huit restent visibles pour les autres travaux, sans attente d'admission dans les essais. Maintenance audio, cron, admission et dispatcher actifs.
+À **11:58:01 Paris** (09:58:01 UTC), les deux Gateways sont sains, sans session média ni pompe active ; zéro claim vivant pour le compte testé. Images, environnements et dates de démarrage inchangés. Six réservations d'encodeur globales sur huit restent visibles, sans attente d'admission dans les essais. Leur attribution initiale à d'autres travaux était incorrecte ; voir la récupération vérifiée ci-dessous. Maintenance audio, cron, admission et dispatcher actifs.
 
 Les deux nouveaux conteneurs de comparaison sont absents ; 70 fichiers temporaires, 850 642 octets, ont été retirés uniquement de leurs répertoires de sortie/cache. Les preuves sûres et marqueurs consommés restent conservés. Navigateur revenu à Films, filtres de séries restaurés ; aucun test ne reste en lecture.
 
 **Résultat : les anciens lancements rapides sont confirmés, et deux démarrages publics à zéro restent sous six secondes. Un défaut du bouton de reprise est corrigé et publié par PR734. La continuité de Silo, le démarrage public de Severance et les échecs Robot/Conclave/Vice-versa 2 restent ouverts.** Les contrôles comparatifs ne justifient ni un retour global à une ancienne image, ni une attribution exclusive au fournisseur ou au relais, ni une déclaration de fiabilité rétablie.
+
+## Suivi du 9 octobre, 12:22–12:37 Paris : capacité récupérée et concurrence testée
+
+### Incident opérateur : réservations d'encodeur abandonnées
+
+Les six réservations ne correspondaient pas à six encodeurs actifs. Les deux
+Gateways étaient les seuls consommateurs vivants du montage partagé, avec zéro
+admission d'encodage. Trois réservations précédaient leur démarrage courant ; les
+trois autres dataient de 09:03:59, 09:51:14 et 09:52:33 UTC. Les deux dernières
+coïncident avec les démarrages des comparaisons PR691/image actuelle de ce rapport.
+
+Le helper des bancs arrêtait directement le conteneur, ce qui fermait les sockets
+mais empêchait la libération normale des réservations partagées. C'est un défaut
+du nettoyage de ces essais. Le registre conserve volontairement une réservation
+incertaine après un arrêt brutal ; supprimer automatiquement toutes les anciennes
+réservations aurait affaibli sa protection. Aucun refus d'admission d'encodeur
+n'est relevé dans les logs des deux Gateways depuis 08:50 UTC : cet incident ne
+prouve donc pas la cause des lenteurs précédentes.
+
+Une première fenêtre de récupération à 10:26:18–10:28:05 UTC n'a rien supprimé :
+elle attendait la fin des extractions audio puis a rencontré une `URLError` de
+contrôle. Les deux leases de report ont été libérés. À 10:29:35–36 UTC, une
+nouvelle prélecture établit zéro session, pompe, encodeur, préparation et broker
+strict sur les deux Gateways. Les six nonces sont inchangés, tous leurs anciens
+conteneurs sont arrêtés et aucun encodeur ne les détient. Seuls ces six fichiers
+vides et leurs répertoires exacts sont retirés, sans suppression récursive.
+**L'occupation passe de 6/8 à 0/8**, sans changer la limite de huit, les images,
+les baux fournisseurs ou les configurations. Le report des admissions est libéré.
+
+Le helper et les cinq opérateurs concernés ferment désormais leurs sessions
+normales par `DELETE /sessions/:id` avant de stopper le conteneur, avec heartbeat
+encore actif et vérification des admissions d'encodage. Aucun paramètre de
+conservation/reprise n'est envoyé. L'arrêt d'urgence reste immédiat et signale
+qu'une récupération indépendante est nécessaire. Quatre contrôles isolés du
+helper réussissent (normal, urgence, échec de nettoyage, session étrangère), ainsi
+que les deux tests existants du pool. Les scripts corrigés sont recopiés dans le
+dossier opérateur privé ; **aucun marqueur consommé n'est rejoué**. Le protocole
+durable est dans `ops/hetzner/media/isolated-gateway-cleanup.md`.
+
+### Severance, départ à zéro avec les nouveaux travaux de fond différés
+
+Un seul lancement public, même version FR Strng et même fichier de
+5 006 492 901 octets. Clic à **10:31:32.875 UTC** ; session à 10:31:33.556586.
+Le report borné du Gateway principal commence à 10:30:56 ; sa requête metadata
+déjà en cours se termine naturellement. De 10:30:58.311 à 10:33:01.718, 62
+observations attestent le report actif, zéro requête metadata active, zéro broker
+strict, zéro Whisper en arrière-plan et aucune transcription occupée. Le pilote
+utilise une seule place d'encodage. Aucun travail n'a été tué et aucun lecteur
+concurrent n'a été remplacé.
+
+- Première image déclarée à 10:32:25.141665 : **52,267 s depuis le clic**
+  (TTFF de télémétrie 52,005 s). Ce n'est pas un début de lecture effective.
+- Préouverture 1,834 s ; préparation FFmpeg 48,413 s ; trois segments/6,006 s
+  disponibles à l'état serveur prêt. Production mesurée 0,119× : le démarrage
+  accéléré reste légitimement non qualifié.
+- À 10:32:48, pendant le report vérifié : 2 107 243 octets reçus en 73,038 s
+  d'observation de la pompe, dont 72,952 s en attente de réception et 26 ms
+  d'écriture aval. Aucune attente d'admission ou de verrou propriétaire.
+- À 10:33:23.997, le **lecteur visible `watch-video`** est toujours à zéro,
+  paused=true/readyState=4/error=null, avec [0, 13,994666] s chargées : 111,122 s
+  après le clic, aucun événement `play_started`. Les premières lectures DOM
+  visaient le lecteur masqué `video-player` ; elles ne servent pas de preuve de
+  l'état du lecteur visible.
+
+Le contrôleur rencontre une autre `URLError` et libère le report à 10:33:08.729,
+avant sa limite de 330 secondes. La dernière mesure DOM est donc postérieure à
+cette libération ; ne pas présenter les 111 secondes comme une fenêtre entière
+sans travail de fond. Le détail réseau de cette erreur de contrôle n'a pas été
+capturé. Les relectures ultérieures répondent en 14/2 ms, sans redémarrage ni
+trace d'exception non gérée dans les logs depuis 10:25. Aucun timeout de
+production n'a été augmenté.
+
+Le retour normal à Séries ferme la lecture et libère sa place. **La lenteur est
+encore observée pendant la fenêtre où les tâches de fond sont absentes** ; ce
+test ne justifie pas de réduire la maintenance audio ou de modifier sa
+concurrence. Il ne départage pas la livraison fournisseur et le relais, ni ne
+certifie l'absence de tout défaut de transport Norva.
+
+### Clôture du suivi
+
+À **12:37:02 Paris**, les deux Gateways sont sains, zéro session/pompe/admission
+d'encodage, pool 0/8, zéro claim vivant du compte testé. Images, environnements,
+démarrages et périmètre du pilote inchangés ; cron, worker, dispatcher et
+admissions ordinaires actifs. Les cinq checks de PR735 passent désormais, paquets
+compris. Aucun nouveau déploiement applicatif, seuil ou codec modifié.
+
+Le dossier NodeMaven est relu : le dernier complément du 8 octobre est marqué
+vu, mais aucune réponse technique nouvelle n'apparaît après celui-ci. Aucun
+message supplémentaire ni changement d'IP, de port ou d'abonnement effectué.
+
+**La capacité abandonnée par les essais est restaurée et leur nettoyage corrigé.
+Le démarrage lent de Severance reste non réparé ; aucun nouveau gain sur Normal
+ni validation à l'écoute n'est revendiqué.** Reçus sous
+`.codex-artifacts/startup-recovery-20261009/`, notamment
+`encoder-recovery.safe.json`, `contention-window.safe.json`,
+`contention-progress.safe.json` et `severance-background-deferred.png`.
