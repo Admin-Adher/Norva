@@ -6092,18 +6092,21 @@ class WatchPage {
             // early segments. Preserve the fallback, but allow new, sustained
             // browser evidence to supersede that estimate, never a timer alone.
             const raw = startupPolicy || {};
+            const shortObservation = raw.reason === 'encode-rate-observation-too-short';
             const adaptive = Number(raw.protocol) === 2 && raw.eligible === false
-                && raw.reason === 'encode-rate-below-minimum'
+                && (raw.reason === 'encode-rate-below-minimum' || shortObservation)
                 && ['copy', 'audio-transcode', 'video-transcode'].includes(raw.pipeline)
                 && raw.targetBufferSeconds === null
                 && Number(raw.minimumEncodeRateX) >= (raw.pipeline === 'video-transcode' ? 2 : 1.15)
                 && Number(raw.minimumEncodeRateX) <= 20
-                && Number.isFinite(raw.observedEncodeRateX) && raw.observedEncodeRateX > 0;
+                && Number.isFinite(raw.observedEncodeRateX) && raw.observedEncodeRateX > 0
+                && raw.observedEncodeRateX <= 20;
             return {
                 minimumSeconds: 96,
                 timeoutMs: 360000,
                 policy: null,
                 ...(adaptive ? { adaptive: true } : {}),
+                ...(adaptive && shortObservation ? { sustainedObservation: true } : {}),
             };
         }
         // A growing multi-audio EVENT manifest publishes one video playlist
@@ -6278,7 +6281,18 @@ class WatchPage {
                 const elapsedMs = growth ? now - growth.at : 0;
                 const addedSeconds = growth ? bufferedAhead - growth.buffer : 0;
                 const rate = elapsedMs > 0 ? addedSeconds * 1000 / elapsedMs : 0;
-                if (growth && elapsedMs >= 2000 && growth.appends >= 3 && addedSeconds >= 8
+                // A short server burst needs two later observation intervals.
+                // A front-loaded burst followed by silence must not qualify on
+                // its average alone. The full resident reserve above still wins.
+                if (growth && options.sustainedObservation === true && elapsedMs >= 3000 && !growth.midpoint) {
+                    growth.midpoint = { at: now, buffer: bufferedAhead };
+                }
+                const midpoint = growth?.midpoint;
+                const sustained = options.sustainedObservation !== true || (midpoint
+                    && elapsedMs >= 6000 && now - midpoint.at >= 3000
+                    && (midpoint.buffer - growth.buffer) * 1000 / (midpoint.at - growth.at) >= 2
+                    && (bufferedAhead - midpoint.buffer) * 1000 / (now - midpoint.at) >= 2);
+                if (growth && sustained && elapsedMs >= 2000 && growth.appends >= 3 && addedSeconds >= 8
                     && rate >= 2 && bufferedAhead >= reserve && now - growth.lastAt <= 1000
                     && Number(this.video.readyState) >= 3 && Number(this.video.videoWidth) > 0) {
                     this._gatewayStartupAdaptiveEvidence = {
@@ -6617,6 +6631,7 @@ class WatchPage {
                             minimumSeconds: gatewayStartupBuffer.minimumSeconds,
                             timeoutMs: gatewayStartupBuffer.timeoutMs,
                             adaptive: gatewayStartupBuffer.adaptive === true,
+                            sustainedObservation: gatewayStartupBuffer.sustainedObservation === true,
                         },
                     );
                 } catch (error) {

@@ -132,6 +132,22 @@ async function verifyGatewayLateRecovery(WatchPage, Hls, tick) {
     if (!await startup.waitForGatewayStartupBuffer(1, startupHls,
         { minimumSeconds: 96, adaptive: true, timeoutMs: 4000 })
         || !(startup._gatewayStartupAdaptiveEvidence?.rateX >= 2)) throw Error('fresh preroll cannot earn growth proof');
+    const shortPolicy = { protocol: 2, eligible: false, pipeline: 'video-transcode', targetBufferSeconds: null,
+        minimumEncodeRateX: 2, observedEncodeRateX: 20, reason: 'encode-rate-observation-too-short' };
+    const observedOptions = startup.gatewayStartupBufferOptions(shortPolicy);
+    if (!observedOptions.sustainedObservation || !observedOptions.adaptive) throw Error('brief burst bypasses observation');
+    const observedAt = Date.now();
+    startup.video.buffered.end = () => 21 + 2 * Math.floor((Date.now() - observedAt) / 400);
+    if (!await startup.waitForGatewayStartupBuffer(1, startupHls, { ...observedOptions, timeoutMs: 8500 })
+        || startup._gatewayStartupAdaptiveEvidence?.elapsedMs < 6000) throw Error('brief burst admitted too soon');
+    startup.video.buffered.end = () => 45;
+    if (await startup.waitForGatewayStartupBuffer(1, startupHls, { ...observedOptions, timeoutMs: 1500 })) {
+        throw Error('stationary burst admitted');
+    }
+    startup.video.buffered.end = () => 111;
+    if (!await startup.waitForGatewayStartupBuffer(1, startupHls, { ...observedOptions, timeoutMs: 1000 })) {
+        throw Error('resident reserve delayed');
+    }
     startup.contentType = 'series'; startup.currentCloudPlaybackSessionId = 'fixture';
     startup.streamStartOffset = 300; startup.video.videoWidth = 1920;
     if (startup.captureCloudResumePosition() !== 315) throw Error('resume clock lost its absolute origin');

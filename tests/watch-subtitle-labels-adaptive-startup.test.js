@@ -100,7 +100,7 @@ test('adaptive observation never survives cancellation or an HLS instance replac
     }
 });
 
-test('the actual manifest callback passes later-rate observation to the startup gate', async () => {
+test('the actual manifest callback passes sustained observation to the startup gate', async () => {
     const start = source.indexOf('this.hls.on(Hls.Events.MANIFEST_PARSED, async (event, data = {}) => {');
     const end = source.indexOf('\n        });', start) + '\n        });'.length;
     assert.ok(start >= 0 && end > start);
@@ -109,7 +109,7 @@ test('the actual manifest callback passes later-rate observation to the startup 
     const page = watch();
     page.hls = activeHls; page.isStalePlaybackAttempt = () => false;
     page.waitForGatewayStartupBuffer = async (_id, _hls, options) => { received = options; return true; };
-    const options = page.gatewayStartupBufferOptions(pendingPolicy);
+    const options = page.gatewayStartupBufferOptions({ ...pendingPolicy, reason: 'encode-rate-observation-too-short', observedEncodeRateX: 20 });
     const snippet = source.slice(start, end);
     // Execute the event wiring, not a regex and not a direct gate invocation.
     vm.runInNewContext(`(function(){${snippet}}).call(page)`, {
@@ -119,6 +119,41 @@ test('the actual manifest callback passes later-rate observation to the startup 
     });
     await callback('manifest', {});
     assert.equal(received.adaptive, true); assert.equal(received.minimumSeconds, 96);
+    assert.equal(received.sustainedObservation, true);
+});
+
+test('a short server observation requires six seconds and growth in both intervals', async () => {
+    const options = { sustainedObservation: true, timeoutMs: 15000 };
+    const sustained = await gate(t => 6 + 2 * Math.floor(t / 500), undefined, options);
+    assert.equal(sustained.result, true); assert.equal(sustained.now, 6000);
+    for (const buffer of [t => t === 0 ? 6 : 30,
+        t => t < 3000 ? 6 + 2 * Math.floor(t / 200) : 34 + Math.floor((t - 3000) / 2000),
+        t => 6 + 2 * Math.floor(t / 16000)]) {
+        const result = await gate(buffer, undefined, options);
+        assert.equal(result.result, false); assert.equal(result.evidence, null);
+    }
+});
+
+test('sufficient resident video and healthy cached policy preserve immediate admission', async () => {
+    const resident = await gate(() => 96, undefined, { sustainedObservation: true });
+    assert.equal(resident.result, true); assert.equal(resident.now, 0);
+    const page = watch();
+    const policy = { protocol: 2, eligible: true, pipeline: 'copy', targetBufferSeconds: 6,
+        reason: 'mkv-h264-copy-ready', minimumEncodeRateX: 1.15, observedEncodeRateX: 20 };
+    const options = page.gatewayStartupBufferOptions(policy);
+    assert.equal(options.minimumSeconds, 6);
+    assert.notEqual(options.sustainedObservation, true);
+    const ready = await gate(() => 6, undefined, options);
+    assert.equal(ready.result, true); assert.equal(ready.now, 0);
+});
+
+test('sustained observation is discarded after cancellation, source replacement or user pause', async () => {
+    for (const change of [p => { p.isStalePlaybackAttempt = () => true; }, p => { p.hls = {}; },
+        p => { p._gatewayUserPaused = true; p.video.currentTime = 15; p.video.played = {length:0}; }]) {
+        const result = await gate(t => 6 + 2 * Math.floor(t / 500), (p,t) => { if(t >= 4000) change(p); },
+            { sustainedObservation: true, timeoutMs: 10000 });
+        assert.equal(result.result, false); assert.equal(result.evidence, null);
+    }
 });
 
 test('an accelerating source can earn a new reserve but a late slowdown or disjoint buffer cannot', async () => {
