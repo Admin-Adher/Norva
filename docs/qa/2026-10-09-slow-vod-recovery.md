@@ -104,3 +104,18 @@ Correctif : conserver la copie exacte dans les dix résultats du titre d’origi
 Les deux publications Cloudflare du commit PR741 ont téléversé le site, puis échoué à la vérification d’octets de `provider-access-config.js` (run37949156645, tentatives1 et2). Vérification locale indépendante avec Node : 59 fichiers concordent avec le manifeste livré, sans reconstruire à ce stade le manifeste attendu du runner. La cause de l’écart vu par le runner n’est pas encore attribuée. Le contrôle conserve son refus et affiche désormais empreinte attendue/reçue et longueur, sans corps de réponse. Aucun troisième réessai aveugle ni contournement du contrôle.
 
 À 15:18:53 UTC : deux Gateways sains, zéro session/pompe/réservation encodeur, zéro claim actif du propriétaire ; crons/admission/dispatcher actifs et versions serveur inchangées. Deux tentatives média publiques au total ; la suite du diagnostic utilise seulement le catalogue.
+
+
+### Déploiement et preuve réelle du correctif de récupération
+
+PR742 intégrée par `f29d8f42b23c8b465e4e9161943b92de5353542f`, code `19fde8ab8`. Contrats CI : 6 221 tests, 6 190 réussis, 31 ignorés, aucun échec. Paquets téléphone et TV réussis ; Windows encore en cours au relevé. Le frontend est identique à la matrice Android à six configurations déjà réussie ; aucun nouveau changement de rendu ni de lecteur natif.
+
+Canary Edge avec la vraie API authentifiée et le même fichier : HTTP200 en 425 ms, dix variantes dont l’originale. Réseau normal Edge et lectures catalogue seulement, aucun média fournisseur ; canary stoppé. Comparaison avant staging : le fichier catalogue déployé ne diffère du candidat que par le correctif de sélection décrit ci-dessus.
+
+Deux Edge remplacés à 15:28:15.260 et 15:28:18.787 UTC. Runtime `/home/adrien/.norva/recovery-anchor-20261009/edge/runtime-functions` ; catalogue SHA-256 `03f697a9b40c92d9dc4d44790b2d0605b47c526fe9c5af99f25f8a6a30805cba`. Les 193 autres fichiers et permissions sont conservés ; 194 empreintes vérifiées. Pause admissions 15:27:58.200502–15:28:22.157010 UTC, soit 23,956508 secondes, drainage naturel sans bail forcé. Crons, worker et admission restaurés ; dispatcher préservé. Gateways inchangés et sains.
+
+À 15:28:29 UTC, les deux API authentifiées retournent dix variantes et la copie exacte, HTTP200 en 375/385 ms. Le navigateur resté sur l’erreur ouvre désormais les dix choix via « Autres versions ». Sélection explicite d’une autre copie : boutons « Reprendre à 0:36:34 », « Repartir du début » et « Annuler », sans lecture automatique. Aucun bouton de lancement alternatif activé ; annulation puis retour à la grille. Capture `normal-recovery-choice-production.png`, viewport temporaire remis à zéro. Aucun troisième essai média. Le contrôle confirme le parcours de récupération, pas la fluidité des alternatives.
+
+Publication Cloudflare du correctif : run37951915275 réussi ; publication 15:29:54 UTC puis vérification des 59 fichiers à 15:29:56. Les deux échecs précédents restent historiques, sans cause attribuée ni contrôle d’intégrité supprimé. À 15:29:46 UTC : zéro session/pompe/encodeur et zéro claim du propriétaire, deux Gateways sains, traitements de fond actifs. Reçus consolidés dans le JSON associé. Attachement PR742 refusé à la limite de 100 ; aucune pièce supprimée.
+
+L’idée d’une préparation optimisée reste à l’étude avec ses contraintes de connexion exposées plus haut. Ce déploiement ne crée aucun téléchargement intégral, service de compression ou partage intercompte nouveau et n’accélère pas l’arrivée de Normal.
