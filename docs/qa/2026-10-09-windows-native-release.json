@@ -1,0 +1,337 @@
+{
+  "releaseVersion": "2.1.5-native.1",
+  "status": "published_prerelease",
+  "code": "5a78562f77e0ece7bd604ad023051d14b0539018",
+  "scope": "Windows x64 finite cloud VOD, native LibVLC video, Electron catalogue",
+  "ci": {
+    "passed": 6261,
+    "skipped": 34,
+    "failed": 0,
+    "run": 37981024305,
+    "androidEmulatorRun": 37979014341,
+    "androidConfigurationsPassed": 6,
+    "emulatorSharedFrontendCode": "4537dfc9d6266c083099154ebd2dad988a7a92fc",
+    "checkRunsPassed": 10,
+    "windowsPackage": "success",
+    "vercelPreviewStatus": "quota limited, retry offered after 24 hours"
+  },
+  "realTests": {
+    "Conclave": {
+      "positionSeconds": 120,
+      "playingEventSeconds": 4.764,
+      "observedSecondsAfterPlaying": 176.204,
+      "lostPictures": 0,
+      "maximumConcurrentSourceRequests": 1,
+      "activeSourceRequestsAtClose": 0,
+      "closed": true,
+      "positionAdvanceSeconds": 174.552
+    },
+    "ViceVersa2": {
+      "playingEventSeconds": 18.954,
+      "rangeBytes": 2097152,
+      "typicalRangeSeconds": [
+        5.59,
+        5.92
+      ],
+      "interruptionsRemain": true,
+      "maximumConcurrentSourceRequests": 1,
+      "activeSourceRequestsAtClose": 0,
+      "closed": true
+    }
+  },
+  "authenticatedReplay": {
+    "source": "real authenticated catalogue, isolated QA profile",
+    "lastLaunch": {
+      "type": "launch-preferences",
+      "preferences": {
+        "audio": {
+          "language": "fr",
+          "stableId": "vlc-v1:1:1630826605:fr"
+        },
+        "subtitle": {
+          "disabled": true
+        }
+      },
+      "resumeSeconds": 1646,
+      "elapsedMs": 328116
+    },
+    "firstPlaying": {
+      "type": "playing",
+      "itemType": "movie",
+      "positionSeconds": 1646,
+      "durationSeconds": 7223.317,
+      "savedAtMs": 1791573768421,
+      "playing": true,
+      "decodedAudio": 0,
+      "decodedVideo": 0,
+      "displayedPictures": 0,
+      "lostPictures": 0,
+      "audioTrack": 1,
+      "subtitleTrack": 2,
+      "elapsedMs": 333149
+    },
+    "subtitleOffRestored": true,
+    "lastProgress": {
+      "type": "progress",
+      "itemType": "movie",
+      "positionSeconds": 1674.722,
+      "durationSeconds": 7223.317,
+      "savedAtMs": 1791573799097,
+      "playing": true,
+      "decodedAudio": 2890,
+      "decodedVideo": 1476,
+      "displayedPictures": 687,
+      "lostPictures": 0,
+      "audioTrack": 1,
+      "subtitleTrack": -1,
+      "elapsedMs": 363824
+    },
+    "closed": {
+      "type": "closed",
+      "reason": "viewer_closed",
+      "elapsedMs": 364262
+    },
+    "expiryStatuses": [
+      200,
+      200
+    ],
+    "historyWriteTimes": [
+      334794,
+      350561,
+      364595
+    ]
+  },
+  "historyApiDeployment": {
+    "revision": "77506fe8ec80d111977080dec453d607a3e02cc1",
+    "startedAt": "2026-10-09T19:20:49.283205+00:00",
+    "leasesForced": false,
+    "changedFiles": 1,
+    "preservedFiles": 193,
+    "pausedAt": "2026-10-09T19:20:49.350515+00:00",
+    "replicas": [
+      {
+        "name": "norva-edge-functions",
+        "healthy": true,
+        "historyHelperSha256": "3d02fa19b78342f35b635cedb05b99332587d8166ad2fff013fb6853f9128e92"
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "healthy": true,
+        "historyHelperSha256": "3d02fa19b78342f35b635cedb05b99332587d8166ad2fff013fb6853f9128e92"
+      }
+    ],
+    "gatewaysUnchanged": true,
+    "completedAt": "2026-10-09T19:21:13.292047+00:00",
+    "restoredAt": "2026-10-09T19:21:13.561905+00:00",
+    "admissionsRestored": true,
+    "workerRestored": true,
+    "dispatcherPreserved": true
+  },
+  "postDeployHealth": {
+    "at": "2026-10-09T19:21:23.515380+00:00",
+    "revision": "77506fe8ec80d111977080dec453d607a3e02cc1",
+    "replicas": [
+      {
+        "name": "norva-edge-functions",
+        "startedAt": "2026-10-09T19:21:06.299836302Z",
+        "healthy": true,
+        "historyHelperSha256": "3d02fa19b78342f35b635cedb05b99332587d8166ad2fff013fb6853f9128e92",
+        "all194SourceHashesMatch": true
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "startedAt": "2026-10-09T19:21:10.101871381Z",
+        "healthy": true,
+        "historyHelperSha256": "3d02fa19b78342f35b635cedb05b99332587d8166ad2fff013fb6853f9128e92",
+        "all194SourceHashesMatch": true
+      }
+    ],
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "healthy": true,
+        "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815"
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "healthy": true,
+        "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815"
+      }
+    ],
+    "admissions": {
+      "cron": {
+        "id": 159,
+        "active": true
+      },
+      "paused": false
+    },
+    "stopAbsent": true,
+    "dispatcherRunning": true,
+    "workerRunning": true
+  },
+  "limits": [
+    "No universal delivery speed guarantee",
+    "No human listening acceptance",
+    "No complete Windows accessibility audit",
+    "Private server media cache not used by native preview",
+    "Live and local modes retain previous path"
+  ],
+  "sourceArchives": [
+    {
+      "name": "vlc-3.0.24.tar.xz",
+      "url": "https://download.videolan.org/pub/videolan/vlc/3.0.24/vlc-3.0.24.tar.xz",
+      "sha256": "e7cab503d1d7d5849b89d2cf0e1ee60d0ef6d012407791b644b9cfc0cc225fdf",
+      "size": 27620304
+    },
+    {
+      "name": "libvlcsharp-3.10.1.tar.gz",
+      "url": "https://code.videolan.org/videolan/LibVLCSharp/-/archive/3.10.1/LibVLCSharp-3.10.1.tar.gz",
+      "sha256": "a54f537652091e8e8be2cf5abf114dfe205ec0cfb0a51f4e3fe1e03be972b03f",
+      "size": 4440040
+    }
+  ],
+  "mergedBy": "f0c97fc3b4924b4a677bf346da677a46677be194",
+  "release": {
+    "id": 408265908,
+    "tag_name": "v2.1.5-native.1",
+    "html_url": "https://github.com/Admin-Adher/Norva/releases/tag/v2.1.5-native.1",
+    "draft": false,
+    "prerelease": true,
+    "published_at": "2026-10-09T19:48:27Z",
+    "assets": [
+      {
+        "id": 625947531,
+        "name": "libvlcsharp-3.10.1.tar.gz",
+        "size": 4440040,
+        "digest": "sha256:a54f537652091e8e8be2cf5abf114dfe205ec0cfb0a51f4e3fe1e03be972b03f",
+        "browser_download_url": "https://github.com/Admin-Adher/Norva/releases/download/v2.1.5-native.1/libvlcsharp-3.10.1.tar.gz"
+      },
+      {
+        "id": 625987773,
+        "name": "Norva-Windows-2.1.5-native.1-x64.exe",
+        "size": 223429995,
+        "digest": "sha256:6f7d5e29c5003ab1d62ee0759adff3d1822cb9239ee859b1bff25255c4ac2c5e",
+        "browser_download_url": "https://github.com/Admin-Adher/Norva/releases/download/v2.1.5-native.1/Norva-Windows-2.1.5-native.1-x64.exe"
+      },
+      {
+        "id": 625990456,
+        "name": "SHA256SUMS.txt",
+        "size": 282,
+        "digest": "sha256:fff63b3792d1ba3bd831d2ac9180e9d85db9dd8a79d96b62edebabb1b9412c9a",
+        "browser_download_url": "https://github.com/Admin-Adher/Norva/releases/download/v2.1.5-native.1/SHA256SUMS.txt"
+      },
+      {
+        "id": 625947448,
+        "name": "vlc-3.0.24.tar.xz",
+        "size": 27620304,
+        "digest": "sha256:e7cab503d1d7d5849b89d2cf0e1ee60d0ef6d012407791b644b9cfc0cc225fdf",
+        "browser_download_url": "https://github.com/Admin-Adher/Norva/releases/download/v2.1.5-native.1/vlc-3.0.24.tar.xz"
+      }
+    ]
+  },
+  "packageInspection": {
+    "artifact": 11641965029,
+    "archiveSha256": "a6d756ae33f6d5dad8d68bc099d318e4c38c936e4d0220f27ba958d37937d0f2",
+    "code": "5a78562f77e0ece7bd604ad023051d14b0539018",
+    "version": "2.1.5-native.1",
+    "nativeDefaultEnabled": true,
+    "canonicalSourceMatches": [
+      "electron-main.js",
+      "server/index.js",
+      "desktop/navigation.js",
+      "desktop/native-player-controller.js",
+      "desktop/native-player-ipc.js",
+      "desktop/native-input.js",
+      "public/js/utils/desktopNative.js",
+      "preload.js"
+    ],
+    "requiredRuntimeFiles": [
+      "Norva.NativePlayer.exe",
+      "libvlc/win-x64/libvlc.dll",
+      "libvlc/win-x64/libvlccore.dll",
+      "norva-labels.json",
+      "norva-theme.css",
+      "THIRD-PARTY-NOTICES.md",
+      "source-manifest.json",
+      "licenses/vlc/COPYING",
+      "licenses/vlc/COPYING.LIB",
+      "licenses/libvlcsharp/LICENSE",
+      "licenses/microsoft.netcore.app.runtime.win-x64/LICENSE.TXT",
+      "licenses/microsoft.netcore.app.runtime.win-x64/THIRD-PARTY-NOTICES.TXT",
+      "licenses/microsoft.windowsdesktop.app.runtime.win-x64/LICENSE"
+    ],
+    "x64Only": true,
+    "qaProfileAndArtifactsExcluded": true,
+    "sourceManifestMatches": true,
+    "exeSize": 223429995,
+    "exeSha256": "6f7d5e29c5003ab1d62ee0759adff3d1822cb9239ee859b1bff25255c4ac2c5e",
+    "portableOpened": true,
+    "catalogueRouteObserved": "/app#home",
+    "catalogueVisible": true
+  },
+  "packageReplay": {
+    "copy": "Conclave, exact previous selection",
+    "nativeProcessObserved": true,
+    "positionsObservedSeconds": [
+      1690,
+      1714,
+      1722
+    ],
+    "subtitleOffPreserved": true,
+    "returnToMoviesWorked": true,
+    "secondReturnToSeriesWorked": true,
+    "nativeWindowsAtClose": 0,
+    "startupTimingNotMeasuredInPackagedReplay": true,
+    "continuousCadenceNotMeasuredInPackagedReplay": true,
+    "temporaryPublicationSuspension": "UI automation reported disabled after close; actual clicks navigated successfully twice; no functional deadlock reproduced, no speculative patch applied"
+  },
+  "releaseHealth": {
+    "at": "2026-10-09T19:47:15.202684+00:00",
+    "revision": "77506fe8ec80d111977080dec453d607a3e02cc1",
+    "replicas": [
+      {
+        "name": "norva-edge-functions",
+        "startedAt": "2026-10-09T19:21:06.299836302Z",
+        "healthy": true,
+        "historyHelperSha256": "3d02fa19b78342f35b635cedb05b99332587d8166ad2fff013fb6853f9128e92",
+        "all194SourceHashesMatch": true
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "startedAt": "2026-10-09T19:21:10.101871381Z",
+        "healthy": true,
+        "historyHelperSha256": "3d02fa19b78342f35b635cedb05b99332587d8166ad2fff013fb6853f9128e92",
+        "all194SourceHashesMatch": true
+      }
+    ],
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "healthy": true,
+        "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815"
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "healthy": true,
+        "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815"
+      }
+    ],
+    "admissions": {
+      "cron": {
+        "id": 159,
+        "active": true
+      },
+      "paused": false
+    },
+    "stopAbsent": true,
+    "dispatcherRunning": true,
+    "workerRunning": true
+  },
+  "cleanup": {
+    "mediaTestsStopped": true,
+    "qaTokenExportDeleted": true,
+    "qaRefreshTokenAbsent": true,
+    "isolatedProfileDeletion": "automatic review rejected recursive deletion; not retried",
+    "isolatedProfileExcludedFromPackage": true
+  }
+}
