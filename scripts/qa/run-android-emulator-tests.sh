@@ -62,16 +62,6 @@ record_diagnostic() {
     timeout --kill-after=2s 10s "$@" || result=$?
     printf 'exit_code=%s\n' "$result"
   } >> "$diagnostic_dir/$name.txt" 2>&1
-  if [[ "$name" == adb-state && "$result" == 124 && ! -e "$diagnostic_dir/emulator-hang-stack.txt" ]]; then
-    # Observe a live host process only after adb has already timed out. This
-    # diagnostic run cannot count as a timing benchmark; no retry or reboot.
-    local qpid
-    qpid="$(pgrep -f '^/.*/emulator/qemu/.*/qemu-system-' | head -n 1)"
-    if [[ -n "$qpid" ]]; then
-      timeout --kill-after=2s 15s sudo gdb -batch -ex 'set pagination off' \
-        -ex 'thread apply all bt 12' -p "$qpid" > "$diagnostic_dir/emulator-hang-stack.txt" 2>&1 || true
-    fi
-  fi
 }
 collect_captures() {
   mkdir -p app/build/outputs/androidTest-results/connected/captures
@@ -91,27 +81,7 @@ collect_captures() {
 # Copy while instrumentation is running, before those files disappear.
 (while true; do collect_captures; sleep 5; done) &
 capture_pid=$!
-# ADB's host server can still report `device` after the guest stops answering.
-# Observe guest responsiveness separately, before the emulator watchdog exits.
-# This is a bounded diagnostic for the slow-preparation fixture, not a retry.
 hang_monitor_pid=''
-if [[ "${NORVA_ANDROID_TEST_CLASS:-}" == *SlowVodPreparationInstrumentedTest* ]]; then
-  (
-    for ((sample=0; sample<300; sample++)); do
-      if ! timeout --kill-after=1s 2s adb shell true >/dev/null 2>&1; then
-        qpid="$(pgrep -f '^/.*/emulator/qemu/.*/qemu-system-' | head -n 1 || true)"
-        if [[ -n "$qpid" ]]; then
-          printf 'utc=%s pid=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$qpid" > "$diagnostic_dir/emulator-guest-hang-stack.txt"
-          timeout --kill-after=2s 15s sudo gdb -nx -batch -iex 'set debuginfod enabled off' -ex 'set pagination off' \
-            -ex 'thread apply all bt 12' -p "$qpid" >> "$diagnostic_dir/emulator-guest-hang-stack.txt" 2>&1 || true
-        fi
-        break
-      fi
-      sleep 2
-    done
-  ) &
-  hang_monitor_pid=$!
-fi
 # Per-test logcat can stop before the crash that terminates instrumentation.
 adb logcat -b all -v threadtime > "$diagnostic_dir/device-logcat.txt" 2>&1 &
 logcat_pid=$!
@@ -238,6 +208,19 @@ wait_for_phone_home() {
 }
 if [[ "$platform" == phone ]]; then
   wait_for_phone_home
+fi
+
+# Attach before failure: after an ADB timeout the process is already handling
+# SIGSEGV. This explicit diagnostic is not a timing/performance benchmark.
+if [[ "${NORVA_ANDROID_TEST_CLASS:-}" == *SlowVodPreparationInstrumentedTest* ]] && command -v gdb >/dev/null; then
+  qpid="$(pgrep -f '^/.*/emulator/qemu/.*/qemu-system-' | head -n 1 || true)"
+  if [[ -n "$qpid" ]]; then
+    timeout --kill-after=2s 180s sudo gdb -nx -batch -iex 'set debuginfod enabled off' \
+      -ex 'set pagination off' -ex 'set confirm off' -ex 'set print thread-events off' \
+      -ex 'handle SIGSEGV stop print pass' -ex continue -ex 'thread apply all bt 14' \
+      -ex detach -p "$qpid" > "$diagnostic_dir/emulator-live-debugger.txt" 2>&1 &
+    hang_monitor_pid=$!
+  fi
 fi
 
 test_args=()
