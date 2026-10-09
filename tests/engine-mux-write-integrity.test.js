@@ -652,7 +652,7 @@ test('seek, mux reinitialisation, and destroy discard lookahead before teardown 
             },
             mkstreamwriterdev: async () => {},
             ff_init_muxer: async () => [303, null, null, []],
-            av_opt_set: async () => {},
+            av_opt_set: async () => 0,
             avformat_write_header: async () => {},
             av_packet_alloc: async () => 404,
         };
@@ -714,6 +714,28 @@ test('a successful batch uses one worker RPC and commits staged bytes only after
     assert.strictEqual(committed.length, 1);
     assert.deepStrictEqual(reports, []);
     assert.deepStrictEqual(fatals, []);
+});
+
+test('each new muxer flushes completed output before header writing; unsupported mode fails closed', async () => {
+    for (const code of [0, -22, undefined]) {
+        const { engine } = makeEngine(loadEngineClass());
+        engine.vS = null; engine.aS = null;
+        const calls = [];
+        engine.lib = {
+            unlink: async () => {}, mkstreamwriterdev: async () => {},
+            ff_init_muxer: async () => [303, null, null, []],
+            av_opt_set: async (_oc, name, value) => { calls.push([name, value]); return name === 'flush_packets' ? code : 0; },
+            avformat_write_header: async () => { calls.push(['header']); },
+            av_packet_alloc: async () => 404,
+        };
+        if (code === 0) {
+            await engine._initMuxer();
+            assert.deepStrictEqual(calls.slice(-2), [['flush_packets', '1'], ['header']]);
+        } else {
+            await assert.rejects(engine._initMuxer(), /MUX_FLUSH_OPTION_FAILED/);
+            assert.ok(!calls.some(call => call[0] === 'header'));
+        }
+    }
 });
 
 test('a rejected batch drops every partial chunk and signals fatal recovery', async () => {

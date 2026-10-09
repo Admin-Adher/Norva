@@ -146,3 +146,68 @@ test('auth errors surface immediately (no retry that hammers a banning panel)', 
         assert.strictEqual(calls, 1, '403 must not be retried');
     } finally { srv.close(); }
 });
+
+test('playback and prefetch serialize transport and reuse a completed shared window', async () => {
+    const eng = bareEngine(loadEngineClass(), 'https://media.invalid/test');
+    let active = 0, maximum = 0, calls = 0;
+    eng._fetchRange = async (start, end) => {
+        calls++; maximum = Math.max(maximum, ++active);
+        await new Promise(r => setTimeout(r, 10));
+        active--;
+        return FILE.subarray(start, end);
+    };
+    const a = eng._cacheWindow(0, 4096);
+    const b = eng._cacheWindow(1024, 1024);
+    const c = eng._cacheWindow(8192, 4096);
+    const [wa, wb, wc] = await Promise.all([a, b, c]);
+    assert.strictEqual(maximum, 1, 'one request at a time even for different consumers');
+    assert.strictEqual(calls, 2, 'queued overlapping read reuses validated bytes');
+    assert.strictEqual(wa, wb);
+    assert.strictEqual(wc.buf.readUInt32LE(0), 8192);
+});
+
+test('a failed range releases the queue without publishing its bytes', async () => {
+    const eng = bareEngine(loadEngineClass(), 'https://media.invalid/test');
+    let calls = 0;
+    eng._fetchRange = async (start, end) => {
+        calls++;
+        if (start === 0) throw new Error('TEST_READ_FAILED');
+        return FILE.subarray(start, end);
+    };
+    const a = eng._cacheWindow(0, 4096);
+    const b = eng._cacheWindow(8192, 4096);
+    await assert.rejects(a, /TEST_READ_FAILED/);
+    assert.strictEqual((await b).start, 8192);
+    assert.strictEqual(calls, 2);
+    assert.strictEqual(eng._raCache.length, 1);
+});
+
+test('a terminal provider refusal also blocks all queued consumers', async () => {
+    for (const status of [401, 403, 458]) {
+        const eng = bareEngine(loadEngineClass(), 'https://media.invalid/test');
+        let calls = 0;
+        eng._fetchRange = async () => { calls++; throw new Error('BLOCK_HTTP_' + status); };
+        const reads = [eng._cacheWindow(0, 4096), eng._cacheWindow(8192, 4096)];
+        await Promise.all(reads.map(p => assert.rejects(p, new RegExp('BLOCK_HTTP_' + status))));
+        assert.strictEqual(calls, 1);
+        assert.strictEqual(eng._raCache.length, 0);
+    }
+});
+
+test('destroy/abort cancels queued work and rejects even a late successful body', async () => {
+    const eng = bareEngine(loadEngineClass(), 'https://media.invalid/test');
+    let finish, calls = 0;
+    eng._fetchRange = async (start, end) => {
+        calls++;
+        await new Promise(r => { finish = r; });
+        return FILE.subarray(start, end);
+    };
+    const a = eng._cacheWindow(0, 4096);
+    const b = eng._cacheWindow(8192, 4096);
+    const checks = [assert.rejects(a, /ENGINE_READ_ABORTED/), assert.rejects(b, /ENGINE_READ_ABORTED/)];
+    await Promise.resolve();
+    eng._ac.abort(); finish();
+    await Promise.all(checks);
+    assert.strictEqual(calls, 1);
+    assert.strictEqual(eng._raCache.length, 0);
+});

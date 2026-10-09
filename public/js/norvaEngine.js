@@ -280,7 +280,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 47;
+  const ENGINE_VERSION = 48;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -542,9 +542,10 @@
       this.video.addEventListener('timeupdate', this._onTimeUpdate);
       this._startPump();
       await this._withStartupDeadline(this._startupOutcomePromise, 'first-usable-append');
-      // Build the cue index in the background (enables prefetch-on-scrub). Delayed
-      // so it never competes with the first frame's fetches on the single-slot link.
-      setTimeout(() => { if (!this.destroyed) this._buildCueIndex(); }, 2500);
+      // Background indexing may only use bytes already received. A timer alone
+      // does not make the provider idle: a cold 4 MiB head/cue read used to compete
+      // with playback. A requested seek can still load its index on demand.
+      setTimeout(() => { if (!this.destroyed) this._buildCueIndex(true); }, 2500);
     }
 
     _startupTimeoutError(stage) {
@@ -1036,12 +1037,37 @@
     // is an authoritative single-slot conflict that WatchPage must report and
     // use to open the per-account circuit before any second connection exists.
     async _cacheWindow(start, len) {
+      // Playback, cue discovery and scrub prefetch share one provider transport.
+      // Recheck the cache after the preceding read; concurrent consumers may
+      // need the same bytes. Failed/aborted requests never enter this cache.
+      const preceding = this._rangeTail || Promise.resolve();
+      let release;
+      this._rangeTail = new Promise(resolve => { release = resolve; });
+      try {
+        await preceding;
+        this._assertStartupDeadline('cache-queue');
+        if (this.destroyed || this._ac.signal.aborted) throw new Error('ENGINE_READ_ABORTED');
+        if (this._rangeTerminalError) throw this._rangeTerminalError;
+        const cached = this._raCache.find(w => start >= w.start && start + len <= w.end);
+        if (cached) { this._raTouch(cached); return cached; }
+        try { return await this._cacheWindowSerial(start, len); }
+        catch (error) {
+          // A queued consumer must not turn a slot/auth refusal into another
+          // request before WatchPage has torn the engine down.
+          if (/BLOCK_HTTP_(401|403|458)\b/.test(String(error && error.message))) this._rangeTerminalError = error;
+          throw error;
+        }
+      } finally { release(); }
+    }
+
+    async _cacheWindowSerial(start, len) {
       let lastErr = null;
       const maxAttempts = this._startupActive ? 2 : 3;
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         this._assertStartupDeadline('cache-fetch');
         try {
           const buf = await this._fetchRange(start, start + len);
+          if (this.destroyed || this._ac.signal.aborted) throw new Error('ENGINE_READ_ABORTED');
           const w = { start, end: start + buf.length, buf };
           this._raCache.push(w);
           while (this._raCache.length > RA_WINDOWS) this._raCache.shift();
@@ -1066,30 +1092,44 @@
     // Build a time→byte index from the Matroska cues so prefetchAt() can map a
     // scrub target to the exact cluster offset. Fully defensive: any failure
     // leaves _cueIndex null and seeking falls back to its normal (cold) path.
-    async _buildCueIndex() {
+    async _buildCueIndex(cacheOnly = false) {
       if (this._cueIndex) return;
-      if (this._cueIndexPending) return this._cueIndexPending;
-      const pending = this._readCueIndex();
+      if (this._cueIndexPending) {
+        const pendingWasCacheOnly = this._cueIndexCacheOnly;
+        await this._cueIndexPending;
+        if (this._cueIndex || cacheOnly || !pendingWasCacheOnly) return;
+        return this._buildCueIndex(false);
+      }
+      this._cueIndexCacheOnly = cacheOnly;
+      const pending = this._readCueIndex(cacheOnly);
       this._cueIndexPending = pending;
       try { await pending; }
       finally { if (this._cueIndexPending === pending) this._cueIndexPending = null; }
     }
 
-    async _readCueIndex() {
+    async _readCueIndex(cacheOnly = false) {
       try {
         if (!this.size || this._cueIndex) return;
-        const head = await this._readRange(0, Math.min(RA_SEEK_WINDOW, this.size));
+        const read = async (pos, len) => {
+          if (!cacheOnly) return this._readRange(pos, len);
+          const w = this._raCache.find(w => pos >= w.start && pos + len <= w.end);
+          return w ? w.buf.subarray(pos - w.start, pos - w.start + len) : null;
+        };
+        const head = await read(0, Math.min(RA_SEEK_WINDOW, this.size));
+        if (!head) return;
         const segStart = this._findSegmentDataStart(head);
         if (segStart < 0) return;
         const { scaleNs, cuesPos } = this._scanSegmentHead(head, segStart);
         if (cuesPos < 0 || cuesPos >= this.size) return;
-        const hdr = await this._readRange(cuesPos, Math.min(16, this.size - cuesPos));
+        const hdr = await read(cuesPos, Math.min(16, this.size - cuesPos));
+        if (!hdr) return;
         const idr = ebmlId(hdr, 0); if (!idr || idr.id !== MKV.Cues) return;
         const szr = ebmlSize(hdr, idr.len); if (!szr || szr.unknown) return;
         const dataStart = cuesPos + idr.len + szr.len;
         const dataLen = Math.min(szr.val, this.size - dataStart);
         if (dataLen <= 0 || dataLen > 16 * 1048576) return; // sanity bound
-        const cues = await this._readRange(dataStart, dataLen);
+        const cues = await read(dataStart, dataLen);
+        if (!cues) return;
         const index = this._parseCuePoints(cues, segStart, scaleNs || 1e6);
         if (index && index.length) { index.sort((a, b) => a.t - b.t); this._cueIndex = index; this.log('cue index: ' + index.length + ' points'); }
       } catch (_) { this._cueIndex = null; }
@@ -1746,6 +1786,11 @@
       // file-seeking trailer (mfra/tfra/mfro), not the onwrite callbacks which
       // also carry the final moof/mdat.
       await lib.av_opt_set(this.oc, 'movflags', 'frag_keyframe+empty_moov+default_base_moof+skip_trailer', lib.AV_OPT_SEARCH_CHILDREN);
+      // A complete fragment must not wait in AVIO's output buffer for another
+      // slow input range. This flushes output bytes, not unfinished fragments;
+      // transactional writes still withhold every failed/stale batch.
+      const flushResult = await lib.av_opt_set(this.oc, 'flush_packets', '1', 0);
+      if (!Number.isInteger(flushResult) || flushResult < 0) throw new Error('MUX_FLUSH_OPTION_FAILED:' + String(flushResult));
       await lib.avformat_write_header(this.oc, 0);
       // Header (ftyp+moov init segment) flushed; subsequent onwrite chunks are media.
       this._diagHeaderPhase = false;

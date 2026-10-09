@@ -112,3 +112,28 @@ test('seeks without a crossing cue retain the ordinary timestamp path and its ep
     assert.deepStrictEqual(calls, [[7, 0, 95000, 0, 0]]);
     assert.strictEqual(engine._diag.subtitleSeekCluster, undefined);
 });
+
+test('background cue discovery never fetches an uncached header or competes with playback', async () => {
+    const engine = makeEngine();
+    let requests = 0;
+    engine._readRange = async () => { requests++; throw Error('unexpected network'); };
+    await engine._buildCueIndex(true);
+    assert.strictEqual(requests, 0);
+    assert.strictEqual(engine._cueIndex, null);
+});
+
+test('a requested seek waits for cache-only discovery, then performs one shared on-demand read', async () => {
+    const engine = makeEngine();
+    const modes = []; let release;
+    engine._readCueIndex = async cacheOnly => {
+        modes.push(cacheOnly);
+        if (cacheOnly) await new Promise(r => { release = r; });
+        else { await new Promise(r => setTimeout(r, 5)); engine._cueIndex = [{ t: 89, off: 100, duration: 6 }]; }
+    };
+    const background = engine._buildCueIndex(true);
+    const seek = engine._buildCueIndex();
+    const second = engine._buildCueIndex();
+    release(); await Promise.all([background, seek, second]);
+    assert.deepStrictEqual(modes, [true, false]);
+    assert.strictEqual(engine._subtitleSeekOffset(90), 100);
+});
