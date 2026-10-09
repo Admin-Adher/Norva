@@ -15845,10 +15845,21 @@ function privateResumeFormat(session) {
     return null;
 }
 
+function privateResumeProducerReleased(session) {
+    // Only teardown may convert already-produced bytes into an owner-private
+    // window, after drain and an acknowledged authority-side abandonment.
+    // Keep the producer context intact for audit; missing/expired leases are
+    // not positive acknowledgement and never open this path.
+    return !session?.mediaCacheProducer || (session.status === 'stopping'
+        && session.mediaCacheProducerAbandoned === true
+        && session.mediaCacheProducerCompleted !== true
+        && session.sharedMediaCachePublicationPending !== true);
+}
+
 function privateResumeHlsBindingForSession(session) {
     if (!canUsePrivateResumeCache(session?.ownerKey)) return null;
     const format = privateResumeFormat(session);
-    if (!format || session.mediaCacheProducer || session.completeHlsCacheLease
+    if (!format || !privateResumeProducerReleased(session) || session.completeHlsCacheLease
         || session.multiAudioHls?.enabled === true
         || (Number.isInteger(session.subtitleStreamIndex) && !exactSubtitleHlsEnabled(session))) return null;
     const identity = asRecord(session.playbackIdentity), profile = asRecord(session.codecProfile);
@@ -15882,7 +15893,7 @@ function privateResumeObservedIdentity(session) {
 function privateResumeRetainedInputBinding(session) {
     if (!canUsePrivateResumeCache(session?.ownerKey) || !canUseRecentResumeSamples(session?.ownerKey)
         || privateResumeFormat(session) !== 'mkv'
-        || session.mediaCacheProducer || session.completeHlsCacheLease) return null;
+        || !privateResumeProducerReleased(session) || session.completeHlsCacheLease) return null;
     const multiAudio = multiAudioHlsEnabled(session);
     // Subtitle graphs may be complete in the plan but lack finalized coverage
     // at exit. Source bytes can accelerate the unchanged ordinary rendition plan.
@@ -22964,12 +22975,6 @@ async function stopSession(session, options = {}) {
         await session.privateResumeContinuationPromise?.catch(() => null);
         session.privateResumeLease?.release();
         session.privateResumeLease = null;
-        // Only explicit normal viewer exit supplies a resume position. No
-        // download/prefetch is started; snapshot already-produced local files.
-        await capturePrivateResumeWindow(session, resumePlaylistClock).catch(() => false);
-        session.privateResumeSamples = null;
-        session.privateResumeInputWindows = null;
-        session.privateResumeDeliveryTarget = null;
         releaseVideoEncoderAdmission(session);
         await session.completeHlsCachePromotionPromise?.catch(() => null);
         await session.sharedMediaCachePublicationPromise?.catch(() => null);
@@ -22980,6 +22985,14 @@ async function stopSession(session, options = {}) {
                 console.warn('[media-gateway] unable to abandon shared media cache producer lease');
             });
         }
+        // Only explicit normal viewer exit supplies a resume position. Capture
+        // after transport/encoder drain and shared publication/abandonment.
+        // The private cache still requires fresh identity, exact tracks and
+        // enough usable coverage; an incomplete source is never published.
+        await capturePrivateResumeWindow(session, resumePlaylistClock).catch(() => false);
+        session.privateResumeSamples = null;
+        session.privateResumeInputWindows = null;
+        session.privateResumeDeliveryTarget = null;
         session.status = 'ended';
         sessions.delete(session.id);
         wakePlaybackBlockedQueues();
