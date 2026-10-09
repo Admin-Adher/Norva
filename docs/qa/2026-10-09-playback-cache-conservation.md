@@ -59,3 +59,8 @@ La suite utile est d'étudier une conservation privée bornée lors de l'abandon
 ## Clôture
 
 À 16:07:18.658 UTC (18:07 Paris) : deux Gateways sains, zéro session, zéro pompe, zéro réservation d'encodeur et zéro claim actif du propriétaire. Deux lancements publics au total ; aucun appel média opérateur parallèle. Essais arrêtés, sélection initiale rétablie et navigateur revenu à la grille Séries. Production inchangée. Normal n'a pas été relu et aucun gain supplémentaire n'est revendiqué.
+
+
+## Suite PR745 — coexistence corrigée, autre limite identifiée
+
+Le refus systématique des producteurs interrompus est corrigé et déployé, après abandon acquitté et drainage. Le témoin isolé reproduit l'ancien `session-ineligible` ; la nouvelle image conserve/revalide 44 s privées. Sur Severance réel, cette exclusion est levée mais la réponse faible et l'absence de plages complètes collectées font refuser `unverified-input`. Aucune reprise rapide réelle validée. Voir [rapport et déploiement](2026-10-09-producer-private-resume.md) et son JSON pour les 60 tests isolés, 6 195 tests CI réussis, le démarrage public en 75,5 s et les limites exactes.
