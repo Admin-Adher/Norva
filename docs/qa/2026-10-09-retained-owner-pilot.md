@@ -67,3 +67,9 @@ Les instantanés intermédiaires montrent des fenêtres encore en réception et 
 **Le déploiement du pilote est effectué ; l'acceptation fonctionnelle reste ouverte.** Il faut obtenir un démarrage réel, une reprise transférée dans l'interface publique, puis mesurer la continuité et recueillir l'écoute. Ne pas généraliser sur la seule réussite des canaries et ne pas annoncer Normal ou Conclave réparés. Les anciens essais et leurs limites restent dans le [rapport cumulatif](2026-10-08-sparse-subtitle-resume.md).
 
 Reçus privés/sûrs séparés sous `.codex-artifacts/retained-owner-pilot-20261009/` : manifestes, canaries, déploiements, santé finale, `first-start.safe.json`, `robot-after-minute.safe.json`, `failure-diagnostics.safe.json` et `public-startup-limit.png`. Aucun identifiant client, accès fournisseur ou URL média n'est publié.
+
+## Suite à 10:53 Paris — cache absent et priorité MP4
+
+[PR732 et son rapport](2026-10-09-finite-seek-priority.md) documentent la comparaison ancienne/nouvelle image, le cache HLS vide après redémarrage et échecs à froid, et le défaut d'une continuation MP4 lente qui retarde le saut demandé. La correction bornée au pilote est intégrée et déployée, avec 6 171 tests CI réussis et un canary isolé. Les paramètres, gardes et périmètres restent inchangés.
+
+Le Robot Sauvage atteint la plage de reprise après correction, mais échoue encore avant première image à la limite de 60 s. Aucun gain de fluidité ni acceptation à l'écoute ; les lectures sont arrêtées, les Gateways sains et les traitements restaurés. Le présent état de 10:07 reste historique ; les nouvelles empreintes et la pause de déploiement sont dans le rapport lié.
