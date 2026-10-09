@@ -91,6 +91,27 @@ collect_captures() {
 # Copy while instrumentation is running, before those files disappear.
 (while true; do collect_captures; sleep 5; done) &
 capture_pid=$!
+# ADB's host server can still report `device` after the guest stops answering.
+# Observe guest responsiveness separately, before the emulator watchdog exits.
+# This is a bounded diagnostic for the slow-preparation fixture, not a retry.
+hang_monitor_pid=''
+if [[ "${NORVA_ANDROID_TEST_CLASS:-}" == *SlowVodPreparationInstrumentedTest* ]]; then
+  (
+    for ((sample=0; sample<300; sample++)); do
+      if ! timeout --kill-after=1s 2s adb shell true >/dev/null 2>&1; then
+        qpid="$(pgrep -f '^/.*/emulator/qemu/.*/qemu-system-' | head -n 1 || true)"
+        if [[ -n "$qpid" ]]; then
+          printf 'utc=%s pid=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$qpid" > "$diagnostic_dir/emulator-guest-hang-stack.txt"
+          timeout --kill-after=2s 15s sudo gdb -batch -ex 'set pagination off' \
+            -ex 'thread apply all bt 12' -p "$qpid" >> "$diagnostic_dir/emulator-guest-hang-stack.txt" 2>&1 || true
+        fi
+        break
+      fi
+      sleep 2
+    done
+  ) &
+  hang_monitor_pid=$!
+fi
 # Per-test logcat can stop before the crash that terminates instrumentation.
 adb logcat -b all -v threadtime > "$diagnostic_dir/device-logcat.txt" 2>&1 &
 logcat_pid=$!
@@ -98,6 +119,10 @@ finish_captures() {
   local test_status=$?
   kill "$capture_pid" 2>/dev/null || true
   wait "$capture_pid" 2>/dev/null || true
+  if [[ -n "$hang_monitor_pid" ]]; then
+    kill "$hang_monitor_pid" 2>/dev/null || true
+    wait "$hang_monitor_pid" 2>/dev/null || true
+  fi
   collect_captures
   record_diagnostic process-exit-info adb shell dumpsys activity exit-info "tv.norva.${platform}"
   record_diagnostic host-kernel sudo dmesg --ctime
