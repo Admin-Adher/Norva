@@ -1010,6 +1010,13 @@ function sanitizePlaybackPreferences(value) {
   const result = {};
   for (const key of ["audio", "subtitle"]) {
     const preference = pick(source[key], PLAYBACK_PREFERENCE_FIELDS);
+    const native = isRecord(source[key]) ? source[key] : {};
+    // Native selections are file-local metadata, not provider access data.
+    // Keep the explicit off state and stable identity through history round trips.
+    if (typeof native.stableId === "string" && /^[a-z0-9._:+/-]{1,160}$/i.test(native.stableId)
+      && !native.stableId.includes("://")) preference.stableId = native.stableId;
+    if (["main", "original", "dub", "audio_description", "commentary", "full", "forced", "sdh"].includes(native.role)) preference.role = native.role;
+    if (key === "subtitle" && typeof native.disabled === "boolean") preference.disabled = native.disabled;
     if (Object.keys(preference).length) result[key] = preference;
   }
   return result;

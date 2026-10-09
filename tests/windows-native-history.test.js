@@ -13,3 +13,12 @@ test('native telemetry is sampled for cloud history and final position flushes b
  assert.deepEqual(calls.slice(-2),[['progress',38],['closed','owned']]);
  receive({type:'closed',sessionId:'owned'});assert.equal(calls.filter(c=>c[0]==='progress').length,4);
 });
+test('cloud history preserves bounded native track identity and explicit subtitle off',async()=>{
+ const {sanitizeHistoryData,sanitizeWatchHistory}=await import('../supabase/functions/_shared/cloud-public-view.mjs');
+ const preferences={audio:{stableId:'vlc-v1:1:1630826605:fr',language:'fr',role:'main'},subtitle:{disabled:true}};
+ const data=sanitizeHistoryData({playbackPreferences:preferences});
+ assert.deepEqual(data.playbackPreferences,preferences);
+ assert.deepEqual(sanitizeWatchHistory({data}).data.playbackPreferences,preferences);
+ const bad=sanitizeHistoryData({playbackPreferences:{audio:{stableId:'https://private.example/file',role:'secret',url:'private'},subtitle:{disabled:'true',token:'secret'}}});
+ assert.equal(bad.playbackPreferences,undefined);
+});

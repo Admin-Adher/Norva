@@ -15,12 +15,13 @@ internal sealed partial class PlayerWindow
     string StableId(MediaTrack track) => $"vlc-v1:{track.Id}:{track.Codec}:{Language(track)}";
     void ApplyPreference(string kind, TrackType type, ref bool applied)
     {
-        if (applied || media == null || preferences.ValueKind != JsonValueKind.Object) return;
+        if (applied || media == null || preferences.ValueKind != JsonValueKind.Object
+            || player.State is not (VLCState.Playing or VLCState.Paused)) return;
         if (!preferences.TryGetProperty(kind, out var preference)) { applied = true; return; }
         var tracks = media.Tracks.Where(t => t.TrackType == type).ToArray();
         if (tracks.Length == 0) return;
         if (kind == "subtitle" && preference.TryGetProperty("disabled", out var off) && off.ValueKind == JsonValueKind.True) {
-            player.SetSpu(-1); applied = true; return;
+            applied = player.SetSpu(-1); return;
         }
         var stable = preference.TryGetProperty("stableId", out var id) ? id.GetString() : null;
         var language = preference.TryGetProperty("language", out var lang) ? lang.GetString() : null;
@@ -28,7 +29,8 @@ internal sealed partial class PlayerWindow
         if (matches.Length != 1 && !string.IsNullOrEmpty(language)) matches = tracks.Where(t => Language(t) == language).ToArray();
         // Ambiguous/missing preferences preserve the file's default track.
         if (matches.Length == 1) {
-            if (type == TrackType.Audio) player.SetAudioTrack(matches[0].Id); else player.SetSpu(matches[0].Id);
+            applied = type == TrackType.Audio ? player.SetAudioTrack(matches[0].Id) : player.SetSpu(matches[0].Id);
+            return;
         }
         applied = true;
     }
