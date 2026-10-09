@@ -1,0 +1,1670 @@
+{
+  "date": "2026-10-09",
+  "timeZone": "Europe/Paris",
+  "engineVersion": 47,
+  "syntheticCases": [
+    {
+      "copy": "long",
+      "route": "NorvaEngine",
+      "firstFrameMs": 566.8999999046328,
+      "events": [
+        {
+          "event": "waiting",
+          "ms": 539,
+          "time": 0
+        },
+        {
+          "event": "playing",
+          "ms": 565,
+          "time": 0.000488
+        },
+        {
+          "event": "requested-seek",
+          "ms": 12692,
+          "time": 12.087093,
+          "target": 90,
+          "buffer": [
+            [
+              0,
+              52.005
+            ]
+          ]
+        },
+        {
+          "event": "seeking",
+          "ms": 12697,
+          "time": 90
+        },
+        {
+          "event": "waiting",
+          "ms": 12698,
+          "time": 90
+        },
+        {
+          "event": "seeked",
+          "ms": 13325,
+          "time": 90.001889
+        },
+        {
+          "event": "playing",
+          "ms": 13325,
+          "time": 90.001908
+        },
+        {
+          "event": "operator-stop",
+          "ms": 84589,
+          "time": 161.223844
+        }
+      ],
+      "gaps": [
+        {
+          "ms": 13318,
+          "gapMs": 624.2000000000007,
+          "mediaFrom": 12.088,
+          "mediaTo": 90,
+          "sinceSeek": 626.499999904634,
+          "hidden": false
+        }
+      ],
+      "errors": [],
+      "finalTime": 161.223844,
+      "finalDuration": 179.999,
+      "subtitles": [
+        {
+          "index": 2,
+          "codec": "subrip",
+          "text": true,
+          "cues": [
+            {
+              "start": 89,
+              "end": 95,
+              "text": "Norva traversant"
+            },
+            {
+              "start": 120,
+              "end": 125,
+              "text": "Norva futur"
+            },
+            {
+              "start": 170,
+              "end": 178,
+              "text": "Norva fin"
+            }
+          ]
+        }
+      ],
+      "timings": {
+        "startupDeadlineMs": 15000,
+        "initialWindowKB": 512,
+        "startupWindowMaxKB": 1024,
+        "fetchWindows": [
+          {
+            "start": 524288,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 10,
+            "outcome": "ok"
+          },
+          {
+            "start": 1572864,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 14,
+            "outcome": "ok"
+          },
+          {
+            "start": 5767168,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 15,
+            "outcome": "ok"
+          },
+          {
+            "start": 9961472,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 11,
+            "outcome": "ok"
+          },
+          {
+            "start": 0,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 12,
+            "outcome": "ok"
+          },
+          {
+            "start": 44162898,
+            "requestedBytes": 2022,
+            "bytes": 2022,
+            "ms": 3,
+            "outcome": "ok"
+          },
+          {
+            "start": 21573460,
+            "requestedBytes": 2097152,
+            "bytes": 2097152,
+            "ms": 20,
+            "outcome": "ok"
+          },
+          {
+            "start": 23670612,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 19,
+            "outcome": "ok"
+          },
+          {
+            "start": 27864916,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 12,
+            "outcome": "ok"
+          },
+          {
+            "start": 32059220,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 14,
+            "outcome": "ok"
+          },
+          {
+            "start": 36253524,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 12,
+            "outcome": "ok"
+          },
+          {
+            "start": 40447828,
+            "requestedBytes": 3717092,
+            "bytes": 3717092,
+            "ms": 13,
+            "outcome": "ok"
+          }
+        ],
+        "fetchAttempts": 13,
+        "startupFetchWindows": [
+          {
+            "start": 0,
+            "requestedBytes": 524288,
+            "bytes": 524288,
+            "ms": 10,
+            "outcome": "ok"
+          },
+          {
+            "start": 524288,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 10,
+            "outcome": "ok"
+          }
+        ],
+        "wasmMs": 38,
+        "probeMs": 0,
+        "openInputMs": 31,
+        "detectMimeMs": 2,
+        "mediaSourceMs": 2,
+        "encoderMs": 2,
+        "firstAppendMs": 80,
+        "muxerMs": 9,
+        "seekMs": 0,
+        "loadTotalMs": 84,
+        "fetches": 1,
+        "fetchMB": 0.5,
+        "fetchMs": 10,
+        "audio": "aac",
+        "video": "h264",
+        "engineVersion": 47,
+        "firstUsableAppendMs": 538,
+        "firstMediaAppendMs": 538,
+        "firstMediaAppendFetches": 2,
+        "firstMediaAppendSuccessfulFetches": 2,
+        "firstMediaAppendFetchKB": 1536
+      },
+      "seekTimings": {
+        "warm": false,
+        "setupMs": 26,
+        "fetches": 0,
+        "fetchKB": 0
+      },
+      "activeSubtitleSamples": [
+        {
+          "ms": 2640,
+          "time": 2.035631,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 2,
+              "end": 6,
+              "text": "Norva debut"
+            }
+          ],
+          "buffer": [
+            [
+              0,
+              32.005
+            ]
+          ]
+        },
+        {
+          "ms": 3640,
+          "time": 3.035462,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 2,
+              "end": 6,
+              "text": "Norva debut"
+            }
+          ],
+          "buffer": [
+            [
+              0,
+              44.005
+            ]
+          ]
+        },
+        {
+          "ms": 4641,
+          "time": 4.036074,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 2,
+              "end": 6,
+              "text": "Norva debut"
+            }
+          ],
+          "buffer": [
+            [
+              0,
+              52.005
+            ]
+          ]
+        },
+        {
+          "ms": 5639,
+          "time": 5.034117,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 2,
+              "end": 6,
+              "text": "Norva debut"
+            }
+          ],
+          "buffer": [
+            [
+              0,
+              52.005
+            ]
+          ]
+        },
+        {
+          "ms": 13640,
+          "time": 90.276672,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 89,
+              "end": 95,
+              "text": "Norva traversant"
+            }
+          ],
+          "buffer": [
+            [
+              88,
+              96
+            ]
+          ]
+        },
+        {
+          "ms": 14640,
+          "time": 91.275668,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 89,
+              "end": 95,
+              "text": "Norva traversant"
+            }
+          ],
+          "buffer": [
+            [
+              88,
+              108
+            ]
+          ]
+        },
+        {
+          "ms": 15639,
+          "time": 92.275915,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 89,
+              "end": 95,
+              "text": "Norva traversant"
+            }
+          ],
+          "buffer": [
+            [
+              88,
+              124
+            ]
+          ]
+        },
+        {
+          "ms": 16641,
+          "time": 93.278147,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 89,
+              "end": 95,
+              "text": "Norva traversant"
+            }
+          ],
+          "buffer": [
+            [
+              88,
+              138
+            ]
+          ]
+        },
+        {
+          "ms": 17640,
+          "time": 94.275108,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 89,
+              "end": 95,
+              "text": "Norva traversant"
+            }
+          ],
+          "buffer": [
+            [
+              88,
+              144
+            ]
+          ]
+        },
+        {
+          "ms": 43639,
+          "time": 120.276065,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 120,
+              "end": 125,
+              "text": "Norva futur"
+            }
+          ],
+          "buffer": [
+            [
+              88,
+              144
+            ]
+          ]
+        },
+        {
+          "ms": 44641,
+          "time": 121.277134,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 120,
+              "end": 125,
+              "text": "Norva futur"
+            }
+          ],
+          "buffer": [
+            [
+              88,
+              144
+            ]
+          ]
+        },
+        {
+          "ms": 45640,
+          "time": 122.27518,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 120,
+              "end": 125,
+              "text": "Norva futur"
+            }
+          ],
+          "buffer": [
+            [
+              88,
+              144
+            ]
+          ]
+        },
+        {
+          "ms": 46640,
+          "time": 123.276998,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 120,
+              "end": 125,
+              "text": "Norva futur"
+            }
+          ],
+          "buffer": [
+            [
+              88,
+              144
+            ]
+          ]
+        },
+        {
+          "ms": 47639,
+          "time": 124.275528,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 120,
+              "end": 125,
+              "text": "Norva futur"
+            }
+          ],
+          "buffer": [
+            [
+              88,
+              146
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "copy": "long",
+      "route": "NorvaEngine",
+      "firstFrameMs": 752.3000000000029,
+      "events": [
+        {
+          "event": "seeking",
+          "ms": 535,
+          "time": 170
+        },
+        {
+          "event": "waiting",
+          "ms": 539,
+          "time": 170
+        },
+        {
+          "event": "seeked",
+          "ms": 751,
+          "time": 170.000436
+        },
+        {
+          "event": "playing",
+          "ms": 751,
+          "time": 170.000522
+        },
+        {
+          "event": "ended",
+          "ms": 10832,
+          "time": 180.009375
+        },
+        {
+          "event": "operator-stop",
+          "ms": 34844,
+          "time": 180.009375
+        }
+      ],
+      "gaps": [],
+      "errors": [],
+      "finalTime": 180.009375,
+      "finalDuration": 180.009375,
+      "subtitles": [
+        {
+          "index": 2,
+          "codec": "subrip",
+          "text": true,
+          "cues": [
+            {
+              "start": 170,
+              "end": 178,
+              "text": "Norva fin"
+            }
+          ]
+        }
+      ],
+      "timings": {
+        "startupDeadlineMs": 15000,
+        "initialWindowKB": 512,
+        "startupWindowMaxKB": 1024,
+        "fetchWindows": [
+          {
+            "start": 0,
+            "requestedBytes": 524288,
+            "bytes": 524288,
+            "ms": 17,
+            "outcome": "ok"
+          },
+          {
+            "start": 44162898,
+            "requestedBytes": 2022,
+            "bytes": 2022,
+            "ms": 4,
+            "outcome": "ok"
+          },
+          {
+            "start": 41681463,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 6,
+            "outcome": "ok"
+          },
+          {
+            "start": 42730039,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 5,
+            "outcome": "ok"
+          },
+          {
+            "start": 43778615,
+            "requestedBytes": 386305,
+            "bytes": 386305,
+            "ms": 5,
+            "outcome": "ok"
+          }
+        ],
+        "fetchAttempts": 5,
+        "startupFetchWindows": [
+          {
+            "start": 0,
+            "requestedBytes": 524288,
+            "bytes": 524288,
+            "ms": 17,
+            "outcome": "ok"
+          },
+          {
+            "start": 44162898,
+            "requestedBytes": 2022,
+            "bytes": 2022,
+            "ms": 4,
+            "outcome": "ok"
+          },
+          {
+            "start": 41681463,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 6,
+            "outcome": "ok"
+          },
+          {
+            "start": 42730039,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 5,
+            "outcome": "ok"
+          }
+        ],
+        "wasmMs": 42,
+        "probeMs": 0,
+        "openInputMs": 25,
+        "detectMimeMs": 1,
+        "mediaSourceMs": 2,
+        "encoderMs": 2,
+        "firstAppendMs": 76,
+        "muxerMs": 5,
+        "seekMs": 6,
+        "loadTotalMs": 83,
+        "fetches": 2,
+        "fetchMB": 0.5,
+        "fetchMs": 20,
+        "audio": "aac",
+        "video": "h264",
+        "engineVersion": 47,
+        "firstUsableAppendMs": 539,
+        "firstMediaAppendMs": 539,
+        "firstMediaAppendFetches": 4,
+        "firstMediaAppendSuccessfulFetches": 4,
+        "firstMediaAppendFetchKB": 2562
+      },
+      "seekTimings": null,
+      "activeSubtitleSamples": [
+        {
+          "ms": 983,
+          "time": 170.191639,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 170,
+              "end": 178,
+              "text": "Norva fin"
+            }
+          ],
+          "buffer": [
+            [
+              170,
+              180.009375
+            ]
+          ]
+        },
+        {
+          "ms": 1984,
+          "time": 171.19247,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 170,
+              "end": 178,
+              "text": "Norva fin"
+            }
+          ],
+          "buffer": [
+            [
+              170,
+              180.009375
+            ]
+          ]
+        },
+        {
+          "ms": 2983,
+          "time": 172.19209,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 170,
+              "end": 178,
+              "text": "Norva fin"
+            }
+          ],
+          "buffer": [
+            [
+              170,
+              180.009375
+            ]
+          ]
+        },
+        {
+          "ms": 3983,
+          "time": 173.191671,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 170,
+              "end": 178,
+              "text": "Norva fin"
+            }
+          ],
+          "buffer": [
+            [
+              170,
+              180.009375
+            ]
+          ]
+        },
+        {
+          "ms": 4983,
+          "time": 174.191546,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 170,
+              "end": 178,
+              "text": "Norva fin"
+            }
+          ],
+          "buffer": [
+            [
+              170,
+              180.009375
+            ]
+          ]
+        },
+        {
+          "ms": 5983,
+          "time": 175.192011,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 170,
+              "end": 178,
+              "text": "Norva fin"
+            }
+          ],
+          "buffer": [
+            [
+              170,
+              180.009375
+            ]
+          ]
+        },
+        {
+          "ms": 6982,
+          "time": 176.190951,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 170,
+              "end": 178,
+              "text": "Norva fin"
+            }
+          ],
+          "buffer": [
+            [
+              170,
+              180.009375
+            ]
+          ]
+        },
+        {
+          "ms": 7982,
+          "time": 177.191099,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 170,
+              "end": 178,
+              "text": "Norva fin"
+            }
+          ],
+          "buffer": [
+            [
+              170,
+              180.009375
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "copy": "long",
+      "route": "NorvaEngine-delayed-baseline",
+      "firstFrameMs": 5912.499999952317,
+      "events": [
+        {
+          "event": "waiting",
+          "ms": 5741,
+          "time": 0
+        },
+        {
+          "event": "playing",
+          "ms": 5910,
+          "time": 0.000744
+        },
+        {
+          "event": "waiting",
+          "ms": 7911,
+          "time": 1.960222
+        },
+        {
+          "event": "playing",
+          "ms": 8644,
+          "time": 2.006342
+        },
+        {
+          "event": "operator-stop",
+          "ms": 21659,
+          "time": 14.980399
+        }
+      ],
+      "gaps": [
+        {
+          "ms": 8676,
+          "gapMs": 769.5999999999985,
+          "mediaFrom": 1.963,
+          "mediaTo": 2.005,
+          "sinceSeek": 12668.3,
+          "hidden": false
+        }
+      ],
+      "errors": [],
+      "finalTime": 14.980399,
+      "finalDuration": 180.021,
+      "subtitles": [
+        {
+          "index": 2,
+          "codec": "subrip",
+          "text": true,
+          "cues": [
+            {
+              "start": 2,
+              "end": 6,
+              "text": "Norva debut"
+            },
+            {
+              "start": 22,
+              "end": 25,
+              "text": "Norva apres saut"
+            }
+          ]
+        }
+      ],
+      "timings": {
+        "startupDeadlineMs": 15000,
+        "initialWindowKB": 512,
+        "startupWindowMaxKB": 1024,
+        "fetchWindows": [
+          {
+            "start": 0,
+            "requestedBytes": 524288,
+            "bytes": 524288,
+            "ms": 2823,
+            "outcome": "ok"
+          },
+          {
+            "start": 524288,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 2814,
+            "outcome": "ok"
+          },
+          {
+            "start": 1572864,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 2870,
+            "outcome": "ok"
+          },
+          {
+            "start": 0,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 3171,
+            "outcome": "ok"
+          },
+          {
+            "start": 5767168,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 5264,
+            "outcome": "ok"
+          },
+          {
+            "start": 44185316,
+            "requestedBytes": 2023,
+            "bytes": 2023,
+            "ms": 5611,
+            "outcome": "ok"
+          },
+          {
+            "start": 9961472,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 5290,
+            "outcome": "ok"
+          },
+          {
+            "start": 14155776,
+            "requestedBytes": 4194304,
+            "bytes": 0,
+            "ms": 1480,
+            "outcome": "network_error"
+          }
+        ],
+        "fetchAttempts": 8,
+        "startupFetchWindows": [
+          {
+            "start": 0,
+            "requestedBytes": 524288,
+            "bytes": 524288,
+            "ms": 2823,
+            "outcome": "ok"
+          },
+          {
+            "start": 524288,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 2814,
+            "outcome": "ok"
+          }
+        ],
+        "wasmMs": 49,
+        "probeMs": 2774,
+        "openInputMs": 26,
+        "detectMimeMs": 1,
+        "mediaSourceMs": 3,
+        "encoderMs": 0,
+        "firstAppendMs": 2857,
+        "muxerMs": 8,
+        "seekMs": 0,
+        "loadTotalMs": 2861,
+        "fetches": 1,
+        "fetchMB": 0.5,
+        "fetchMs": 2823,
+        "audio": "copy",
+        "video": "h264",
+        "engineVersion": 47,
+        "firstUsableAppendMs": 5740,
+        "firstMediaAppendMs": 5740,
+        "firstMediaAppendFetches": 2,
+        "firstMediaAppendSuccessfulFetches": 2,
+        "firstMediaAppendFetchKB": 1536
+      },
+      "seekTimings": null,
+      "activeSubtitleSamples": [
+        {
+          "ms": 9054,
+          "time": 2.375935,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 2,
+              "end": 6,
+              "text": "Norva debut"
+            }
+          ],
+          "buffer": [
+            [
+              0,
+              18.005
+            ]
+          ]
+        },
+        {
+          "ms": 10054,
+          "time": 3.376366,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 2,
+              "end": 6,
+              "text": "Norva debut"
+            }
+          ],
+          "buffer": [
+            [
+              0,
+              18.005
+            ]
+          ]
+        },
+        {
+          "ms": 11054,
+          "time": 4.376401,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 2,
+              "end": 6,
+              "text": "Norva debut"
+            }
+          ],
+          "buffer": [
+            [
+              0,
+              18.005
+            ]
+          ]
+        },
+        {
+          "ms": 12055,
+          "time": 5.376434,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 2,
+              "end": 6,
+              "text": "Norva debut"
+            }
+          ],
+          "buffer": [
+            [
+              0,
+              18.005
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "copy": "long",
+      "route": "NorvaEngine-delayed-flush",
+      "firstFrameMs": 5726.500000047684,
+      "events": [
+        {
+          "event": "waiting",
+          "ms": 5711,
+          "time": 0
+        },
+        {
+          "event": "playing",
+          "ms": 5726,
+          "time": 0.000569
+        },
+        {
+          "event": "operator-stop",
+          "ms": 28243,
+          "time": 22.476522
+        }
+      ],
+      "gaps": [],
+      "errors": [],
+      "finalTime": 22.476522,
+      "finalDuration": 180.021,
+      "subtitles": [
+        {
+          "index": 2,
+          "codec": "subrip",
+          "text": true,
+          "cues": [
+            {
+              "start": 2,
+              "end": 6,
+              "text": "Norva debut"
+            },
+            {
+              "start": 22,
+              "end": 25,
+              "text": "Norva apres saut"
+            }
+          ]
+        }
+      ],
+      "timings": {
+        "startupDeadlineMs": 15000,
+        "initialWindowKB": 512,
+        "startupWindowMaxKB": 1024,
+        "fetchWindows": [
+          {
+            "start": 0,
+            "requestedBytes": 524288,
+            "bytes": 524288,
+            "ms": 2825,
+            "outcome": "ok"
+          },
+          {
+            "start": 524288,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 2826,
+            "outcome": "ok"
+          },
+          {
+            "start": 1572864,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 2833,
+            "outcome": "ok"
+          },
+          {
+            "start": 0,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 3209,
+            "outcome": "ok"
+          },
+          {
+            "start": 5767168,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 5295,
+            "outcome": "ok"
+          },
+          {
+            "start": 44185316,
+            "requestedBytes": 2023,
+            "bytes": 2023,
+            "ms": 5594,
+            "outcome": "ok"
+          },
+          {
+            "start": 9961472,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 5306,
+            "outcome": "ok"
+          },
+          {
+            "start": 14155776,
+            "requestedBytes": 4194304,
+            "bytes": 4194304,
+            "ms": 2826,
+            "outcome": "ok"
+          }
+        ],
+        "fetchAttempts": 8,
+        "startupFetchWindows": [
+          {
+            "start": 0,
+            "requestedBytes": 524288,
+            "bytes": 524288,
+            "ms": 2825,
+            "outcome": "ok"
+          },
+          {
+            "start": 524288,
+            "requestedBytes": 1048576,
+            "bytes": 1048576,
+            "ms": 2826,
+            "outcome": "ok"
+          }
+        ],
+        "wasmMs": 36,
+        "probeMs": 2790,
+        "openInputMs": 27,
+        "detectMimeMs": 1,
+        "mediaSourceMs": 1,
+        "encoderMs": 0,
+        "firstAppendMs": 2860,
+        "muxerMs": 6,
+        "seekMs": 0,
+        "loadTotalMs": 2862,
+        "fetches": 1,
+        "fetchMB": 0.5,
+        "fetchMs": 2825,
+        "audio": "copy",
+        "video": "h264",
+        "engineVersion": 47,
+        "firstUsableAppendMs": 5708,
+        "firstMediaAppendMs": 5708,
+        "firstMediaAppendFetches": 2,
+        "firstMediaAppendSuccessfulFetches": 2,
+        "firstMediaAppendFetchKB": 1536
+      },
+      "seekTimings": null,
+      "activeSubtitleSamples": [
+        {
+          "ms": 8678,
+          "time": 2.910095,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 2,
+              "end": 6,
+              "text": "Norva debut"
+            }
+          ],
+          "buffer": [
+            [
+              0,
+              8.005
+            ]
+          ]
+        },
+        {
+          "ms": 9678,
+          "time": 3.912511,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 2,
+              "end": 6,
+              "text": "Norva debut"
+            }
+          ],
+          "buffer": [
+            [
+              0,
+              20.005
+            ]
+          ]
+        },
+        {
+          "ms": 10678,
+          "time": 4.911794,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 2,
+              "end": 6,
+              "text": "Norva debut"
+            }
+          ],
+          "buffer": [
+            [
+              0,
+              20.005
+            ]
+          ]
+        },
+        {
+          "ms": 11678,
+          "time": 5.91082,
+          "paused": false,
+          "ready": 4,
+          "hidden": false,
+          "activeSubtitles": [
+            {
+              "start": 2,
+              "end": 6,
+              "text": "Norva debut"
+            }
+          ],
+          "buffer": [
+            [
+              0,
+              20.005
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "copy": 4,
+      "route": "engine",
+      "firstFrameMs": null,
+      "events": [
+        {
+          "name": "error",
+          "ms": 944.6000001430511,
+          "time": 0,
+          "error": 4
+        },
+        {
+          "name": "error",
+          "ms": 35417.799999952316,
+          "time": 0,
+          "error": 4
+        }
+      ],
+      "gaps": [],
+      "errors": [],
+      "failure": {
+        "info": {
+          "stage": "startup:global",
+          "message": "ENGINE_STARTUP_TIMEOUT:global:15000"
+        },
+        "timings": {
+          "startupDeadlineMs": 15000,
+          "initialWindowKB": 512,
+          "startupWindowMaxKB": 1024,
+          "fetchWindows": [
+            {
+              "start": 0,
+              "requestedBytes": 524288,
+              "bytes": 524288,
+              "ms": 2973,
+              "outcome": "ok"
+            },
+            {
+              "start": 3093965715,
+              "requestedBytes": 1304,
+              "bytes": 1304,
+              "ms": 660,
+              "outcome": "ok"
+            },
+            {
+              "start": 524288,
+              "requestedBytes": 1048576,
+              "bytes": 1048576,
+              "ms": 2627,
+              "outcome": "ok"
+            },
+            {
+              "start": 1572864,
+              "requestedBytes": 1048576,
+              "bytes": 0,
+              "ms": 8700,
+              "outcome": "network_error"
+            }
+          ],
+          "fetchAttempts": 4,
+          "startupFetchWindows": [
+            {
+              "start": 0,
+              "requestedBytes": 524288,
+              "bytes": 524288,
+              "ms": 2973,
+              "outcome": "ok"
+            },
+            {
+              "start": 3093965715,
+              "requestedBytes": 1304,
+              "bytes": 1304,
+              "ms": 660,
+              "outcome": "ok"
+            },
+            {
+              "start": 524288,
+              "requestedBytes": 1048576,
+              "bytes": 1048576,
+              "ms": 2627,
+              "outcome": "ok"
+            },
+            {
+              "start": 1572864,
+              "requestedBytes": 1048576,
+              "bytes": 0,
+              "ms": 8700,
+              "outcome": "network_error"
+            }
+          ],
+          "wasmMs": 39,
+          "probeMs": 2934
+        },
+        "firstMediaBytes": 0,
+        "sourceBuffer": null,
+        "mime": null
+      }
+    },
+    {
+      "copy": 0,
+      "route": "engine",
+      "firstFrameMs": null,
+      "events": [
+        {
+          "name": "error",
+          "ms": 937.5,
+          "time": 0,
+          "error": 4
+        },
+        {
+          "name": "error",
+          "ms": 35794.59999990463,
+          "time": 0,
+          "error": 4
+        }
+      ],
+      "gaps": [],
+      "errors": [],
+      "failure": {
+        "info": {
+          "stage": "startup:global",
+          "message": "ENGINE_STARTUP_TIMEOUT:global:15000"
+        },
+        "timings": {
+          "startupDeadlineMs": 15000,
+          "initialWindowKB": 512,
+          "startupWindowMaxKB": 1024,
+          "fetchWindows": [
+            {
+              "start": 0,
+              "requestedBytes": 524288,
+              "bytes": 524288,
+              "ms": 9023,
+              "outcome": "ok"
+            },
+            {
+              "start": 1253875749,
+              "requestedBytes": 7412,
+              "bytes": 7412,
+              "ms": 1851,
+              "outcome": "ok"
+            },
+            {
+              "start": 524288,
+              "requestedBytes": 1048576,
+              "bytes": 0,
+              "ms": 4084,
+              "outcome": "network_error"
+            }
+          ],
+          "fetchAttempts": 3,
+          "startupFetchWindows": [
+            {
+              "start": 0,
+              "requestedBytes": 524288,
+              "bytes": 524288,
+              "ms": 9023,
+              "outcome": "ok"
+            },
+            {
+              "start": 1253875749,
+              "requestedBytes": 7412,
+              "bytes": 7412,
+              "ms": 1851,
+              "outcome": "ok"
+            },
+            {
+              "start": 524288,
+              "requestedBytes": 1048576,
+              "bytes": 0,
+              "ms": 4084,
+              "outcome": "network_error"
+            }
+          ],
+          "wasmMs": 34,
+          "probeMs": 8989,
+          "openInputMs": 1878,
+          "detectMimeMs": 2,
+          "mediaSourceMs": 1,
+          "encoderMs": 0,
+          "firstAppendMs": 10906,
+          "muxerMs": 6,
+          "seekMs": 0,
+          "loadTotalMs": 10910,
+          "fetches": 2,
+          "fetchMB": 0.5,
+          "fetchMs": 10875,
+          "audio": "copy",
+          "video": "h264",
+          "engineVersion": 47
+        },
+        "firstMediaBytes": 0,
+        "sourceBuffer": {
+          "updating": false,
+          "mode": "segments",
+          "timestampOffset": 0,
+          "buffered": []
+        },
+        "mime": "video/mp4; codecs=\"avc1.640029,mp4a.40.2\""
+      }
+    }
+  ],
+  "targetedTests": 85,
+  "realProviderSessions": 2,
+  "realSeeksPerformed": false,
+  "realAudioListeningAccepted": false,
+  "healthAfterRealTests": {
+    "atUtc": "2026-10-09T20:12:39.401014+00:00",
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "ok": true,
+        "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815",
+        "activeSessions": 0,
+        "rawPumpCount": 0
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "ok": true,
+        "image": "sha256:e7520bec0c63cdb224617f6991b7484f9b28079a2c24e4c76a9dcbf19f92b815",
+        "activeSessions": 0,
+        "rawPumpCount": 0
+      }
+    ],
+    "sessions": [
+      {
+        "case": "0-engine-baseline-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:11:36.559169+00:00",
+            "expiresAt": "2026-10-09T20:12:13.416+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      },
+      {
+        "case": "4-engine-baseline-0",
+        "state": [
+          {
+            "mode": "relay",
+            "status": "expired",
+            "createdAt": "2026-10-09T20:08:51.322205+00:00",
+            "expiresAt": "2026-10-09T20:09:26.565+00:00"
+          }
+        ],
+        "startupMs": null,
+        "startupPolicy": null
+      }
+    ],
+    "ownerLiveClaims": [
+      {
+        "count": 0
+      }
+    ]
+  },
+  "productionRoutingChanged": false,
+  "experimentalFlushPacketsDeployed": false,
+  "limitations": [
+    "MKV crossing-cue recovery requires usable Cues with CueDuration; absent duration is unknown.",
+    "No universal guarantee of subtitle completeness for unindexed files.",
+    "No demonstrated real startup improvement on Conclave or Abduct.",
+    "Synthetic browser audio was muted; no listening acceptance claimed.",
+    "Native Android VOD uses its native player; this change does not modify its UI or playback.",
+    "The rejected byte-seek experiment recovered the cue but resumed demuxing too early; the final code uses backward timestamp seek instead."
+  ],
+  "additionalAACCopyCheck": {
+    "firstFrameMs": 391.99999990463255,
+    "events": [
+      {
+        "event": "seeking",
+        "ms": 121,
+        "time": 23
+      },
+      {
+        "event": "waiting",
+        "ms": 157,
+        "time": 23
+      },
+      {
+        "event": "seeked",
+        "ms": 392,
+        "time": 23.00038
+      },
+      {
+        "event": "playing",
+        "ms": 392,
+        "time": 23.00041
+      },
+      {
+        "event": "ended",
+        "ms": 37473,
+        "time": 60.031
+      },
+      {
+        "event": "operator-stop",
+        "ms": 69207,
+        "time": 60.031
+      }
+    ],
+    "errors": [],
+    "gaps": [],
+    "finalTime": 60.031,
+    "finalDuration": 60.031,
+    "subtitles": [
+      {
+        "index": 3,
+        "codec": "subrip",
+        "text": true,
+        "cues": [
+          {
+            "start": 22.021,
+            "end": 25.021,
+            "text": "After seek"
+          }
+        ]
+      }
+    ],
+    "activeSubtitleSamples": [
+      {
+        "ms": 578,
+        "time": 23.145972,
+        "paused": false,
+        "ready": 4,
+        "hidden": false,
+        "activeSubtitles": [
+          {
+            "start": 22.021,
+            "end": 25.021,
+            "text": "After seek"
+          }
+        ],
+        "buffer": [
+          [
+            22.021,
+            40.021
+          ]
+        ]
+      },
+      {
+        "ms": 1578,
+        "time": 24.144555,
+        "paused": false,
+        "ready": 4,
+        "hidden": false,
+        "activeSubtitles": [
+          {
+            "start": 22.021,
+            "end": 25.021,
+            "text": "After seek"
+          }
+        ],
+        "buffer": [
+          [
+            22.021,
+            60.031
+          ]
+        ]
+      }
+    ]
+  },
+  "initialCIFailure": {
+    "run": 37985687127,
+    "cause": "Stale generated i18n/asset-manifest.json; corrected by normal i18n build. SQL tests passed 40/40 before this failure."
+  }
+}

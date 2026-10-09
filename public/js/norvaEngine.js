@@ -83,6 +83,7 @@
     Segment: 0x18538067, SeekHead: 0x114D9B74, Seek: 0x4DBB, SeekID: 0x53AB, SeekPosition: 0x53AC,
     Info: 0x1549A966, TimestampScale: 0x2AD7B1, Cues: 0x1C53BB6B,
     CuePoint: 0xBB, CueTime: 0xB3, CueTrackPositions: 0xB7, CueClusterPosition: 0xF1,
+    CueDuration: 0xB2,
   };
   // Read an EBML element ID (keeps the length-descriptor bits, matching MKV.* ids).
   function ebmlId(b, p) {
@@ -279,7 +280,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 46;
+  const ENGINE_VERSION = 47;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -415,7 +416,6 @@
       // running record of the exact bytes/boxes/codec decisions that fed MSE, so a
       // rejected append can be explained instead of just observed. Pure accounting,
       // no effect on playback. Surfaced via engineSnapshot().
-      this._dropWrites = false;       // when true, muxer onwrite bytes are discarded (trailer)
       this._diag = {
         mime: null, videoCodecString: null, videoCands: null, audioTag: null,
         vName: null, aName: null, copyAudio: null, durationSec: null,
@@ -1067,6 +1067,15 @@
     // scrub target to the exact cluster offset. Fully defensive: any failure
     // leaves _cueIndex null and seeking falls back to its normal (cold) path.
     async _buildCueIndex() {
+      if (this._cueIndex) return;
+      if (this._cueIndexPending) return this._cueIndexPending;
+      const pending = this._readCueIndex();
+      this._cueIndexPending = pending;
+      try { await pending; }
+      finally { if (this._cueIndexPending === pending) this._cueIndexPending = null; }
+    }
+
+    async _readCueIndex() {
       try {
         if (!this.size || this._cueIndex) return;
         const head = await this._readRange(0, Math.min(RA_SEEK_WINDOW, this.size));
@@ -1156,29 +1165,43 @@
     _parseCuePoints(b, segStart, scaleNs) {
       const out = []; let p = 0;
       while (p < b.length) {
-        const idr = ebmlId(b, p); if (!idr) break;
-        const szr = ebmlSize(b, p + idr.len); if (!szr) break;
-        const ds = p + idr.len + szr.len, de = Math.min(ds + szr.val, b.length);
+        const idr = ebmlId(b, p); if (!idr) return [];
+        const szr = ebmlSize(b, p + idr.len); if (!szr || szr.unknown) return [];
+        const ds = p + idr.len + szr.len, de = ds + szr.val;
+        if (!Number.isSafeInteger(de) || de > b.length) return [];
         if (idr.id === MKV.CuePoint) {
-          let time = -1, clusterPos = -1, q = ds;
+          let time = -1, q = ds;
+          const positions = [];
           while (q < de) {
-            const i2 = ebmlId(b, q); if (!i2) break;
-            const s2 = ebmlSize(b, q + i2.len); if (!s2) break;
-            const d2 = q + i2.len + s2.len, e2 = Math.min(d2 + s2.val, de);
+            const i2 = ebmlId(b, q); if (!i2) return [];
+            const s2 = ebmlSize(b, q + i2.len); if (!s2 || s2.unknown) return [];
+            const d2 = q + i2.len + s2.len, e2 = d2 + s2.val;
+            if (!Number.isSafeInteger(e2) || e2 > de) return [];
             if (i2.id === MKV.CueTime) time = ebmlUint(b, d2, s2.val);
             else if (i2.id === MKV.CueTrackPositions) {
-              let r = d2;
+              let r = d2, clusterPos = -1, duration = null;
               while (r < e2) {
-                const i3 = ebmlId(b, r); if (!i3) break;
-                const s3 = ebmlSize(b, r + i3.len); if (!s3) break;
+                const i3 = ebmlId(b, r); if (!i3) return [];
+                const s3 = ebmlSize(b, r + i3.len); if (!s3 || s3.unknown) return [];
                 const d3 = r + i3.len + s3.len;
+                if (!Number.isSafeInteger(d3 + s3.val) || d3 + s3.val > e2) return [];
                 if (i3.id === MKV.CueClusterPosition) clusterPos = ebmlUint(b, d3, s3.val);
+                else if (i3.id === MKV.CueDuration) duration = ebmlUint(b, d3, s3.val);
                 r = d3 + s3.val;
               }
+              if (Number.isSafeInteger(clusterPos) && clusterPos >= 0 &&
+                  Number.isSafeInteger(segStart + clusterPos)) positions.push({ clusterPos, duration });
             }
             q = e2;
           }
-          if (time >= 0 && clusterPos >= 0) out.push({ t: time * scaleNs / 1e9, off: segStart + clusterPos });
+          if (Number.isSafeInteger(time) && time >= 0) {
+            for (const pos of positions) {
+              const entry = { t: time * scaleNs / 1e9, off: segStart + pos.clusterPos };
+              // Missing CueDuration means unknown, never a guessed four-second cue.
+              if (Number.isSafeInteger(pos.duration) && pos.duration > 0) entry.duration = pos.duration * scaleNs / 1e9;
+              out.push(entry);
+            }
+          }
         }
         p = de;
       }
@@ -1614,11 +1637,6 @@
           }
           return;
         }
-        // The MP4 trailer (mfra/mfro, written by av_write_trailer) is file-seeking
-        // metadata, NOT a media segment. Appending it to the SourceBuffer makes
-        // Chromium's parser fail (CHUNK_DEMUXER_ERROR_APPEND_FAILED). It must never
-        // be enqueued — endOfStream() finalises the buffer instead.
-        if (this._dropWrites) { d.trailerBytesDropped = (d.trailerBytesDropped || 0) + chunk.length; return; }
         // Once continuity is lost, every later callback belongs to the invalid
         // mux sequence. Drop it wholesale while the player tears this engine down.
         if (this._fatalSignaled) {
@@ -1724,7 +1742,10 @@
         const vcp = await lib.AVStream_codecpar(muxRet[3][0]);
         await lib.AVCodecParameters_codec_tag_s(vcp, tag);
       }
-      await lib.av_opt_set(this.oc, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', lib.AV_OPT_SEARCH_CHILDREN);
+      // Finalisation must flush the last media fragment. Suppress only the
+      // file-seeking trailer (mfra/tfra/mfro), not the onwrite callbacks which
+      // also carry the final moof/mdat.
+      await lib.av_opt_set(this.oc, 'movflags', 'frag_keyframe+empty_moov+default_base_moof+skip_trailer', lib.AV_OPT_SEARCH_CHILDREN);
       await lib.avformat_write_header(this.oc, 0);
       // Header (ftyp+moov init segment) flushed; subsequent onwrite chunks are media.
       this._diagHeaderPhase = false;
@@ -1751,6 +1772,21 @@
     // batch can contain a partial moof; none of it may reach MediaSource.
     async _writePacketsChecked(inPackets) {
       if (!Array.isArray(inPackets) || !inPackets.length) return true;
+      return this._writeMuxChecked(() => this.lib.ff_write_multi(this.oc, this.pkt, inPackets), inPackets);
+    }
+
+    async _finalizeMuxerChecked() {
+      return this._writeMuxChecked(async () => {
+        const ret = await this.lib.av_write_trailer(this.oc);
+        if (!Number.isInteger(ret) || ret < 0) {
+          throw new Error(`MUX_PACKET_WRITE_FAILED:${Number.isInteger(ret) ? ret : 'exception'}:EOF_FINALIZE_FAILED`);
+        }
+      }, []);
+    }
+
+    // EOF uses the same transaction as packet batches: partial or obsolete
+    // final fragments must never be appended or reported as a clean end.
+    async _writeMuxChecked(write, inPackets) {
       if (this._stopRequested || this.destroyed || this._fatalSignaled) return false;
 
       const generation = this._muxGeneration;
@@ -1759,7 +1795,7 @@
       this._muxWriteStage = stage;
       try {
         try {
-          await this.lib.ff_write_multi(this.oc, this.pkt, inPackets);
+          await write();
         } catch (cause) {
           if (this._muxWriteStage === stage) this._muxWriteStage = null;
           if (this.destroyed || this._stopRequested || this._muxGeneration !== generation ||
@@ -1889,9 +1925,29 @@
       // demuxer clamps to the beginning — the resume reads the wrong region. (epoch is in the
       // video time_base; only add it when seeking that stream; 0 for mp4/mkv → unchanged.)
       const epoch = (s === this.vS) ? (this._ptsEpoch || 0) : 0;
-      const ts = Math.max(0, Math.round(t * tb) + epoch);
+      let sourceTime = t + epoch / tb;
+      let seekFlags = 0;
+      if (this._subCapture && this.hasInbandSubtitles()) {
+        await this._buildCueIndex();
+        if (this.destroyed) return;
+        const off = this._subtitleSeekOffset(sourceTime);
+        if (off !== null) {
+          // A video timestamp seek can skip an indexed subtitle that started
+          // before the target and still belongs on screen. Re-enter its actual
+          // cluster using the SAME demuxer/serial transport. A timestamp seek
+          // also resets Matroska's buffered cluster state; a raw byte seek does
+          // not reliably do that. BACKWARD selects a video keyframe at/before
+          // the indexed block, never the following keyframe past the subtitle.
+          for (const cue of this._cueIndex) {
+            if (cue.off === off) sourceTime = Math.min(sourceTime, cue.t);
+          }
+          seekFlags = lib.AVSEEK_FLAG_BACKWARD || 1;
+          this._diag.subtitleSeekCluster = { target: t, offset: off, sourceTime };
+        }
+      }
+      const ts = Math.max(0, Math.round(sourceTime * tb));
       const [lo, hi] = from64(ts);
-      const ret = await lib.avformat_seek_file_approx(this.fmtCtx, s.index, lo, hi, 0);
+      const ret = await lib.avformat_seek_file_approx(this.fmtCtx, s.index, lo, hi, seekFlags);
       if (typeof ret === 'number' && ret < 0) {
         // Timestamp seek REJECTED — libav bindings return negative AVERROR codes, they
         // don't throw, and this one was historically discarded: on an MKV without usable
@@ -1904,6 +1960,23 @@
         return;
       }
       this.log(`seek demuxer → ${t.toFixed(1)}s (abs ts ${ts}${epoch ? ', epoch ' + epoch : ''})`);
+    }
+
+    // Earliest indexed block known to remain active at the requested source time.
+    // An absent duration is not evidence of subtitle coverage.
+    _subtitleSeekOffset(sourceTime) {
+      if (!Array.isArray(this._cueIndex) || !Number.isFinite(sourceTime)) return null;
+      let earliest = null;
+      for (const cue of this._cueIndex) {
+        if (cue.t > sourceTime) break;
+        if (!(cue.duration > 0) || cue.t + cue.duration <= sourceTime ||
+            !Number.isSafeInteger(cue.off) || cue.off < 0 || cue.off >= this.size) continue;
+        earliest = earliest === null ? cue.off : Math.min(earliest, cue.off);
+      }
+      if (earliest === null) return null;
+      const normal = this._offsetForTime(sourceTime);
+      return Number.isSafeInteger(normal) && normal >= 0 && normal < this.size
+        ? Math.min(normal, earliest) : earliest;
     }
 
     // Byte-offset seek: exact cluster start when the MKV cue index was parsed, else a
@@ -2134,12 +2207,7 @@
         this._releaseVideoDtsProbeAudio(tailAudio, true);
         if (tailAudio.length && !(await this._writePacketsChecked(tailAudio))) return;
       }
-      // Drop the trailer's bytes (mfra/mfro): they are file-seeking metadata, NOT a
-      // valid MSE media segment. Appending them is what produced
-      // CHUNK_DEMUXER_ERROR_APPEND_FAILED on an early/partial read. endOfStream()
-      // below finalises the buffer cleanly without them.
-      this._dropWrites = true;
-      try { await lib.av_write_trailer(this.oc); } finally { this._dropWrites = false; }
+      if (!(await this._finalizeMuxerChecked())) return;
       this.ended = true; this._drain();
       this.log('stream ended (' + this._diag.pumpExitReason + ')');
     }
