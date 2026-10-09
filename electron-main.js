@@ -1,7 +1,9 @@
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, shell, ipcMain } = require('electron');
+const fs = require('fs');
 const http = require('http');
 const net = require('net');
 const path = require('path');
+const { isSameAppOrigin } = require('./desktop/navigation');
 
 const APP_NAME = 'Norva';
 const PORT_START = 3002;
@@ -85,6 +87,10 @@ function isAuthNavigation(targetUrl) {
 }
 
 function createWindow(url, transcoderUrl) {
+    const nativeExecutable = path.join(app.isPackaged ? process.resourcesPath : __dirname,
+        'native-player', 'Norva.NativePlayer.exe');
+    const nativeEnabled = process.platform === 'win32' && process.env.NORVA_DESKTOP_NATIVE_PLAYER !== '0'
+        && fs.existsSync(nativeExecutable);
     const window = new BrowserWindow({
         width: 1280,
         height: 820,
@@ -101,12 +107,19 @@ function createWindow(url, transcoderUrl) {
             // Tells the page where the in-app transcoder lives (residential IP),
             // so cloud-mode playback transcodes locally instead of via the
             // datacenter gateway the provider blocks.
-            additionalArguments: transcoderUrl ? [`--norva-transcoder=${transcoderUrl}`] : []
+            additionalArguments: [
+                ...(transcoderUrl ? [`--norva-transcoder=${transcoderUrl}`] : []),
+                ...(nativeEnabled ? ['--norva-native-player=1',`--norva-native-origin=${new URL(url).origin}`] : [])
+            ]
         }
     });
 
+    if (nativeEnabled) require('./desktop/native-player-ipc').wireNativePlayer({
+        ipcMain, window, executable:nativeExecutable, origin:new URL(url).origin
+    });
+
     window.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
-        if (targetUrl.startsWith(url) || isAuthNavigation(targetUrl)) {
+        if (isSameAppOrigin(targetUrl, url) || isAuthNavigation(targetUrl)) {
             return { action: 'allow' };
         }
 
@@ -115,7 +128,7 @@ function createWindow(url, transcoderUrl) {
     });
 
     window.webContents.on('will-navigate', (event, targetUrl) => {
-        if (targetUrl.startsWith(url) || isAuthNavigation(targetUrl)) {
+        if (isSameAppOrigin(targetUrl, url) || isAuthNavigation(targetUrl)) {
             return;
         }
 
@@ -137,7 +150,7 @@ async function startDesktopApp() {
     // cloud app for full cloud sync. Either way the in-app server runs as the
     // residential transcoder. Override with NORVA_DESKTOP_URL, e.g.
     // https://norva.tv/app.html for the pure cloud experience.
-    const appUrl = process.env.NORVA_DESKTOP_URL || serverUrl;
+    const appUrl = process.env.NORVA_DESKTOP_URL || `${serverUrl}/app`;
 
     // If we load a remote (cloud) origin, let the in-app server accept its
     // cross-origin playback calls so the page can use the local transcoder.

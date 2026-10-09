@@ -51,6 +51,12 @@ app.get('/login.html', (req, res, next) => {
 });
 
 app.use(require('./middleware/withdrawnCatalog'));
+// The catalogue uses /app (also the account sign-in return path). Express's
+// static middleware only resolves app.html; the landing-page fallback below
+// must not handle this application route in the desktop bundle.
+app.get('/app', (req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'public', 'app.html'));
+});
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // FFMPEG Configuration (optional - for transcoding support)

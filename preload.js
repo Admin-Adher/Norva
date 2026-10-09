@@ -8,7 +8,7 @@
 // The transcoder URL is passed by electron-main via webPreferences
 // additionalArguments (['--norva-transcoder=http://127.0.0.1:<port>']).
 
-const { contextBridge } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
 function transcoderFromArgs() {
     const prefix = '--norva-transcoder=';
@@ -19,8 +19,26 @@ function transcoderFromArgs() {
 
 try {
     const transcoder = transcoderFromArgs();
+    const nativeOrigin = process.argv.find(arg => arg.startsWith('--norva-native-origin='))?.slice('--norva-native-origin='.length);
+    const native = process.argv.includes('--norva-native-player=1') && location.origin === nativeOrigin;
     if (transcoder) {
-        contextBridge.exposeInMainWorld('NorvaDesktop', { transcoder });
+        const invoke = (method, value) => ipcRenderer.invoke(`norva:native:${method}`,value);
+        contextBridge.exposeInMainWorld('NorvaDesktop', { transcoder, ...(native ? { nativePlayer: {
+            protocol:1,
+            supportsPlayback: (type, container) => ['movie','series','episode'].includes(type)
+                && ['mkv','mp4','m4v','avi','mov','mpeg','mpg','ts','m2ts','webm'].includes(String(container || '').toLowerCase()),
+            privateMediaCacheProtocol: () => 0,
+            playVideoJson: value => { void invoke('open', value).catch(() => window.dispatchEvent(new CustomEvent('norva:native-launch-failed'))); },
+            stop: () => invoke('stop'),
+            authorize: id => invoke('authorize',id),
+            ackPlaybackSessionClosed: id => invoke('ack',id),
+            pendingPlaybackCloses: () => invoke('pending-closes'),
+            onEvent: callback => {
+                const listener = (_event,value) => callback(value);
+                ipcRenderer.on('norva:native:event',listener);
+                return () => ipcRenderer.removeListener('norva:native:event',listener);
+            }
+        } } : {}) });
     }
 } catch (err) {
     // Never let preload failure block the app; playback just falls back to the

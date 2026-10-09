@@ -25,7 +25,7 @@
 (() => {
     const bootNativeBridge = () => {
         if (window.__norvaStandaloneBooted) return true;
-        const bridge = window.NodeCastNative || window.NorvaTVCloud;
+        const bridge = window.NodeCastNative || window.NorvaTVCloud || window.NorvaDesktop?.nativePlayer;
         if (!bridge) return false;
         window.__norvaStandaloneBooted = true;
 
@@ -442,8 +442,9 @@
         };
         const acknowledgeNativePlaybackClose = (sessionId) => {
             try {
-                const ack = window.NorvaTVCloud?.ackPlaybackSessionClosed;
-                if (typeof ack === 'function') ack.call(window.NorvaTVCloud, sessionId);
+                const ackBridge = window.NorvaTVCloud || window.NorvaDesktop?.nativePlayer;
+                const ack = ackBridge?.ackPlaybackSessionClosed;
+                if (typeof ack === 'function') ack.call(ackBridge, sessionId);
             } catch (_) {
                 // Android keeps the close pending and will replay it. Never turn an
                 // unavailable native bridge into a second expiry request here.
@@ -1200,6 +1201,7 @@
                 } catch (_) { /* art is optional */ }
                 bridge.playVideoJson(JSON.stringify({
                     url: streamUrl,
+                    ...(bridge === window.NorvaDesktop?.nativePlayer ? { uiLanguage:document.documentElement.lang || 'en' } : {}),
                     fallbackUrl: fb,
                     title: title || 'Norva',
                     sourceId: String(meta.sourceId || ''),
@@ -1456,7 +1458,14 @@
         };
 
         if (window.WatchPage) {
+            const originalPlay = WatchPage.prototype.play;
             WatchPage.prototype.play = async function (content, streamUrl, playback) {
+                // The Windows pilot has exact cloud-session authorization and a
+                // finite byte-range transport. Other paths keep their player.
+                if (bridge === window.NorvaDesktop?.nativePlayer && (
+                    window.API?.isCloudMode?.() !== true
+                    || bridge.supportsPlayback?.(content?.type, content?.containerExtension || 'mp4') !== true
+                )) return originalPlay.apply(this, arguments);
                 const initialMeta = contentMeta(content);
                 // Capture this viewer action before any await. Reading the
                 // mutable claim after history/cleanup could adopt a newer tap
@@ -1663,7 +1672,9 @@
         }
 
         if (window.VideoPlayer) {
+            const originalLivePlay = VideoPlayer.prototype.play;
             VideoPlayer.prototype.play = async function (channel, streamUrl, playback) {
+                if (bridge === window.NorvaDesktop?.nativePlayer) return originalLivePlay.apply(this, arguments);
                 const meta = channelMeta(channel);
                 const forwardedIntentClaim = channel?.__norvaNativeIntentClaim || '';
                 const forwardedIntentClaimMeta = channel?.__norvaNativeIntentClaimMeta || null;

@@ -431,7 +431,7 @@ function memoryStorage(seed = {}) {
     };
 }
 
-function loadCloudApi({ native = false, engine = true, createSessionError = null, sessionResponse = null } = {}) {
+function loadCloudApi({ native = false, desktop = false, engine = true, createSessionError = null, sessionResponse = null } = {}) {
     const calls = [];
     const callOptions = [];
     const localStorage = memoryStorage({
@@ -467,6 +467,10 @@ function loadCloudApi({ native = false, engine = true, createSessionError = null
         NorvaCloud,
         ...(engine ? { NorvaEngine: function NorvaEngine() {} } : {}),
         ...(native ? { NodeCastNative: {} } : {}),
+        ...(desktop ? { NorvaDesktop: { transcoder:'http://127.0.0.1:1234',nativePlayer: {
+            protocol:1,privateMediaCacheProtocol:()=>0,
+            supportsPlayback:(type,container)=>['movie','series'].includes(type)&&['mp4','mkv'].includes(container)
+        } } } : {}),
         innerWidth: 1280,
         innerHeight: 720,
         location: {
@@ -505,8 +509,26 @@ function loadCloudApi({ native = false, engine = true, createSessionError = null
     };
     vm.createContext(sandbox);
     vm.runInContext(read('public/js/api.js'), sandbox, { filename: 'api.js' });
-    return { API: window.API, calls, callOptions };
+    return { API: window.API, calls, callOptions, sandbox };
 }
+
+test('Windows finite VOD uses one direct claim without a Gateway or local encoder',async()=>{
+    for(const type of ['movie','series']){
+        const {API,calls}=loadCloudApi({desktop:true});
+        await API.proxy.xtream.getStreamUrl('00000000-0000-4000-8000-000000000001','episode',type,'mkv',{});
+        assert.equal(calls.length,1);assert.equal(calls[0].mode,'direct');
+        assert.notEqual(calls[0].requiresTranscode,true);
+        assert.equal(calls[0].privateMediaCacheProtocol,0);
+        assert.equal(calls[0].mediaCacheReadPolicy,'bypass-once');
+    }
+});
+
+test('Windows pilot preserves the existing local transcoder for Live and unsupported containers',()=>{
+    const {sandbox}=loadCloudApi({desktop:true});
+    assert.equal(vm.runInContext('_localTranscoderBase("live", "ts")',sandbox),'http://127.0.0.1:1234');
+    assert.equal(vm.runInContext('_localTranscoderBase("movie", "m3u8")',sandbox),'http://127.0.0.1:1234');
+    assert.equal(vm.runInContext('_localTranscoderBase("movie", "mkv")',sandbox),'');
+});
 
 test('dense browser VOD without exact codecs uses one full Gateway conversion lane', async () => {
     const { API, calls } = loadCloudApi();
