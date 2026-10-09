@@ -1,7 +1,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),http=require('node:http'),{once}=require('node:events');
 const {createNativeInput}=require('../desktop/native-input');
 const bytes=Buffer.from(Array.from({length:32768},(_,i)=>i%251));
-async function fixture(t,kind='normal'){
+async function fixture(t,kind='normal',options={}){
  let active=0,maximum=0,requests=0,changed=false;
  const server=http.createServer((q,r)=>{
   active++;requests++;maximum=Math.max(maximum,active);let done=false;const end=()=>{if(!done){done=true;active--;}};r.on('close',end);r.on('finish',end);
@@ -16,7 +16,7 @@ async function fixture(t,kind='normal'){
   if(kind==='abort'){r.write(payload.subarray(0,16));setTimeout(()=>r.destroy(),10);return;}
   setTimeout(()=>r.end(payload),5);
  });server.listen(0,'127.0.0.1');await once(server,'listening');
- const input=await createNativeInput(`http://127.0.0.1:${server.address().port}/${kind==='redirect'?'redirect':'file'}`,{windowBytes:1024,timeoutMs:200});
+ const input=await createNativeInput(`http://127.0.0.1:${server.address().port}/${kind==='redirect'?'redirect':'file'}`,{windowBytes:1024,timeoutMs:200,...options});
  t.after(async()=>{await input.stop();server.closeAllConnections();await new Promise(r=>server.close(r));});
  return{input,stats:()=>({active,maximum,requests}),change:()=>{changed=true;}};
 }
@@ -40,6 +40,24 @@ for(const kind of ['ignore','short','abort','hang'])test(`fail closed for ${kind
 test('file validator change cannot splice bytes into the original session',async t=>{
  const f=await fixture(t);assert.equal((await get(f.input.url,0,511)).status,206);f.change();
  assert.equal((await get(f.input.url,16000,16511)).status,502);
+ assert.equal((await get(f.input.url,0,511)).status,502,'a known change also revokes previously cached headers');
+});
+
+test('header and index interleaving reuses complete session windows without another provider read',async t=>{
+ const f=await fixture(t);
+ for(const start of [0,1024,2048,30720,31744,0,1024,2048]) {
+  const r=await get(f.input.url,start,start+511);assert.equal(r.status,206);assert.deepEqual(r.body,bytes.subarray(start,start+512));
+ }
+ assert.equal(f.stats().requests,5);assert.equal(f.input.counters.maximumConcurrentSourceRequests,1);
+ assert.ok(f.input.counters.cacheHits>=3);assert.equal(f.input.counters.maximumCachedBytes,5*1024);
+ await f.input.stop();assert.equal(f.input.counters.cachedBytes,0);
+ const next=await fixture(t);await get(next.input.url,0,511);assert.equal(next.stats().requests,1,'another session owns a new empty cache');
+});
+
+test('session cache evicts least recently used complete windows at its memory bound',async t=>{
+ const f=await fixture(t,'normal',{cacheWindows:2});
+ for(const start of [0,1024,0,2048,0,1024])assert.equal((await get(f.input.url,start,start+511)).status,206);
+ assert.equal(f.stats().requests,4);assert.equal(f.input.counters.maximumCachedBytes,2048);
 });
 test('invalid token and multi-range do not touch the provider; close aborts pending response',async t=>{
  const f=await fixture(t,'hang');assert.equal((await fetch(f.input.url+'bad')).status,404);

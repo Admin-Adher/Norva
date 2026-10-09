@@ -89,3 +89,16 @@ test('volume changes are bounded to the owning player',async()=>{
     h.event({type:'volume',sessionId:request.sessionId,value:101});assert.equal(h.controller.volume,100);
     h.event({type:'volume',sessionId:request.sessionId,value:30});assert.equal(h.controller.volume,30);h.child.emit('exit',0);
 });
+
+test('embedding host comes from the trusted main process, never the renderer request',async()=>{
+    const h=fixture();h.controller.host={handle:'1234',processId:42};
+    await h.controller.open({...request,host:{handle:'dead',processId:999},parentWindow:'bad'});
+    assert.deepEqual(h.calls[0][1],['--parent-window','1234','--parent-process','42']);
+    assert.equal(h.calls[0][2].windowsHide,true);
+    h.event({type:'ready',protocol:1});assert.equal(h.writes[0].host,undefined);
+    let fullscreen;h.controller.on('fullscreen',value=>fullscreen=value);
+    h.event({type:'fullscreen',sessionId:'other',enabled:true});assert.equal(fullscreen,undefined);
+    h.event({type:'fullscreen',sessionId:request.sessionId,enabled:true});assert.equal(fullscreen,true);
+    h.controller.setFullscreen(false);assert.deepEqual(h.writes.at(-1),{type:'fullscreen',enabled:false});
+    h.child.emit('exit',0);
+});

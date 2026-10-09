@@ -11,6 +11,7 @@ internal sealed partial class PlayerWindow
     {
         try {
             var type = message.GetProperty("type").GetString();
+            if (type == "fullscreen" && host != null) { fullScreen = message.GetProperty("enabled").GetBoolean(); return; }
             if (type == "stop") { CloseWithReason("parent_stop"); return; }
             if (type == "authorize" && opened && message.GetProperty("sessionId").GetString() == session) {
                 authorization.Restart(); return;
@@ -27,12 +28,15 @@ internal sealed partial class PlayerWindow
             PlayerStrings.Language = message.TryGetProperty("uiLanguage",out var locale) ? locale.GetString() ?? "en" : "en";
             back.Text=back.AccessibleName=PlayerStrings.Get("back");
             fullscreen.Text=fullscreen.AccessibleName=PlayerStrings.Get("fullscreen");
+            LabelControl(back,"back");LabelControl(fullscreen,"fullscreen");LabelControl(audioButton,"audio");LabelControl(subtitleButton,"subtitles");
+            LabelControl(leftActions[0],"restart");LabelControl(leftActions[1],"backward");LabelControl(leftActions[3],"forward");LabelControl(rightActions[0],"mute");LabelControl(rightActions[3],"speed");
             audio.AccessibleName=PlayerStrings.Get("audio");subtitles.AccessibleName=PlayerStrings.Get("subtitles");
             timeline.AccessibleName=PlayerStrings.Get("position");volume.AccessibleName=volumeLabel.Text=PlayerStrings.Get("volume");
             status.Text=PlayerStrings.Get("preparing");
             if(message.TryGetProperty("playbackPreferences",out var selected)) preferences=selected.Clone();
             if(message.TryGetProperty("volume",out var sound) && sound.TryGetInt32(out var level)) volume.Value=Math.Clamp(level,0,100);
             Text = "Norva — " + (message.GetProperty("title").GetString() ?? "Vidéo")[..Math.Min(240, (message.GetProperty("title").GetString() ?? "Vidéo").Length)];
+            titleLabel.Text=Text[8..];
             media = new Media(engine, uri);
             media.AddOption(":network-caching=1500");
             // No parse/network probe, fallback URL, transcoder or second player.
@@ -44,6 +48,8 @@ internal sealed partial class PlayerWindow
     void Tick()
     {
         if (closing) return;
+        host?.Fit(this);
+        if (closing) return;
         // Authorizations originate in successful exact-session cloud heartbeats.
         if (authorization.ElapsedMilliseconds > 20_000) { CloseWithReason("authorization_expired"); return; }
         if (!opened || failed) return;
@@ -52,13 +58,12 @@ internal sealed partial class PlayerWindow
         if (!dragging && length > 0) timeline.Value = (int)Math.Clamp(position * 10_000d / length, 0, 10_000);
         timeline.Enabled = player.IsSeekable;
         pause.Text = pause.AccessibleName = PlayerStrings.Get(player.IsPlaying ? "pause" : "play");
-        status.Text = player.IsPlaying || player.State == VLCState.Paused
-            ? $"{TimeSpan.FromMilliseconds(position):hh\\:mm\\:ss} / {TimeSpan.FromMilliseconds(length):hh\\:mm\\:ss}"
-            : PlayerStrings.Get("preparing");
+        status.Text = PlayerStrings.Get("preparing");
         ApplyPreference("audio", TrackType.Audio, ref audioPreferenceApplied);
         ApplyPreference("subtitle", TrackType.Text, ref subtitlePreferenceApplied);
         RefreshTracks(audio, player.AudioTrackDescription, player.AudioTrack);
         RefreshTracks(subtitles, player.SpuDescription, player.Spu);
+        UpdateControls(position,length);
         if (Environment.TickCount64 - lastProgress > 1000) { lastProgress = Environment.TickCount64; Emit("progress"); }
     }
 
