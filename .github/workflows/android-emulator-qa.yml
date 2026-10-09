@@ -13,6 +13,14 @@ on:
         required: false
         default: ''
         type: string
+      phone-gpu:
+        description: 'Phone emulator graphics backend for a bounded diagnostic comparison'
+        required: false
+        default: 'swiftshader_indirect'
+        type: choice
+        options:
+          - swiftshader_indirect
+          - swiftshader
   pull_request:
     paths:
       - '.github/workflows/android-emulator-qa.yml'
@@ -82,7 +90,7 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_7
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim
+          emulator-options: -no-window -gpu ${{ inputs['phone-gpu'] || 'swiftshader_indirect' }} -no-snapshot -no-boot-anim
           script: bash scripts/qa/run-android-emulator-tests.sh phone ${{ matrix.navigation }} ${{ matrix.font_scale }}
       - name: Upload phone test reports
         if: always()

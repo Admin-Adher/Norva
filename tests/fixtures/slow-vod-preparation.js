@@ -43,15 +43,15 @@ window.SlowPreparationQA = (() => {
  async function verify(){
   console.info('SLOW_VOD_QA start');
   for(const kind of ['movie','series'])for(const rebuffer of [false,true]){
-   await mount({kind,rebuffer});console.info('SLOW_VOD_QA '+kind+' rebuffer='+rebuffer);layout();
+   await mount({kind,rebuffer});console.info('SLOW_VOD_QA '+kind+' rebuffer='+rebuffer);layout();console.info('SLOW_VOD_QA layout');
    document.getElementById('watch-slow-continue').click();check(events.length===0,'continue changed pipeline');
    check(document.getElementById('watch-slow-preparation').classList.contains('hidden'),'continue not dismissed');
    check(page.loadingSpinner.classList.contains('show'),'continue stopped preparation');
-   await mount({kind,rebuffer});layout();
+   await mount({kind,rebuffer});layout();console.info('SLOW_VOD_QA handoff');
    const original=page._playbackAttemptId;document.getElementById('watch-slow-versions').click();
    check(page._playbackAttemptId===original+1,'late ready not cancelled');
    await new Promise(r=>setTimeout(r,100));check(events.join(',')===`close,closed,released,open-${kind==='movie'?'movies':'series'}`,'bad handoff '+events.join(','));
-   page.hideLoading({restoreFocus:false});
+   page.hideLoading({restoreFocus:false});console.info('SLOW_VOD_QA hidden');
   }
   console.info('SLOW_VOD_QA Back');
   await mount();page.backBtn.click();check(page._slowPreparation===null,'Back left notice active');

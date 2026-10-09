@@ -56,9 +56,10 @@ public class SlowVodPreparationInstrumentedTest {
      evaluate(i,holder.get(),"document.getElementById('qa-controls').style.display='none';window.qaResult='pending';(async()=>{try{await NorvaI18n.setPreference('"+locale+"');if(document.visibilityState!=='visible')throw Error('hidden WebView');if(Math.abs(innerWidth-"+width+")>2)throw Error('viewport '+innerWidth);await SlowPreparationQA.verify();window.qaResult='ok';}catch(e){window.qaResult=String(e);}})();");
      String result="\"pending\"";
      for(int n=0;n<150&&"\"pending\"".equals(result);n++){Thread.sleep(100);result=evaluate(i,holder.get(),"window.qaResult");}
+     android.util.Log.i("SlowVodQA","result width="+width+" zoom="+zoom+" locale="+locale+" "+result);
      assertEquals("width="+width+" zoom="+zoom+" locale="+locale,"\"ok\"",result);
     }
    }
-  }finally{i.runOnMainSync(()->{activity.setContentView(new android.widget.FrameLayout(activity));holder.get().destroy();activity.finish();});}
+  }finally{android.util.Log.i("SlowVodQA","teardown start");i.runOnMainSync(()->{activity.setContentView(new android.widget.FrameLayout(activity));holder.get().destroy();activity.finish();});android.util.Log.i("SlowVodQA","teardown done");}
  }
 }
