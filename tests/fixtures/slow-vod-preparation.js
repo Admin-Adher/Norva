@@ -5,7 +5,9 @@ window.SlowPreparationQA = (() => {
  async function mount({kind='movie',rebuffer=false,advance=true}={}) {
   page?.hideLoading({restoreFocus:false});
   if(!markup)markup=new DOMParser().parseFromString(await(await fetch('/app.html')).text(),'text/html').getElementById('page-watch').outerHTML;
-  document.getElementById('qa-host').innerHTML=markup;
+  // Reuse the same DOM as the SPA; repeated decoding of detached animated
+  // artwork is unrelated to the recovery assertions.
+  if(!document.getElementById('page-watch'))document.getElementById('qa-host').innerHTML=markup;
   document.getElementById('page-watch').classList.add('active');
   events=[];
   const app={currentPage:'watch',currentUser:{id:'qa-owner'},pages:{}};
@@ -37,8 +39,9 @@ window.SlowPreparationQA = (() => {
   }
  }
  async function verify(){
+  console.info('SLOW_VOD_QA start');
   for(const kind of ['movie','series'])for(const rebuffer of [false,true]){
-   await mount({kind,rebuffer});layout();
+   await mount({kind,rebuffer});console.info('SLOW_VOD_QA '+kind+' rebuffer='+rebuffer);layout();
    document.getElementById('watch-slow-continue').click();check(events.length===0,'continue changed pipeline');
    check(document.getElementById('watch-slow-preparation').classList.contains('hidden'),'continue not dismissed');
    check(page.loadingSpinner.classList.contains('show'),'continue stopped preparation');

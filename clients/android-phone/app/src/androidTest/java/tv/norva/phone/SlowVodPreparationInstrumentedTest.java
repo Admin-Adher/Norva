@@ -26,6 +26,9 @@ public class SlowVodPreparationInstrumentedTest {
   AtomicReference<WebView> holder=new AtomicReference<>();CountDownLatch loaded=new CountDownLatch(1);
   i.runOnMainSync(()->{
    WebView view=new WebView(activity);holder.set(view);view.getSettings().setJavaScriptEnabled(true);view.getSettings().setDomStorageEnabled(true);view.getSettings().setUseWideViewPort(true);
+   view.setWebChromeClient(new WebChromeClient(){
+    @Override public boolean onConsoleMessage(ConsoleMessage message){android.util.Log.i("SlowVodQA",message.message());return true;}
+   });
    view.setWebViewClient(new WebViewClient(){
     @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest request){
      String path=request.getUrl().getPath();
@@ -37,7 +40,13 @@ public class SlowVodPreparationInstrumentedTest {
    float density=context.getResources().getDisplayMetrics().density;
    android.widget.FrameLayout host=new android.widget.FrameLayout(activity);
    host.addView(view,new android.widget.FrameLayout.LayoutParams(Math.round(width*density),Math.round(height*density)));
-   activity.setContentView(host);view.requestFocus();view.loadUrl("https://norva-slow.test/slow-vod-preparation.html");
+   activity.setContentView(host);view.requestFocus();
+   try {
+    java.io.InputStream input=i.getContext().getAssets().open("slow-vod-preparation.html");
+    java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream();byte[] buffer=new byte[4096];int read;
+    while((read=input.read(buffer))!=-1)output.write(buffer,0,read);input.close();
+    view.loadDataWithBaseURL("https://norva-slow.test/",output.toString("UTF-8"),"text/html","UTF-8",null);
+   }catch(Exception error){throw new RuntimeException(error);}
   });
   try{
    assertTrue("Fixture loaded",loaded.await(45,TimeUnit.SECONDS));

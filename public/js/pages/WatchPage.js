@@ -9433,9 +9433,11 @@ class WatchPage {
     }
 
     clearSlowPreparation() {
+        const state = this._slowPreparation;
         clearTimeout(this._slowPreparationTimer);
         this._slowPreparationTimer = null;
         this._slowPreparation = null;
+        if (!state) return;
         const panel = document.getElementById('watch-slow-preparation');
         if (panel?.contains?.(document.activeElement)) this.backBtn?.focus?.({ preventScroll: true });
         panel?.classList.add('hidden');
