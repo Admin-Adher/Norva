@@ -1,0 +1,177 @@
+{
+  "date": "2026-10-09",
+  "scope": "existing single-owner retained decoder pilot",
+  "revision": "56736d049aad28a0342f0a2f2801d4b41c609a37",
+  "outcome": "deployed-owner-only-real-startup-validation-failed",
+  "gateway": {
+    "at": "2026-10-09T08:01:06.428287+00:00",
+    "revision": "56736d049aad28a0342f0a2f2801d4b41c609a37",
+    "image": "sha256:b7daa15239a9e156792eb684601eb8f76fdfd3916ad8217a02e5006484e23624",
+    "sourceTreeSha256": "007b8b28e1276ede6d43b515c66d8b27822251b36feaffc615df58ea9d04cd56",
+    "replicas": [
+      {
+        "name": "norva-media-gateway",
+        "startedAt": "2026-10-09T08:00:40.638101606Z",
+        "healthy": true,
+        "all94SourceHashesMatch": true,
+        "retainedOwnerCount": 1
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "startedAt": "2026-10-09T08:00:43.251562164Z",
+        "healthy": true,
+        "all94SourceHashesMatch": true,
+        "retainedOwnerCount": 1
+      }
+    ],
+    "admissions": {
+      "cron": {
+        "id": 159,
+        "active": true
+      },
+      "paused": false
+    },
+    "stopAbsent": true,
+    "dispatcherRunning": true,
+    "workerRunning": true
+  },
+  "edge": {
+    "at": "2026-10-09T08:01:07.645225+00:00",
+    "revision": "56736d049aad28a0342f0a2f2801d4b41c609a37",
+    "replicas": [
+      {
+        "name": "norva-edge-functions",
+        "startedAt": "2026-10-09T07:59:52.741136571Z",
+        "healthy": true,
+        "playbackSha256": "60280e24f89fd7f11003638fc26068feef1b769115bf02a56ffb0e18d4747c9d",
+        "all194SourceHashesMatch": true
+      },
+      {
+        "name": "norva-edge-functions-2",
+        "startedAt": "2026-10-09T07:59:56.37967238Z",
+        "healthy": true,
+        "playbackSha256": "60280e24f89fd7f11003638fc26068feef1b769115bf02a56ffb0e18d4747c9d",
+        "all194SourceHashesMatch": true
+      }
+    ],
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "healthy": true,
+        "image": "sha256:b7daa15239a9e156792eb684601eb8f76fdfd3916ad8217a02e5006484e23624"
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "healthy": true,
+        "image": "sha256:b7daa15239a9e156792eb684601eb8f76fdfd3916ad8217a02e5006484e23624"
+      }
+    ],
+    "admissions": {
+      "cron": {
+        "id": 159,
+        "active": true
+      },
+      "paused": false
+    },
+    "stopAbsent": true,
+    "dispatcherRunning": true,
+    "workerRunning": true
+  },
+  "finalHealth": {
+    "atUtc": "2026-10-09T08:07:23.229224+00:00",
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "healthy": true,
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "image": "sha256:b7daa15239a9e156792eb684601eb8f76fdfd3916ad8217a02e5006484e23624",
+        "startedAt": "2026-10-09T08:00:40.638101606Z",
+        "onlyTwoReviewedEnvironmentChanges": true,
+        "restartPolicy": {
+          "Name": "unless-stopped",
+          "MaximumRetryCount": 0
+        },
+        "sharedVideoEncoderCapacity": {
+          "limit": 8,
+          "occupied": 0
+        }
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "healthy": true,
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "image": "sha256:b7daa15239a9e156792eb684601eb8f76fdfd3916ad8217a02e5006484e23624",
+        "startedAt": "2026-10-09T08:00:43.251562164Z",
+        "onlyTwoReviewedEnvironmentChanges": true,
+        "restartPolicy": {
+          "Name": "unless-stopped",
+          "MaximumRetryCount": 0
+        },
+        "sharedVideoEncoderCapacity": {
+          "limit": 8,
+          "occupied": 0
+        }
+      }
+    ],
+    "ownerCount": 1,
+    "pilotActivated": true,
+    "audibleAcceptance": false,
+    "realSourceFluencyValidated": false,
+    "ownerLiveClaims": 0,
+    "admissions": {
+      "paused": false,
+      "cron": true
+    },
+    "dispatcherRunning": true,
+    "workerRunning": true,
+    "canariesAbsent": true
+  },
+  "publicTrials": [
+    {
+      "type": "movie",
+      "error": "gateway_502",
+      "state": "failed",
+      "title": "FR - Conclave (2024)",
+      "source": "Dino",
+      "createdAt": "2026-10-09T08:01:58.334294+00:00",
+      "committedCaller": 1,
+      "events": [
+        {
+          "at": "2026-10-09T08:03:01.333332+00:00",
+          "code": "gateway_502",
+          "event": "gateway_error",
+          "ttffMs": null,
+          "position": 0
+        }
+      ]
+    },
+    {
+      "type": "movie",
+      "error": "gateway_502",
+      "state": "failed",
+      "title": "FR| Le Robot Sauvage",
+      "source": "MAX OTT",
+      "createdAt": "2026-10-09T08:04:00.887127+00:00",
+      "committedCaller": 1,
+      "events": [
+        {
+          "at": "2026-10-09T08:05:04.06189+00:00",
+          "code": "gateway_502",
+          "event": "gateway_error",
+          "ttffMs": null,
+          "position": 0
+        }
+      ]
+    }
+  ],
+  "audibleAcceptance": false,
+  "newNormalGain": false,
+  "earlierCI": {
+    "passed": 6165,
+    "skipped": 31,
+    "androidConfigurationsPassed": 6
+  },
+  "evidenceDirectory": ".codex-artifacts/retained-owner-pilot-20261009/"
+}
