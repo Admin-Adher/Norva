@@ -4104,7 +4104,7 @@ test('real split-track MP4 demuxing serves cache during remote release grace', {
 });
 
 
-for (const mode of ['same','changed-bytes','expired','redirected','changed-size']) test(`recent delivery hint through real HTTP: ${mode}`, async()=>{
+for (const lifecycle of ['closed','parked']) for (const mode of ['same','changed-bytes','expired','redirected','changed-size']) test(`recent delivery hint through real HTTP: ${lifecycle}/${mode}`, async()=>{
   const {validateRecentResume}=require('../services/media-gateway/src/recent-resume-validation');
   const {sampleProof,samplesMatch}=require('../services/media-gateway/src/recent-resume-samples');
   const N=65536,size=16*N,ownerKey='a'.repeat(64),routeKey='http:1:connect',scope={id:'new-playback'};
@@ -4122,14 +4122,22 @@ for (const mode of ['same','changed-bytes','expired','redirected','changed-size'
   const sourceUrl=`http://127.0.0.1:${server.address().port}/entry`,h=brokerHarness();
   try{
     first=await h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,pathPrefix:'finite-mkv-seek',captureRecentSamples:true,
-      finiteWindowBytes:N,finiteWarmupWindowBytes:0,completedReleaseDelayMs:0,onProviderIdentity:v=>identity=v});
+      finiteWindowBytes:N,finiteWarmupWindowBytes:0,completedReleaseDelayMs:0,onProviderIdentity:v=>identity=v,
+      ...(lifecycle==='parked'?{retainedInputScope:scope,retainedInputTtlMs:10000,
+        dispatcherFactory:()=>new(require('undici').Agent)({connections:1,pipelining:1})}:{})});
     const original=[];
     for(const start of [0,4*N,8*N,12*N]){
       const response=await fetch(first.inputUrl,{headers:{Range:`bytes=${start}-${start+N-1}`}});
       assert.equal(response.status,206);original.push({start,payload:Buffer.from(await response.arrayBuffer())});
     }
     assert.equal(first.retainDeliveryTarget({ownerKey,routeKey}),null,'live broker cannot hand off');
-    await first.close();const token=first.retainDeliveryTarget({ownerKey,routeKey});assert.ok(token);
+    assert.equal(first.retainDeliveryTarget({ownerKey,routeKey,retainedInputScope:scope}),null,'scope alone is not a drain');
+    if(lifecycle==='parked'){
+      assert.ok(await first.parkRetainedInput(scope));
+      assert.equal(first.retainDeliveryTarget({ownerKey,routeKey}),null,'parked input requires its private scope');
+      assert.equal(first.retainDeliveryTarget({ownerKey,routeKey,retainedInputScope:{}}),null,'forged scope');
+    }else await first.close();
+    const token=first.retainDeliveryTarget({ownerKey,routeKey,...(lifecycle==='parked'?{retainedInputScope:scope}:{})});assert.ok(token);
     const proof=sampleProof(original,size,identity.effectiveUrlIdentitySha256),plan={kind:proof.kind,target:proof.target,
       ranges:proof.ranges.map(({start,length})=>({start,length}))};phase='resume';
     const fresh=await validateRecentResume({plan,acceptIdentity:()=>identity.effectiveUrlIdentitySha256===proof.target,

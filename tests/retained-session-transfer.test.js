@@ -39,6 +39,7 @@ function harness({ drain, validation, gate = true } = {}) {
         privateFinalCodecProfileAfterPendingCacheWork: async () => { await ctx.profilePending; return null; },
         revalidateRecentResumeSession: async (lookup, plan, signal) => {
             counts.validation++; assert.equal(counts.socket, 0, 'old transport drained before validation');
+            ctx.validationPlanCheck?.(plan);
             assert.equal(plan.kind, 'sampled-recent-v1');
             return validation ? validation(lookup, signal) : { samples, fileSizeBytes: 8*N, effectiveUrlIdentitySha256: target, effectiveUrlSha256: target };
         },
@@ -91,7 +92,7 @@ function harness({ drain, validation, gate = true } = {}) {
         await ctx.deleteHandler(req,res);return res;
     };
     return { ...api, session, sessions, activeVideoEncoderAdmissions, counts, request, remove, setProfilePending: p => { ctx.profilePending=p; }, transfer: ctx.retainedSessionTransfer,
-        getTimer: () => timer,
+        getTimer: () => timer, setValidationPlanCheck: fn => { ctx.validationPlanCheck=fn; },
         stop: () => ctx.stopSession(session), expire: async()=> { now += 10001; await timer?.(); },
         setNow: x => { now = x; }, get now() { return now; } };
 }
@@ -126,6 +127,26 @@ test('encoder reservation follows the adopted session and releases through the o
     const release=vm.runInNewContext(`(${section('function releaseVideoEncoderAdmission(', '// sourceUrl ->')})`,
         {activeVideoEncoderAdmissions:h.activeVideoEncoderAdmissions});
     release(result);assert.equal(h.activeVideoEncoderAdmissions.size,0);
+});
+
+test('retained transfer revalidates the drained delivery target without accepting a rotated URL', async t => {
+    const token=Object.freeze({}); let h,issued=0;
+    h=harness({validation:async(lookup)=>{
+        assert.equal(lookup.ownerKey,owner);
+        return {samples,fileSizeBytes:8*N,effectiveUrlIdentitySha256:target,effectiveUrlSha256:target};
+    }});t.after(h.stop);
+    h.session.finiteMkvSeekBroker.retainDeliveryTarget = options => {
+        assert.equal(options.retainedInputScope,h.session.retainedInputScope);
+        assert.equal(options.ownerKey,owner);assert.equal(options.routeKey,'pinned');
+        assert.equal(h.counts.socket,0);issued++;return token;
+    };
+    const original=h.request;
+    // The actual validation function receives the opaque hint; it grants no
+    // authority to skip four samples, exact target, expiry or validator checks.
+    h.setValidationPlanCheck(plan=>assert.equal(plan.deliveryTarget,token));
+    assert.equal(await h.tryParkRetainedSession(h.session,105),true);
+    assert.equal(await h.tryResumeRetainedSession(original()),h.session);
+    assert.equal(issued,1);assert.equal(h.counts.validation,1);
 });
 
 test('a sliding retained playlist rebases the new viewer while preserving the decoder clock', async t => {
