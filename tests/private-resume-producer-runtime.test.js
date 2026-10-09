@@ -62,12 +62,17 @@ async function closeServer(server) {
   await new Promise((resolve) => server.close(() => resolve()));
 }
 
-async function createExactMkvFixture(ffmpeg, root) {
+async function createExactMkvFixture(ffmpeg, root, sparseSubtitles = false) {
   const sourcePath = path.join(root, 'source.mkv');
+  const subtitlePath = path.join(root, 'sparse.srt');
+  if (sparseSubtitles) await fsp.writeFile(subtitlePath,
+    '1\n00:00:14,000 --> 00:00:15,000\nFirst cue\n\n2\n00:01:05,000 --> 00:01:06,000\nFuture cue\n\n');
   await run(ffmpeg, ['-hide_banner','-nostdin','-loglevel','error','-y',
     '-f','lavfi','-i','testsrc2=size=320x180:rate=24:duration=120',
     '-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=120',
-    '-map','0:v:0','-map','1:a:0','-c:v','libx264','-threads','1','-preset','ultrafast',
+    ...(sparseSubtitles ? ['-i',subtitlePath] : []),
+    '-map','0:v:0','-map','1:a:0',...(sparseSubtitles ? ['-map','2:0','-c:s','srt'] : []),
+    '-c:v','libx264','-threads','1','-preset','ultrafast',
     '-pix_fmt','yuv420p','-g','48','-keyint_min','48','-sc_threshold','0',
     '-c:a','aac','-b:a','96k','-ac','2','-disposition:a:0','default',sourcePath]);
   return sourcePath;
@@ -84,7 +89,7 @@ async function readJson(response) {
   return { response, payload, text };
 }
 
-for (const validator of ['strong', 'absent']) test(`an abandoned complete-cache producer with ${validator} validators keeps a private HLS window and revalidates it before resume`, {
+for (const validator of ['strong', 'absent', 'absent-sparse-subtitles']) test(`an abandoned complete-cache producer with ${validator} keeps eligible private data and revalidates it before resume`, {
   timeout: 120_000,
 }, async (t) => {
   const { ffmpeg, ffprobe } = locateMediaTools();
@@ -97,7 +102,8 @@ for (const validator of ['strong', 'absent']) test(`an abandoned complete-cache 
   const outputRoot = path.join(root, 'gateway-output');
   await fsp.mkdir(outputRoot, { recursive: true });
   t.after(() => fsp.rm(root, { recursive: true, force: true }));
-  const sourcePath = await createExactMkvFixture(ffmpeg, root);
+  const sparseSubtitles = validator === 'absent-sparse-subtitles';
+  const sourcePath = await createExactMkvFixture(ffmpeg, root, sparseSubtitles);
   const sourceStat = await fsp.stat(sourcePath);
   const probe = JSON.parse(execFileSync(ffprobe, ['-v','error','-show_streams','-show_format','-of','json',sourcePath]));
   const video = probe.streams.find(s => s.codec_type === 'video');
@@ -105,7 +111,7 @@ for (const validator of ['strong', 'absent']) test(`an abandoned complete-cache 
 
   const provider = new ProviderSimulator({ fixtureRoot: root });
   const providerServer = http.createServer((request, response) => {
-    if (validator === 'absent') {
+    if (validator !== 'strong') {
       const setHeader = response.setHeader.bind(response);
       response.setHeader = (name, value) => ['etag','last-modified'].includes(name.toLowerCase())
         ? response : setHeader(name, value);
@@ -312,7 +318,7 @@ for (const validator of ['strong', 'absent']) test(`an abandoned complete-cache 
         audioTracks: [
           { index: 1, language: 'eng', title: 'English', codec: 'aac', channels: 2, sampleRate: 48000, default: true },
         ],
-        subtitles: [],
+        subtitles: sparseSubtitles ? [{ index:2, language:'eng', codec:'subrip', subtitleType:'text', extractable:true, default:true }] : [],
         probeSource: 'gateway_inband',
         probedAt: new Date().toISOString(),
       },
@@ -341,9 +347,11 @@ for (const validator of ['strong', 'absent']) test(`an abandoned complete-cache 
   assert.equal(producer.startupTimings.retainedSharedCacheHlsOutput, true);
   assert.equal(producer.startupTimings.ffmpegSpawnCount, 1);
   const deadline = Date.now() + 25_000;
+  const producerVideoUrl = sparseSubtitles
+    ? new URL(`video.m3u8?token=${encodeURIComponent(playlistToken(producer.hlsUrl))}`,producer.hlsUrl).href : producer.hlsUrl;
   let text = '';
   while (Date.now() < deadline) {
-    text = await (await fetch(producer.hlsUrl)).text();
+    text = await (await fetch(producerVideoUrl)).text();
     const duration = [...text.matchAll(/#EXTINF:([0-9.]+)/g)].reduce((n,m)=>n+Number(m[1]),0);
     if (duration >= 48) break;
     await new Promise(resolve => setTimeout(resolve,100));
@@ -355,7 +363,8 @@ for (const validator of ['strong', 'absent']) test(`an abandoned complete-cache 
     { method:'DELETE', headers:serviceHeaders }));
   assert.equal(close.response.status,200,close.text);
   const stopped = await waitFor(h=>h.activeSessions===0 && h.vodInputPump.active===0 && h.videoEncoderCapacity.active===0,'drain');
-  assert.equal(stopped.privateResumeHlsCache.stores,1,JSON.stringify(stopped.privateResumeHlsCache)+'\n'+gatewayOutput.join(''));
+  assert.equal(stopped.privateResumeHlsCache.stores,sparseSubtitles ? 0 : 1,JSON.stringify(stopped.privateResumeHlsCache)+'\n'+gatewayOutput.join(''));
+  assert.equal(stopped.privateResumeHlsCache.inputStores,sparseSubtitles ? 1 : 0);
   assert.equal(stopped.sharedMediaCache.stats.publications,0);
   assert.equal(publications.length,0);
   assert.equal(workerCalls.length,0,'partial graph must never reach shared storage');
@@ -367,15 +376,22 @@ for (const validator of ['strong', 'absent']) test(`an abandoned complete-cache 
   const reopened=await readJson(await fetch(`${gatewayBase}/sessions`,{method:'POST',
     headers:{...serviceHeaders,'Content-Type':'application/json'},body:JSON.stringify(resumeBody)}));
   assert.equal(reopened.response.status,201,reopened.text);
-  assert.equal(reopened.payload.startupTimings.privateResumeWindowHit,true,JSON.stringify(reopened.payload.startupTimings));
-  assert.ok(reopened.payload.startupTimings.privateResumeAheadSeconds>=24);
+  if (sparseSubtitles) {
+    assert.equal(reopened.payload.startupTimings.recentMultiAudioInputHit,true,JSON.stringify(reopened.payload.startupTimings));
+    assert.ok(reopened.payload.startupTimings.recentMultiAudioInputSeededBytes>=2*1024*1024);
+    assert.notEqual(reopened.payload.startupTimings.privateResumeWindowHit,true);
+    assert.equal(reopened.payload.subtitleRenditions.length,1,'ordinary playback must preserve its subtitle lane');
+  } else {
+    assert.equal(reopened.payload.startupTimings.privateResumeWindowHit,true,JSON.stringify(reopened.payload.startupTimings));
+    assert.ok(reopened.payload.startupTimings.privateResumeAheadSeconds>=24);
+  }
   if (validator === 'absent') {
     assert.equal(reopened.payload.startupTimings.privateResumeValidationMode, 'sampled-recent-v1');
     assert.equal(reopened.payload.startupTimings.privateResumeInputSeededBytes || 0, 0, 'incomplete HTTP body is not a replayable input window');
   }
   assert.ok(providerRun.snapshot().maximumConcurrentProviderGets<=1);
   const playlist=await (await fetch(reopened.payload.hlsUrl)).text();
-  assert.match(playlist,/resume-/);
+  if (!sparseSubtitles) assert.match(playlist,/resume-/);
   await run(ffmpeg,['-v','error','-xerror','-nostdin','-i',reopened.payload.hlsUrl,'-t','8','-f','null','-']);
   // Independent TS encoders reset transport continuity counters at the HLS
   // discontinuity. Validate codecs across that declared splice instead of
@@ -383,13 +399,37 @@ for (const validator of ['strong', 'absent']) test(`an abandoned complete-cache 
   // PCM sink explicitly numbers decoded samples: this assertion checks codec
   // errors, NOT the source clock or audio continuity at the discontinuity.
   // Those still require the separate browser timing/playback replay.
+  const decodedSeconds = sparseSubtitles ? 120 : 55;
   const decodeLog = await run(ffmpeg,['-v','error','-err_detect','explode','-nostdin','-y',
-    '-i',reopened.payload.hlsUrl,'-map','0:v:0','-t','55','-f','rawvideo','pipe:1',
-    '-map','0:a:0','-af','asetpts=N/SR/TB','-t','55','-f','s16le',os.devNull]);
+    '-i',reopened.payload.hlsUrl,'-map','0:v:0','-t',String(decodedSeconds),'-f','rawvideo','pipe:1',
+    '-map','0:a:0','-af','asetpts=N/SR/TB','-t',String(decodedSeconds),'-f','s16le',os.devNull]);
   assert.equal(decodeLog.trim(), '', 'cached prefix and fresh continuation must decode without codec errors');
+  if (sparseSubtitles) {
+    const rendition = reopened.payload.subtitleRenditions[0];
+    const subtitlePlaylist = new URL(rendition.playlistName, reopened.payload.hlsUrl);
+    subtitlePlaylist.searchParams.set('token', playlistToken(reopened.payload.hlsUrl));
+    let cues = '';
+    const cueDeadline = Date.now() + 10_000;
+    while (Date.now() < cueDeadline) {
+      const subtitleText = await (await fetch(subtitlePlaylist)).text();
+      const segments = subtitleText.split(/\r?\n/).filter(line => line && !line.startsWith('#'));
+      cues = '';
+      for (const segment of segments) {
+        const url = new URL(segment, subtitlePlaylist);
+        url.searchParams.set('token', playlistToken(reopened.payload.hlsUrl));
+        const response = await fetch(url);
+        assert.equal(response.status, 200);
+        cues += await response.text();
+      }
+      if (cues.includes('Future cue')) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.match(cues, /First cue/);
+    assert.match(cues, /Future cue/, 'a later sparse subtitle must survive private input replay');
+  }
   await fetch(`${gatewayBase}/sessions/${reopened.payload.id}`,{method:'DELETE',headers:serviceHeaders});
   await waitFor(h=>h.activeSessions===0 && h.vodInputPump.active===0 && h.videoEncoderCapacity.active===0,'final drain');
   assert.equal(providerRun.snapshot().activeGets,0);
-  t.diagnostic(JSON.stringify({privateWindowStored:true,privateWindowHit:true,decodedSeconds:55,partialSharedPublications:publications.length,
+  t.diagnostic(JSON.stringify({privateWindowStored:!sparseSubtitles,privateWindowHit:!sparseSubtitles,privateInputHit:sparseSubtitles,decodedSeconds,partialSharedPublications:publications.length,
     maximumConcurrentProviderGets:providerRun.snapshot().maximumConcurrentProviderGets,aheadSeconds:reopened.payload.startupTimings.privateResumeAheadSeconds}));
 });

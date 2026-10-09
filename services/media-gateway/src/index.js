@@ -17166,7 +17166,8 @@ async function runBoundedMkvInputPump(session, writable, signal, dispatcher) {
             if (!openedOnce && range.start === 0 && range.total === fileSizeBytes
                 && range.end === fileSizeBytes - 1 && !unknownLengthFullBody
                 && canUsePrivateResumeCache(session.ownerKey) && canUseRecentResumeSamples(session.ownerKey)) {
-                linearSamples = new LinearResumeSamples(fileSizeBytes, session.vodInputEffectiveUrlSha256);
+                linearSamples = new LinearResumeSamples(fileSizeBytes, session.vodInputEffectiveUrlSha256,
+                    { retainInput: exactSubtitleHlsEnabled(session) || multiAudioHlsEnabled(session) });
                 const targetUrl = String(attempt.response?.url || session.sourceUrl || '');
                 session.linearResumeEvidence = { samples: linearSamples, targetUrl,
                     routeKey: recentDeliveryRouteKey(session) };
@@ -17681,7 +17682,7 @@ async function stopBoundedMkvInputPump(session) {
     if (evidence) {
         const observedBytes = evidence.samples.offset;
         const eligible = evidence.samples.valid;
-        const samples = evidence.samples.finish({
+        const snapshot = evidence.samples.finishSnapshot({
             graceful: session.status === 'stopping' && session.privateResumeStopPosition > 0
                 && !session.lastError && !session.inputFailure
                 && (!pump.error || pump.error.code === 'VOD_INPUT_ABORTED')
@@ -17689,10 +17690,13 @@ async function stopBoundedMkvInputPump(session) {
                 && evidence.routeKey === recentDeliveryRouteKey(session),
             fileSizeBytes: fileSizeBytesForSession(session), target: session.vodInputEffectiveUrlSha256,
         });
+        const samples = snapshot?.samples;
         console.info(JSON.stringify({ event: 'private_resume_linear_samples', observedBytes,
-            uninterrupted: eligible, samples: samples?.length || 0 }));
+            uninterrupted: eligible, samples: samples?.length || 0,
+            privateInputBytes: snapshot?.inputWindows.reduce((n,w) => n + w.payload.length, 0) || 0 }));
         if (samples) {
             session.privateResumeSamples = samples;
+            if (snapshot.inputWindows.length) session.privateResumeInputWindows = snapshot.inputWindows;
             session.privateResumeDeliveryTarget = retainRecentDeliveryTarget({
                 ownerKey: session.ownerKey, sourceUrl: session.sourceUrl,
                 userAgent: session.userAgent || FFMPEG_USER_AGENT,

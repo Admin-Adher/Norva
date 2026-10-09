@@ -57,12 +57,13 @@ function captureSamples(entries) {
 }
 
 // Passive evidence from bytes already delivered to the decoder. A completed
-// local window is NOT a completed HTTP response, a replayable input window, or
-// whole-file authority. Only the existing private, four-fresh-range policy may
-// use these samples, after an ordinary viewer stop has drained the transport.
-// Keep one rolling window and four detached samples; never retain the movie.
+// local window is NOT a completed HTTP response or whole-file authority.
+// Optional private input retention keeps only fully observed local intervals:
+// the first 8 MiB and the latest completed 2 MiB. No unfinished local suffix
+// survives. Only an ordinary drained viewer stop and four fresh matching ranges
+// can authorize reuse; a network interruption invalidates every interval.
 class LinearResumeSamples {
-    constructor(fileSizeBytes, target) {
+    constructor(fileSizeBytes, target, { retainInput = false } = {}) {
         this.fileSizeBytes = fileSizeBytes;
         this.target = target;
         this.valid = Number.isSafeInteger(fileSizeBytes)
@@ -71,6 +72,9 @@ class LinearResumeSamples {
         this.window = this.valid ? Buffer.alloc(LINEAR_SAMPLE_WINDOW_BYTES) : null;
         this.head = null;
         this.samples = null;
+        this.retainInput = retainInput === true;
+        this.prefixWindows = [];
+        this.latestWindow = null;
     }
 
     append(start, bytes) {
@@ -87,6 +91,11 @@ class LinearResumeSamples {
             if (!this.head && this.offset >= SAMPLE_BYTES) this.head = Buffer.from(this.window.subarray(0, SAMPLE_BYTES));
             if (at + length === LINEAR_SAMPLE_WINDOW_BYTES) {
                 const base = this.offset - LINEAR_SAMPLE_WINDOW_BYTES;
+                if (this.retainInput) {
+                    const entry = { start: base, payload: Buffer.from(this.window) };
+                    if (base < RECENT_HEADER_MAX_BYTES) this.prefixWindows.push(entry);
+                    else this.latestWindow = entry;
+                }
                 const starts = [base === 0 ? SAMPLE_BYTES : 0,
                     Math.floor((LINEAR_SAMPLE_WINDOW_BYTES - SAMPLE_BYTES) / 2),
                     LINEAR_SAMPLE_WINDOW_BYTES - SAMPLE_BYTES];
@@ -98,16 +107,24 @@ class LinearResumeSamples {
     }
 
     finish({ graceful = false, fileSizeBytes, target } = {}) {
+        return this.finishSnapshot({ graceful, fileSizeBytes, target })?.samples || null;
+    }
+
+    finishSnapshot({ graceful = false, fileSizeBytes, target } = {}) {
         const samples = this.valid && graceful && fileSizeBytes === this.fileSizeBytes
             && target === this.target && sampleProof(this.samples, fileSizeBytes, target)
             ? this.samples : null;
+        const snapshot = samples ? { samples, inputWindows: this.retainInput
+            ? [...this.prefixWindows, ...(this.latestWindow ? [this.latestWindow] : [])] : [] } : null;
         this.invalidate();
-        return samples;
+        return snapshot;
     }
 
     invalidate() {
         this.valid = false;
         this.window = this.head = this.samples = null;
+        this.prefixWindows = [];
+        this.latestWindow = null;
     }
 }
 
