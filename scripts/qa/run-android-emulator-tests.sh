@@ -212,11 +212,12 @@ fi
 
 # Attach before failure: after an ADB timeout the process is already handling
 # SIGSEGV. This explicit diagnostic is not a timing/performance benchmark.
-if [[ "${NORVA_ANDROID_TEST_CLASS:-}" == *SlowVodPreparationInstrumentedTest* ]] && command -v gdb >/dev/null; then
+if [[ "${NORVA_ANDROID_HOST_DEBUGGER:-false}" == true ]] && command -v gdb >/dev/null; then
   qpid="$(pgrep -f '^/.*/emulator/qemu/.*/qemu-system-' | head -n 1 || true)"
   if [[ -n "$qpid" ]]; then
     timeout --kill-after=2s 180s sudo gdb -nx -batch -iex 'set debuginfod enabled off' \
       -ex 'set pagination off' -ex 'set confirm off' -ex 'set print thread-events off' \
+      -ex 'handle SIGUSR1 SIGUSR2 SIGPIPE nostop noprint pass' \
       -ex 'handle SIGSEGV stop print pass' -ex continue -ex 'thread apply all bt 14' \
       -ex detach -p "$qpid" > "$diagnostic_dir/emulator-live-debugger.txt" 2>&1 &
     hang_monitor_pid=$!

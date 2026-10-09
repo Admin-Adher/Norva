@@ -29,6 +29,11 @@ on:
         options:
           - enabled
           - disabled
+      phone-host-debugger:
+        description: 'Attach a bounded host fault debugger; diagnostic only, never performance evidence'
+        required: false
+        default: false
+        type: boolean
   pull_request:
     paths:
       - '.github/workflows/android-emulator-qa.yml'
@@ -51,6 +56,7 @@ jobs:
     timeout-minutes: 90
     env:
       NORVA_ANDROID_TEST_CLASS: ${{ inputs['phone-test-class'] || '' }}
+      NORVA_ANDROID_HOST_DEBUGGER: ${{ inputs['phone-host-debugger'] && 'true' || 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -71,7 +77,7 @@ jobs:
       - name: Install phone compile SDK
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
       - name: Install host debugger for explicit freeze diagnostic
-        if: contains(inputs['phone-test-class'], 'SlowVodPreparationInstrumentedTest')
+        if: inputs['phone-host-debugger']
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends gdb
