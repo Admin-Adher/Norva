@@ -10365,5 +10365,274 @@
       "DB gateway row id differed from external Gateway session id; inspection corrected",
       "Browser proof first supplied relative media URL rejected by WatchPage; absolute loopback URL restored; first frontend stop utility absent, replaced with exact fixture process match"
     ]
+  },
+  "realSourcesFollowup20261009": {
+    "atUtc": "2026-10-09T04:18:57.372112+00:00",
+    "productionCodeChanged": false,
+    "productionDeployment": false,
+    "retainedFeatureActivatedInProduction": false,
+    "scope": "Temporary candidate with PR722 source, real ordinary Edge direct claims for the existing authorized pilot owner, exact profiles, serialized pinned provider transport; WatchPage via loopback adapter. Not full production Edge-to-Gateway route.",
+    "sources": [
+      "MAX OTT",
+      "Strng IPTV 8K"
+    ],
+    "copies": [
+      "Abduct [MULTI-SUB]",
+      "Normal (2026)",
+      "Vice-versa 2 MP4"
+    ],
+    "nativeClaimsCreated": 9,
+    "providerHttpRequestCount": null,
+    "providerRequestCountNote": "Each claim can issue several serial media ranges; claim count is not HTTP count.",
+    "normalAligned": {
+      "seekPositionSeconds": 900,
+      "serverReadyMs": 21824,
+      "firstFrameMs": 23549.699999952318,
+      "initialPlaybackStarted": false,
+      "browserTimeBeforeClose": 0,
+      "availableMediaAtLastObservationSeconds": 52,
+      "availableMediaObservationUtc": "2026-10-09T04:13:00.862265+00:00",
+      "sourceWindow8MiBCompletedCountAtObservation": 16,
+      "sourceWindow8MiBCompletedDurationMsMin": 1536,
+      "sourceWindow8MiBCompletedDurationMsMax": 94807,
+      "retainedReuseDemonstrated": false,
+      "closeObservationUtc": "2026-10-09T04:13:14.522786+00:00",
+      "observedRetainedParking": true,
+      "replacementSessionCreatedUtc": "2026-10-09T04:13:22.311Z",
+      "replacementPrefixBytes": 2097152,
+      "replacementReady": false,
+      "replacementFailure": {
+        "atUtc": "2026-10-09T04:14:24.849065+00:00",
+        "action": "/resume",
+        "kind": "HTTPError",
+        "http": 502,
+        "code": null,
+        "guard": null
+      },
+      "parkExpiryCause": "Ten-second limit and normal fallback supported by code and old/new session observations; no completed park receipt captured."
+    },
+    "abductAligned": {
+      "initialReady": false,
+      "failure": {
+        "atUtc": "2026-10-09T04:16:11.331242+00:00",
+        "action": "/start",
+        "kind": "HTTPError",
+        "http": 502,
+        "code": null,
+        "guard": null
+      }
+    },
+    "mp4Aligned": {
+      "initialReady": false,
+      "failure": {
+        "atUtc": "2026-10-09T04:18:08.646089+00:00",
+        "action": "/start",
+        "kind": "HTTPError",
+        "http": 502,
+        "code": null,
+        "guard": null
+      }
+    },
+    "normalAudioSample": {
+      "atUtc": "2026-10-09T04:10:30.559Z",
+      "outputs": [
+        {
+          "segments": [
+            "video-00004.ts",
+            "video-00005.ts",
+            "video-00006.ts"
+          ],
+          "streams": [
+            {
+              "type": "video",
+              "codec": "h264",
+              "profile": "High"
+            },
+            {
+              "type": "audio",
+              "codec": "aac",
+              "profile": "LC",
+              "sampleRate": "48000",
+              "channels": 2
+            }
+          ],
+          "packets": {
+            "audio": {
+              "count": 281,
+              "first": 8.021333,
+              "last": 13.994667,
+              "maxGap": 0.021334000000001296,
+              "gapsOver100ms": 0
+            },
+            "video": {
+              "count": 144,
+              "first": 8.005,
+              "last": 13.963,
+              "maxGap": 0.04200000000000159,
+              "gapsOver100ms": 0
+            }
+          },
+          "probeExit": 0,
+          "probeErrorLines": 0,
+          "decodeExit": 0,
+          "decodeErrorLines": 0,
+          "mediaDeleted": true
+        }
+      ],
+      "providerRequests": 0,
+      "audibleAcceptance": false
+    },
+    "offlineHardware": {
+      "atUtc": "2026-10-09T04:18:17.976Z",
+      "network": "none",
+      "providerRequests": 0,
+      "sharedEncoderReleased": true,
+      "results": [
+        {
+          "format": "h264",
+          "exit": 0,
+          "stderr": "amdgpu: os_same_file_description couldn't determine if two DRM fds reference the same file description.\nIf they do, bad things may happen!\n",
+          "seconds": 12.041667,
+          "committed": true
+        },
+        {
+          "format": "hevc10",
+          "exit": 0,
+          "stderr": "amdgpu: os_same_file_description couldn't determine if two DRM fds reference the same file description.\nIf they do, bad things may happen!\n",
+          "seconds": 12.041667,
+          "committed": true
+        }
+      ]
+    },
+    "harnessCorrections": [
+      "Initial candidate copied the native two-minute lease expiry; heartbeat refreshed SQL but not candidate absolute expiry. Replaced by a bounded ten-minute test deadline with independent fail-closed native heartbeats. No production TTL change.",
+      "Initial candidate omitted hardware decode and shared ledgers; subsequent candidate matched production device/decoder and shared disk/encoder reservations.",
+      "Startup small-window and retained finite startup flags initially omitted; final three starts use explicitly matched startup settings. No timing difference causally attributed to this change.",
+      "Initial localhost SSH process disappeared; no supplier test depended on the later error-page retry. Persistent tunnel then verified; old error tab left to automatic temporary-tab cleanup.",
+      "Failure UI timer overwrites displayed error; HTTP receipts are authoritative. One page error at Normal stop was counted but its detail was not preserved."
+    ],
+    "storageIncident": {
+      "freeBytesObserved": 131298189312,
+      "minimumFreeBytes": 137438953472,
+      "admissionHttp503AtUtc": "2026-10-09T03:49:09Z",
+      "exactResponseBodyPreserved": false,
+      "specific503CauseProven": false,
+      "freeBytesAfterNaturalRecovery": 161528373248,
+      "recoveryAtUtc": "2026-10-09T03:56:37Z",
+      "oldImagesDeleted": 0,
+      "productionCacheDeleted": false,
+      "recoveryCauseKnown": false
+    },
+    "cleanup": {
+      "atUtc": "2026-10-09T04:18:57.372112+00:00",
+      "productionChanged": false,
+      "claims": [
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T03:44:39.462501+00:00",
+          "expiresAt": "2026-10-09T03:46:42.609+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T03:49:09.459402+00:00",
+          "expiresAt": "2026-10-09T03:49:12.155+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T04:02:16.474288+00:00",
+          "expiresAt": "2026-10-09T04:03:23.862+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T04:04:06.147611+00:00",
+          "expiresAt": "2026-10-09T04:05:09.267+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T04:07:39.52476+00:00",
+          "expiresAt": "2026-10-09T04:08:41.439+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T04:09:25.585569+00:00",
+          "expiresAt": "2026-10-09T04:13:22.036+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T04:13:22.219718+00:00",
+          "expiresAt": "2026-10-09T04:14:26.693+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T04:15:08.659722+00:00",
+          "expiresAt": "2026-10-09T04:16:13.163+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T04:17:05.05234+00:00",
+          "expiresAt": "2026-10-09T04:18:10.883+00:00"
+        }
+      ],
+      "testClaimsOrdinarilyClosed": true,
+      "candidateRemoved": true,
+      "controlStopped": true,
+      "removedTemporaryData": [
+        "output",
+        "offline-hardware",
+        "candidate.private.env",
+        "candidate.private.json",
+        "control.pid"
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "activeSessions": 0,
+          "retainedEnabled": false,
+          "recentOwnerScope": "owner-allowlist",
+          "sharedVideoEncoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "activeSessions": 0,
+          "retainedEnabled": false,
+          "recentOwnerScope": "owner-allowlist",
+          "sharedVideoEncoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          }
+        }
+      ],
+      "dispatcherActive": true,
+      "freeDiskBytes": 161425727488,
+      "offlineContainerAbsent": true
+    },
+    "limitations": [
+      "No successful retained decoder transfer on real sources in this pass.",
+      "No new gain on Normal; no continuous real playback acceptance with final aligned configuration.",
+      "Offline GPU success does not establish the cause of the real source failures.",
+      "Browser muted; no audible quality acceptance.",
+      "Provider versus shared proxy delivery not distinguished.",
+      "No emulator rerun: no product code or UI changed."
+    ],
+    "nextExperiment": "Evaluate bounded delivery-window completion versus ten-second retention deadline using isolated controlled slow transport before any further provider replay; keep timeouts, exact validation, claims and source/subtitle preservation unchanged.",
+    "artifacts": ".codex-artifacts/retained-real-sources-20261009/"
   }
 }
