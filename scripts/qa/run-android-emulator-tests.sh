@@ -62,6 +62,16 @@ record_diagnostic() {
     timeout --kill-after=2s 10s "$@" || result=$?
     printf 'exit_code=%s\n' "$result"
   } >> "$diagnostic_dir/$name.txt" 2>&1
+  if [[ "$name" == adb-state && "$result" == 124 && ! -e "$diagnostic_dir/emulator-hang-stack.txt" ]]; then
+    # Observe a live host process only after adb has already timed out. This
+    # diagnostic run cannot count as a timing benchmark; no retry or reboot.
+    local qpid
+    qpid="$(pgrep -f '^/.*/emulator/qemu/.*/qemu-system-' | head -n 1)"
+    if [[ -n "$qpid" ]]; then
+      timeout --kill-after=2s 15s sudo gdb -batch -ex 'set pagination off' \
+        -ex 'thread apply all bt 12' -p "$qpid" > "$diagnostic_dir/emulator-hang-stack.txt" 2>&1 || true
+    fi
+  fi
 }
 collect_captures() {
   mkdir -p app/build/outputs/androidTest-results/connected/captures

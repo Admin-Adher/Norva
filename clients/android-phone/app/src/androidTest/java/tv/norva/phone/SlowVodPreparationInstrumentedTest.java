@@ -19,8 +19,10 @@ public class SlowVodPreparationInstrumentedTest {
  @Test public void portraitRecovery() throws Exception { verify(360,800); }
  @Test public void landscapeRecovery() throws Exception { verify(844,390); }
  @Test public void steadyPreparation() throws Exception { verify(360,800,true); }
+ @Test public void portraitStaticArtwork() throws Exception { verify(360,800,false,true); }
  private void verify(int width,int height) throws Exception { verify(width,height,false); }
- private void verify(int width,int height,boolean steady) throws Exception {
+ private void verify(int width,int height,boolean steady) throws Exception { verify(width,height,steady,false); }
+ private void verify(int width,int height,boolean steady,boolean staticArtwork) throws Exception {
   android.app.Instrumentation i=InstrumentationRegistry.getInstrumentation();
   android.content.Context context=i.getTargetContext();
   android.app.Activity activity=i.startActivitySync(new android.content.Intent(context,RecoveryWebViewFixtureActivity.class)
@@ -34,6 +36,9 @@ public class SlowVodPreparationInstrumentedTest {
    view.setWebViewClient(new WebViewClient(){
     @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest request){
      String path=request.getUrl().getPath();
+     // Diagnostic only: same production image box and still asset. The real
+     // animated path remains exercised by all non-diagnostic methods.
+     if(staticArtwork && path.equals("/img/watch/norva-loading-60fps.webp"))path="/img/watch/norva-loading-still.webp";
      try{return new WebResourceResponse(path.endsWith(".css")?"text/css":path.endsWith(".js")?"text/javascript":path.endsWith(".html")?"text/html":"application/octet-stream","UTF-8",i.getContext().getAssets().open(path.substring(1)));}
      catch(Exception ignored){return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));}
     }
