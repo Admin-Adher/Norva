@@ -72,6 +72,8 @@ collect_captures() {
   record_diagnostic adb-devices adb devices -l
   record_diagnostic app-pid adb shell pidof "tv.norva.${platform}"
   record_diagnostic emulator-process pgrep -af 'qemu-system|emulator.*-avd'
+  record_diagnostic host-memory free -m
+  record_diagnostic host-process-memory ps -eo pid,comm,rss,vsz --sort=-rss
   record_diagnostic capture-pull adb pull "/sdcard/Android/data/tv.norva.${platform}/files/." app/build/outputs/androidTest-results/connected/captures/
 }
 # UTP can remove the test application and its external files at teardown.
@@ -87,6 +89,7 @@ finish_captures() {
   wait "$capture_pid" 2>/dev/null || true
   collect_captures
   record_diagnostic process-exit-info adb shell dumpsys activity exit-info "tv.norva.${platform}"
+  record_diagnostic host-kernel sudo dmesg --ctime
   local logcat_stopped_by_harness=0 logcat_status=0
   if kill -0 "$logcat_pid" 2>/dev/null; then
     logcat_stopped_by_harness=1

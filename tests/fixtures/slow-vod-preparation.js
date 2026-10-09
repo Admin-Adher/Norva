@@ -22,6 +22,8 @@ window.SlowPreparationQA = (() => {
   for(const el of document.querySelectorAll('[data-i18n]'))el.textContent=NorvaI18n.t(el.dataset.i18n,{defaultValue:el.textContent});
   page.showLoading();
   if(advance){clearTimeout(page._slowPreparationTimer);page.showSlowPreparation(page._slowPreparation);}
+  // Inspect a rendered state, including Android WebView's next paint.
+  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
   return page;
  }
  function layout(){
@@ -51,9 +53,11 @@ window.SlowPreparationQA = (() => {
    await new Promise(r=>setTimeout(r,100));check(events.join(',')===`close,closed,released,open-${kind==='movie'?'movies':'series'}`,'bad handoff '+events.join(','));
    page.hideLoading({restoreFocus:false});
   }
+  console.info('SLOW_VOD_QA Back');
   await mount();page.backBtn.click();check(page._slowPreparation===null,'Back left notice active');
   await mount();page.hideLoading({restoreFocus:false});check(document.getElementById('watch-slow-versions').onclick===null,'ready leaves action');
   await mount();page.app.currentUser={id:'other'};document.getElementById('watch-slow-versions').click();check(events.length===0,'stale owner action');page.hideLoading({restoreFocus:false});
+  console.info('SLOW_VOD_QA done');
   return 'ok';
  }
  return {mount,layout,verify,ready(){page.hideLoading({restoreFocus:false});},events:()=>events};
