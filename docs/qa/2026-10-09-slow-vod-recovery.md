@@ -20,3 +20,37 @@ Navigation, changement de compte, déconnexion, nouveau saut et disponibilité d
 Aucune réparation réseau revendiquée. Aucun nouveau relais configuré, aucune baisse des réserves, ni préchargement général. Les pilotes de cache restent dans leur périmètre actuel. Une préparation anticipée de fichiers lourds reste une piste à évaluer après comparaison des coûts de stockage, des pistes conservées et du bénéfice par rapport aux caches existants.
 
 Le nouveau checkout isolé préserve les modifications éditoriales présentes dans le checkout historique. Son attachement Codex a été refusé à la limite de 100 ; aucune pièce supprimée.
+
+## Suivi réseau et préparation anticipée
+
+Après accord explicite d'Adrien le 9 octobre, demande envoyée dans la conversation NodeMaven existante : possibilité d'un essai temporaire sur un trajet différent, coûts et conséquences sur l'IP à préciser avant essai. Aucun remplacement, configuration ou frais autorisé ; aucun accès fournisseur transmis. Message visible après envoi ; réponse technique pas encore reçue à ce relevé. Capture locale `nodemaven-sent.jpg`.
+
+L'évaluation du cache existant confirme un périmètre différent d'une préparation intégrale : `private-resume-hls-cache.js` impose un plafond mémoire maximal de 256 Mio et une durée maximale de 30 minutes ; le chemin de preuves récentes expire au plus à dix minutes et conserve au plus 64 Mio d'entrée multi-pistes. Ces bornes sont celles du code, pas un nouveau relevé des paramètres de chaque instance. Aucune borne modifiée.
+
+Protocole proposé pour la suite (non exécuté) : mêmes copies et positions, essai ordinaire, cache existant puis préparation anticipée de la même copie ; mesurer délai clic→lecture, au moins cinq minutes de progression, réserve, interruptions, octets fournisseur, stockage et CPU/GPU. Pistes audio et sous-titres, y compris forcés et traversants, doivent être identiques. Chaque source garde sa connexion unique et la lecture utilisateur reste prioritaire. Le coût de préparation et le gain sur la lecture suivante doivent être séparés ; aucune promesse pour la première lecture. Commencer par un petit lot explicite avec budget disque réservé avant acquisition et expiration/revalidation, sans admission automatique d'un catalogue entier.
+
+## Échecs de vérification conservés
+
+- CI initiale : références i18n des deux pages présentes uniquement dans la branche principale ; intégration de main puis regeneration ciblée.
+- Suite élargie du lecteur : huit tests sans DOM révélaient une dépendance inutile du nettoyage même sans proposition active. Nettoyage rendu inerte dans ce cas ; 283 tests lecteur/séries passent après correction.
+- Un contrat textuel de navigation attendait l'ancienne signature SeriesPage ; actualisé pour conserver les mêmes options et gardes que MoviesPage. Neuf tests de ce contrat réussis.
+- Première matrice ciblée 37934806259 : quatre émulateurs téléphone ont disparu pendant le test paysage (XML sans détail d'assertion, appareil absent). Les deux contrôles TV ont réussi. Cause de disparition non prouvée ; aucun échec de grande police attribué au produit. Le banc réutilise maintenant le DOM comme la SPA, charge son document par le chemin déjà utilisé par les autres fixtures WebView et journalise ses étapes. Seconde matrice ciblée sur code 8979e7be9 en cours ; pas de modification de seuil de vérification.
+- Matrices automatiques redondantes annulées au profit de la matrice ciblée ; premiers échecs conservés.
+
+### Diagnostic Android complémentaire
+
+La seconde matrice 37935667321 conserve le même arrêt des quatre émulateurs téléphone. Le code produit passe séparément la CI sur 063505192 puis a0d41d080 : 6 216 tests, 6 185 réussis, 31 ignorés, zéro échec ; paquets Phone/TV/Windows réussis. Les groupes locaux précédents sont inclus dans cette suite, pas additionnables.
+
+La matrice instrumentée 37936772099 ajoute des observations du noyau/processus/mémoire hôte et attend un rendu réel avant les mesures DOM. Les quatre téléphones s'arrêtent encore ; aucune assertion de police ou d'accessibilité n'est documentée. L'hôte a plus de 10 Gio disponibles au dernier relevé avant l'arrêt, sans OOM/segfault inscrit dans son noyau. Cela ne prouve pas l'état passé de la mémoire invitée ni la cause du blocage.
+
+Contrôle portrait séparé 37937510148 : même arrêt sur les quatre configurations ; un parcours français complet atteint `done` avant le parcours suivant dans le reçu geste/police 1.0. Ce n'est donc pas exclusivement une rotation paysage. Les tests TV de consentement passent, mais ne prouvent pas cet écran de lecteur.
+
+Comparaison diagnostique bornée du moteur graphique de l'émulateur proposée par entrée manuelle du workflow, sans changer le défaut existant ni le rendu applicatif. La [documentation Android](https://developer.android.com/studio/run/emulator-acceleration) distingue le mode actuel `swiftshader` et l'ancien `swiftshader_indirect`, déprécié depuis 36.4.9. Cette documentation ne prouve pas la cause de nos arrêts. Les mêmes tests/tailles/polices restent requis ; résultat à observer avant publication.
+
+### Clôture de cette vérification — publication bloquée
+
+La comparaison `swiftshader` 37938208208 échoue également sur les quatre téléphones ; les deux tests TV passent. Aucun changement du moteur graphique par défaut n'est retenu comme correction. Le relevé supplémentaire 37938875389 conserve le journal noyau invité (`-show-kernel`) et des relevés mémoire invités. Dans le reçu geste/police 1.0, la dernière lecture mémoire réussie précède les manipulations : environ 895 Mio disponibles à 13:47:07 UTC ; le noyau reste muet après 13:47:12, puis la lecture mémoire expire, ADB devient hors ligne et l'émulateur disparaît. Ni OOM ni panic n'est observé dans cette fenêtre. Cette absence ne permet pas d'exclure toutes les causes ; aucune attribution précise ou réparation Android n'est revendiquée.
+
+Les parcours DOM du navigateur sont réussis. Les assertions de fermeture et d'appartenance passent dans la suite Node ; elles ne remplacent pas le contrôle Android demandé par `AGENTS.md`. **PR741 reste non intégrée et l'interface n'est pas déployée.** Aucun déploiement Gateway/Edge/Web ni lecture fournisseur opérateur n'a eu lieu pendant cette vérification. Les pilotes existants, langues, réserves, routes et limites restent inchangés.
+
+La demande NodeMaven est envoyée et visible dans la conversation avec Anna, mais toujours sans réponse technique observée. Aucun accès fournisseur, remplacement d'IP ni frais engagé. Les captures et diagnostics restent sous `.codex-artifacts/slow-vod-recovery/` du checkout isolé. Le prochain travail doit résoudre le blocage du banc Android avant intégration, puis vérifier le parcours public réel avec fermeture de la copie courante et choix explicite des alternatives. Aucun essai de préparation intégrale n'a été lancé.
