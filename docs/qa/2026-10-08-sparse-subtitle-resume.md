@@ -1001,3 +1001,43 @@ La correction à éprouver devra conserver une **fenêtre lisible bornée autour
 Une commande opérateur combinant tunnel en arrière-plan et observateur a été refusée avant exécution par la revue automatique. Le tunnel et l'observation en lecture seule ont ensuite été lancés dans des sessions gérées séparées. Ce refus n'est pas un échec média. L'observateur réalise 100 relevés bornés, sans erreur de fixture. Après le refus de conservation, un récepteur local de diagnostic a seulement sauvegardé les mesures déjà présentes dans le navigateur, sans nouvel appel média.
 
 **Aucun nouveau gain sur Normal, aucun transfert réussi dans ce passage, aucune activation ou nouvelle garantie de fluidité.** La limite de fenêtre est maintenant reproduite et chiffrée; sa correction reste à implémenter et valider. Reçus : `.codex-artifacts/retained-startup-observation-20261009/summary.safe.json`, `reproduce-window.cjs`, puis `receipts/window-analysis.safe.json`, `window-predicate-reproduction.safe.json`, `http-local.safe.json`, `browser-failed.safe.json`, `delivery-observation.safe.json`, `cleanup.safe.json`. Les résultats précédents ne sont pas effacés.
+
+
+## 9 octobre, 09:15–09:36 Paris — fenêtre liée à la position regardée (PR730)
+
+### Correction du prototype et preuves isolées
+
+Le code `4031c065e` distingue désormais le téléchargement des segments de leur lecture. WatchPage ajoute la position vidéo courante aux rechargements existants des playlists, uniquement pour la même origine, la même session et le même jeton. Aucune requête fournisseur ou minuterie supplémentaire. Les requêtes d'un ancien lecteur ou d'une tentative remplacée ne rapportent plus de progression.
+
+Le Gateway accepte ce retour seulement pour le jeton principal courant, une session non expirée/non conservée, et le graphe déjà admis de conservation avec sous-titres exacts. L'origine de la session adoptée est ramenée à celle du producteur. Les valeurs non finies, hors borne, attachées à un autre spectateur ou pointant au-delà des segments servis sont refusées. La position est traduite en numéro de segment à partir des durées effectivement publiées, sans supposer une cadence fixe ni réutiliser un ancien manifeste.
+
+L'admission existante du producteur reçoit une borne supplémentaire : moins de62 segments devant le dernier segment regardé, pour la playlist inchangée de64 entrées. Deux entrées restent ainsi derrière la position rapportée. Le crédit de téléchargement existant reste nécessaire. Un lecteur sans retour négocié garde son comportement antérieur. Plafond disque, suppression bornée, réserves de démarrage, tokens, claims, routes, quotas, durée des sessions et contrôles de revalidation restent inchangés. Un retour arrière vers des fichiers absents ne devient pas admissible.
+
+**109 tests ciblés réussis**, groupes recoupés avec la CI. Sept nouvelles régressions couvrent le vrai écrivain HTTP avec préchargement de120s, les bornes, les origines après adoption, l'autorisation et les vrais callbacks HLS de WatchPage. Une assertion supplémentaire fait passer au manifeste corrigé le prédicat produit qui refusait PR729 : position absolue701s admise avec origine96, ancienne position601s refusée. Le groupe de sept tests repasse après cet ajout.
+
+Un canary **FFmpeg réel**, UID1000, réseau `none`, sans fournisseur ni GPU, confirme le débit contrôlé du producteur : à position0, arrêt au segment61 malgré le téléchargement de tous les segments;124s sont disponibles, donc la réserve de96s reste atteignable. Après retour de position101s, arrêt au segment111, origine de playlist96s : la position reste incluse. Pic8 264 062octets, sous le budget du canary32Mio. Processus et médias synthétiques arrêtés/supprimés. Ce test vérifie le producteur réel, pas un parcours complet de lecteur ni des sous-titres synthétiques supplémentaires.
+
+### Conclave : transfert réel, réception toujours trop lente
+
+Un seul démarrage à600s puis une seule reprise à678,095928s, sous claims Edge directs ordinaires, heartbeat0,5s/timeout1s et drainage, sur un Gateway temporaire. WatchPage/HLS1.7.3 réels, onglet visible. Aucun remplacement du Gateway public. Le candidat mesure bien le retour :418 requêtes locales de playlist portent la position, jusqu'à78,095s; le producteur l'associe à la séquence39. Ces requêtes sont des rechargements HLS locaux, pas418 appels média fournisseur.
+
+| Mesure depuis l'action | Démarrage | Reprise |
+|---|---:|---:|
+| Première image |59,608s|8,351s|
+| Lecture effective |307,545s|Non obtenue avant clôture|
+
+La phase initiale avance à78,096s, puis se met en attente. Un `levelLoadTimeOut` et deux `bufferStalledError` non fatals,13 intervalles de callbacks supérieurs à250ms, maximum2,952s : **aucune fluidité certifiée**. Une plage fournisseur de8Mio nécessite141,117s, dont140,393s dans l'attente du corps; le Gateway ne présente aucun PUT bloqué par la nouvelle borne durant les observations correspondantes. La réception contribue donc à la lenteur; livraison et relais restent non départagés.
+
+La pause conserve le décodeur en2,506s, connexion source fermée. Revalidation3,972s, transfert3,976s, même PID, zéro nouveau FFmpeg. Cela ne constitue pas un démarrage en4s. Après117,050s depuis la demande, le lecteur reste arrêté à78,095927s, tampon `[78,101334;126,058334]`, soit environ48s devant la position. La réserve de repli après transfert reste96s. L'essai est arrêté sans réduire la réserve ni prolonger la session.
+
+La source trop lente n'a produit que63 segments dans ce passage : **sa playlist n'a pas encore glissé**. La prévention réelle du dépassement rapide est donc démontrée par le canary FFmpeg et la régression, tandis que Conclave valide seulement la remontée des positions et le transfert avec ce code. Aucune comparaison causale de vitesse ni réparation complète de Conclave n'est revendiquée.
+
+La piste forcée n'a aucun paquet au diagnostic initial : `SUBTITLE_SNAPSHOT_PENDING` prouvé, pas une corruption. La SDH est acceptée par le lecteur strict, puis sélectionnée et affichée dans le navigateur avant fermeture. Le banc choisit de nouveau la piste forcée lors du chargement de la reprise; ce passage ne certifie pas un affichage SDH après transfert. L'extrait couvrant676,050–682,048s comprend le raccord678,096s : H264/AAC-LC stéréo48kHz, décodage sans erreur, pas maximal vidéo42ms/audio21,334ms, aucun trou supérieur à100ms. Navigateur muet : **qualité à l'écoute non validée**.
+
+### CI, incidents de preuve et clôture
+
+Le manifeste i18n doit être régénéré après WatchPage : premier contrôle arrêté à cette étape, corrigé par `6df0a5e49`, sans modification du comportement testé. Contrats CI ensuite réussis : **6 164 tests,31 ignorés, zéro échec**; paquets Phone/TV/Windows et autres contrats du code réussis. Matrice ciblée37898782724 : quatre WebViews téléphone gestes/trois boutons, polices1/1,3, plus deux contrôles consentement TV/D-pad, tous réussis. Les contrôles TV ne certifient pas le décodeur natif. Deux matrices automatiques doublons sont annulées, sans relance d'un test échoué. Une faute d'indentation du seul instrumentateur temporaire est corrigée avant le lancement du candidat; aucun incident de production.
+
+À **09:33:58 Paris**, les deux claims sont expirés normalement, candidat/contrôleur/tunnel arrêtés et retirés, zéro média temporaire restant, aucun échec de heartbeat. Les deux Gateways sont sains, image PR706 `efd3ae83…`, démarrages du8octobre14:25UTC inchangés; zéro session/encodeur réservé au relevé, dispatcher actif et161 733 328 896octets libres. Deux observations en lecture seule bornées,160 puis120 relevés, aucune erreur de fixture, terminées.
+
+**Conservation du décodeur toujours désactivée; cache récent toujours limité au propriétaire. Aucun déploiement Gateway, aucun nouveau test ou gain sur Normal.** Il reste à valider la protection durant une lecture réelle assez rapide pour faire glisser la fenêtre, puis la fluidité et l'écoute. Attachement PR730 refusé à la limite de100 pièces, aucune pièce retirée. Reçus : `.codex-artifacts/retained-rendered-window-20261009/summary.safe.json`, tests, `ci-contracts.log`, matrice Android, `conclave-resume-wait.jpg`, canary et `receipts/`.

@@ -12489,5 +12489,929 @@
       "remainingMediaFiles": []
     },
     "evidenceDirectory": ".codex-artifacts/retained-startup-observation-20261009"
+  },
+  "renderedWindow20261009": {
+    "code": "4031c065eebb33f022ec8e1cfca4a544025e43e1",
+    "manifest": "6df0a5e49e9c0f9f8f5eb8992c09944096496310",
+    "productionGatewayChanged": false,
+    "featureActivated": false,
+    "localTests": {
+      "passed": 109,
+      "skipped": 0,
+      "exactPredicateGroupPassed": 7,
+      "groupsOverlap": true
+    },
+    "ci": {
+      "passed": 6164,
+      "skipped": 31,
+      "failed": 0,
+      "androidTargetedRun": 37898782724,
+      "androidConfigurationsPassed": 6
+    },
+    "offlineCanary": {
+      "atUtc": "2026-10-09T07:29:33.142Z",
+      "realFfmpeg": true,
+      "network": "none",
+      "providerRequests": 0,
+      "first": {
+        "protocol": 1,
+        "consumed": 61,
+        "produced": 61,
+        "bytes": 6316503,
+        "peakBytes": 6316503,
+        "maxBytes": 33554432,
+        "aheadSegments": 32,
+        "renderedSequence": 0,
+        "admissionWaits": 0,
+        "admittedSegments": 62,
+        "pending": 1,
+        "stopped": false,
+        "resumeRetainedBytes": 0,
+        "resumeRetainedFiles": 0
+      },
+      "after": {
+        "protocol": 1,
+        "consumed": 111,
+        "produced": 111,
+        "bytes": 8146374,
+        "peakBytes": 8264062,
+        "maxBytes": 33554432,
+        "aheadSegments": 32,
+        "renderedSequence": 50,
+        "admissionWaits": 0,
+        "admittedSegments": 112,
+        "pending": 1,
+        "stopped": false,
+        "resumeRetainedBytes": 0,
+        "resumeRetainedFiles": 0
+      },
+      "origin": 96,
+      "renderedPosition": 101,
+      "containsRenderedPosition": true,
+      "initialMediaSeconds": 124,
+      "startupReserveUnchanged": 96,
+      "wholePlayerValidated": false
+    },
+    "real": {
+      "title": "FR - Conclave (2024)",
+      "firstFrameMs": 59608.100000000006,
+      "playingMs": 307545.2999999523,
+      "lastInitialMediaTime": 78.053334,
+      "resumePosition": 678.095928,
+      "resumed": {
+        "firstFrameMs": 8351.000000190747,
+        "lastMediaTime": 78.094334,
+        "frames": 1
+      },
+      "retainedSessionHit": true,
+      "errors": [
+        {
+          "phase": "initial",
+          "atMs": 185635.59999990463,
+          "details": "levelLoadTimeOut",
+          "fatal": false
+        },
+        {
+          "phase": "initial",
+          "atMs": 331121.5,
+          "details": "bufferStalledError",
+          "fatal": false
+        },
+        {
+          "phase": "initial",
+          "atMs": 398409,
+          "details": "bufferStalledError",
+          "fatal": false
+        }
+      ],
+      "waits": [
+        {
+          "phase": "initial",
+          "at": 0.058334
+        },
+        {
+          "phase": "initial",
+          "at": 78.058424
+        }
+      ],
+      "lastInitial": {
+        "phase": "initial",
+        "wallMs": 429704.09999990463,
+        "buffered": [
+          [
+            48.065334,
+            86.061334
+          ]
+        ],
+        "at": 78.095928,
+        "paused": true,
+        "ready": 4,
+        "origin": 599.9576666666667,
+        "selected": 3,
+        "showing": 1
+      },
+      "lastResumed": {
+        "phase": "resumed",
+        "wallMs": 117050.40000009537,
+        "buffered": [
+          [
+            78.101334,
+            126.058334
+          ]
+        ],
+        "at": 78.095927,
+        "paused": true,
+        "ready": 4,
+        "origin": 599.9576666666667,
+        "selected": 2,
+        "showing": 1
+      },
+      "frameGaps": {
+        "count": 13,
+        "maxSeconds": 2.951599999999977
+      },
+      "trace": [
+        {
+          "status": "ready",
+          "codecProfileSource": "request",
+          "audioRenditions": [],
+          "multiAudioHls": {
+            "protocol": 1,
+            "enabled": false,
+            "reason": "audio_track_count_below_minimum",
+            "maxAudioRenditions": 12,
+            "sourceTrackCount": 1,
+            "preparedTrackCount": 0,
+            "masterPlaylist": "playlist.m3u8",
+            "videoPlaylist": "playlist.m3u8",
+            "defaultHlsIndex": null,
+            "defaultStreamIndex": null
+          },
+          "subtitleRenditions": [
+            {
+              "hlsIndex": 0,
+              "streamIndex": 2,
+              "language": "fre",
+              "title": "VFQ Forced",
+              "sourceCodec": "ass",
+              "outputCodec": "webvtt",
+              "default": true,
+              "forced": true,
+              "hearingImpaired": false,
+              "playlistName": "subtitle_0.m3u8",
+              "segmentPattern": "subtitle_0-%05d.vtt"
+            },
+            {
+              "hlsIndex": 1,
+              "streamIndex": 3,
+              "language": "fre",
+              "title": "VFQ SDH",
+              "sourceCodec": "ass",
+              "outputCodec": "webvtt",
+              "default": false,
+              "forced": false,
+              "hearingImpaired": true,
+              "playlistName": "subtitle_1.m3u8",
+              "segmentPattern": "subtitle_1-%05d.vtt"
+            }
+          ],
+          "exactSubtitleHls": {
+            "protocol": 1,
+            "enabled": true,
+            "cacheEligible": true,
+            "reason": "enabled",
+            "maxRenditions": 8,
+            "maxCacheableRenditions": 8,
+            "sourceTrackCount": 2,
+            "preparedTrackCount": 2,
+            "delivery": {
+              "protocol": 1,
+              "kind": "committed-webvtt",
+              "clock": "source-pes-v1",
+              "streamIndexes": [
+                2,
+                3
+              ]
+            }
+          },
+          "startupPolicy": {
+            "protocol": 2,
+            "eligible": false,
+            "pipeline": "video-transcode",
+            "targetBufferSeconds": null,
+            "minimumEncodeRateX": 2,
+            "observedEncodeRateX": 0.626,
+            "reason": "encode-rate-below-minimum"
+          },
+          "startupTimings": {
+            "admissionWaitMs": 0,
+            "ownerProviderLockWaitMs": 0,
+            "adaptiveRouteLookupMs": 1,
+            "adaptiveRouteControlStatus": "fallback",
+            "adaptiveRouteSelectionReason": "adaptive-disabled",
+            "cleanupMs": 0,
+            "slotReleaseWaitMs": 0,
+            "stoppedConflictingSessions": 0,
+            "globalBackgroundExtractionPreemptions": 0,
+            "globalBackgroundWhisperPreemptions": 0,
+            "globalBackgroundCpuPreemptions": 0,
+            "codecProfileMs": 0,
+            "codecProfileProbeRan": false,
+            "codecProfileProbeReleaseWaitMs": 0,
+            "boundedMkvInputPump": false,
+            "fileSizeBytes": 3093967019,
+            "fileSizeProbeRan": false,
+            "fileSizeProbeMs": 0,
+            "fileSizeProbeReleaseWaitMs": 0,
+            "ffmpegReadyMs": 58108,
+            "playlistSegmentCount": 3,
+            "playlistBufferSeconds": 6.006,
+            "firstSegmentBytes": 440296,
+            "playlistSegmentBytes": 1258284,
+            "startOffsetProbeMs": 0,
+            "totalMs": 58118,
+            "ffmpegSpawnCount": 1,
+            "analyzerSpawnCount": 0,
+            "providerGetPreopened": false,
+            "providerSeekIdentityPreflight": false,
+            "providerSeekIdentityDeferredToBroker": true,
+            "providerSeekHeaderPrefetch": false,
+            "fileSizeDiscoveredFromPlaybackGet": false,
+            "fileSizePendingFullBodyEof": false,
+            "providerGetPreopenMs": 0,
+            "providerNodeTransport": "http",
+            "providerProxySlot": 1,
+            "finiteMkvSeekBroker": true,
+            "finiteTsSeekBroker": false,
+            "finiteMkvSeekProviderFetches": 0,
+            "finiteMkvCurrentPrefixBytes": 0,
+            "finiteMkvSeekWindowBytes": 2097152,
+            "finiteTsSeekLookbehindBytes": 0,
+            "finiteTsSeekContinuationGraceMs": 0,
+            "finiteTsAbandonedDrainMs": 0,
+            "finiteMp4AbandonedDrainMs": 0,
+            "finiteMkvSeekWarmupCueGraceMs": 50,
+            "finiteMkvSeekWarmupWindowBytes": 262144,
+            "finiteMkvResumePrefixWeakValidationBytes": 1048576,
+            "finiteMkvSeekSequentialWindowBytes": 8388608,
+            "finiteMkvSeekMultiAudioWindow": false,
+            "finiteMkvSeekCacheLimitBytes": 67108864,
+            "finiteTsIndexUsed": false,
+            "finiteTsIndexPrerollSeconds": null,
+            "finiteMkvResumeMode": "continuous-window-indexed-seek",
+            "multiAudioHls": {
+              "protocol": 1,
+              "enabled": false,
+              "reason": "audio_track_count_below_minimum",
+              "maxAudioRenditions": 12,
+              "sourceTrackCount": 1,
+              "preparedTrackCount": 0,
+              "masterPlaylist": "playlist.m3u8",
+              "videoPlaylist": "playlist.m3u8",
+              "defaultHlsIndex": null,
+              "defaultStreamIndex": null
+            },
+            "exactSubtitleHls": {
+              "protocol": 1,
+              "enabled": true,
+              "cacheEligible": true,
+              "reason": "enabled",
+              "maxRenditions": 8,
+              "maxCacheableRenditions": 8,
+              "sourceTrackCount": 2,
+              "preparedTrackCount": 2,
+              "delivery": {
+                "protocol": 1,
+                "kind": "committed-webvtt",
+                "clock": "source-pes-v1",
+                "streamIndexes": [
+                  2,
+                  3
+                ]
+              }
+            },
+            "vaapiFastReadiness": true,
+            "vaapiFastReadinessBufferSeconds": 6,
+            "beforeFfmpegMs": 10,
+            "retainedSharedCacheHlsOutput": false,
+            "hlsDiskReservationMs": 20,
+            "finiteTsFastInput": false,
+            "finiteTsDurationScanSkipped": false,
+            "finiteTsResumeAligned": false,
+            "finiteMp4ResumeAligned": false,
+            "exactSubtitleBootstrap": {
+              "protocol": 1,
+              "preparedTrackCount": 2,
+              "firstMediaSequence": 1
+            },
+            "ffmpegSpawnDelayMs": 28,
+            "videoEncoder": "vaapi",
+            "videoDecode": "vaapi",
+            "vaapiHardwareDecodeFallbacks": 0,
+            "providerValidatorEvidence": "weak-or-absent",
+            "finiteMkvSeekProviderIdentityBound": true,
+            "firstSegmentReadyMs": 51640.290283203125,
+            "playlistProductionSpanMs": 6392.749755859375,
+            "playlistPostFirstBufferSeconds": 4.004,
+            "sustainedMediaProductionRateX": 0.626,
+            "mediaProductionRateX": 0.626,
+            "inputProbeMode": "known-fast",
+            "fastInputProbeFallbacks": 0
+          },
+          "requestedSeekOffset": 600,
+          "actualStartOffset": 600,
+          "localSeekTarget": 0,
+          "sourceTimestamps": false,
+          "audioStreamIndex": 1,
+          "subtitleStreamIndex": 2,
+          "audioMode": "transcode",
+          "atUtc": "2026-10-09T07:25:34.355983+00:00",
+          "label": "initial",
+          "process": {
+            "pids": [
+              "77"
+            ],
+            "externalSockets": 1
+          }
+        },
+        {
+          "status": "ready",
+          "codecProfileSource": "request",
+          "audioRenditions": [],
+          "multiAudioHls": {
+            "protocol": 1,
+            "enabled": false,
+            "reason": "audio_track_count_below_minimum",
+            "maxAudioRenditions": 12,
+            "sourceTrackCount": 1,
+            "preparedTrackCount": 0,
+            "masterPlaylist": "playlist.m3u8",
+            "videoPlaylist": "playlist.m3u8",
+            "defaultHlsIndex": null,
+            "defaultStreamIndex": null
+          },
+          "subtitleRenditions": [
+            {
+              "hlsIndex": 0,
+              "streamIndex": 2,
+              "language": "fre",
+              "title": "VFQ Forced",
+              "sourceCodec": "ass",
+              "outputCodec": "webvtt",
+              "default": true,
+              "forced": true,
+              "hearingImpaired": false,
+              "playlistName": "subtitle_0.m3u8",
+              "segmentPattern": "subtitle_0-%05d.vtt"
+            },
+            {
+              "hlsIndex": 1,
+              "streamIndex": 3,
+              "language": "fre",
+              "title": "VFQ SDH",
+              "sourceCodec": "ass",
+              "outputCodec": "webvtt",
+              "default": false,
+              "forced": false,
+              "hearingImpaired": true,
+              "playlistName": "subtitle_1.m3u8",
+              "segmentPattern": "subtitle_1-%05d.vtt"
+            }
+          ],
+          "exactSubtitleHls": {
+            "protocol": 1,
+            "enabled": true,
+            "cacheEligible": true,
+            "reason": "enabled",
+            "maxRenditions": 8,
+            "maxCacheableRenditions": 8,
+            "sourceTrackCount": 2,
+            "preparedTrackCount": 2,
+            "delivery": {
+              "protocol": 1,
+              "kind": "committed-webvtt",
+              "clock": "source-pes-v1",
+              "streamIndexes": [
+                2,
+                3
+              ]
+            }
+          },
+          "startupPolicy": {
+            "protocol": 2,
+            "eligible": false,
+            "pipeline": "video-transcode",
+            "targetBufferSeconds": null,
+            "minimumEncodeRateX": 2,
+            "observedEncodeRateX": 0.626,
+            "reason": "encode-rate-below-minimum"
+          },
+          "startupTimings": {
+            "admissionWaitMs": 0,
+            "ownerProviderLockWaitMs": 0,
+            "adaptiveRouteLookupMs": 1,
+            "adaptiveRouteControlStatus": "fallback",
+            "adaptiveRouteSelectionReason": "adaptive-disabled",
+            "cleanupMs": 0,
+            "slotReleaseWaitMs": 0,
+            "stoppedConflictingSessions": 0,
+            "globalBackgroundExtractionPreemptions": 0,
+            "globalBackgroundWhisperPreemptions": 0,
+            "globalBackgroundCpuPreemptions": 0,
+            "codecProfileMs": 0,
+            "codecProfileProbeRan": false,
+            "codecProfileProbeReleaseWaitMs": 0,
+            "boundedMkvInputPump": false,
+            "fileSizeBytes": 3093967019,
+            "fileSizeProbeRan": false,
+            "fileSizeProbeMs": 0,
+            "fileSizeProbeReleaseWaitMs": 0,
+            "ffmpegReadyMs": 58108,
+            "playlistSegmentCount": 3,
+            "playlistBufferSeconds": 6.006,
+            "firstSegmentBytes": 440296,
+            "playlistSegmentBytes": 1258284,
+            "startOffsetProbeMs": 0,
+            "totalMs": 58118,
+            "ffmpegSpawnCount": 1,
+            "analyzerSpawnCount": 0,
+            "providerGetPreopened": false,
+            "providerSeekIdentityPreflight": false,
+            "providerSeekIdentityDeferredToBroker": true,
+            "providerSeekHeaderPrefetch": false,
+            "fileSizeDiscoveredFromPlaybackGet": false,
+            "fileSizePendingFullBodyEof": false,
+            "providerGetPreopenMs": 0,
+            "providerNodeTransport": "http",
+            "providerProxySlot": 1,
+            "finiteMkvSeekBroker": true,
+            "finiteTsSeekBroker": false,
+            "finiteMkvSeekProviderFetches": 0,
+            "finiteMkvCurrentPrefixBytes": 0,
+            "finiteMkvSeekWindowBytes": 2097152,
+            "finiteTsSeekLookbehindBytes": 0,
+            "finiteTsSeekContinuationGraceMs": 0,
+            "finiteTsAbandonedDrainMs": 0,
+            "finiteMp4AbandonedDrainMs": 0,
+            "finiteMkvSeekWarmupCueGraceMs": 50,
+            "finiteMkvSeekWarmupWindowBytes": 262144,
+            "finiteMkvResumePrefixWeakValidationBytes": 1048576,
+            "finiteMkvSeekSequentialWindowBytes": 8388608,
+            "finiteMkvSeekMultiAudioWindow": false,
+            "finiteMkvSeekCacheLimitBytes": 67108864,
+            "finiteTsIndexUsed": false,
+            "finiteTsIndexPrerollSeconds": null,
+            "finiteMkvResumeMode": "continuous-window-indexed-seek",
+            "multiAudioHls": {
+              "protocol": 1,
+              "enabled": false,
+              "reason": "audio_track_count_below_minimum",
+              "maxAudioRenditions": 12,
+              "sourceTrackCount": 1,
+              "preparedTrackCount": 0,
+              "masterPlaylist": "playlist.m3u8",
+              "videoPlaylist": "playlist.m3u8",
+              "defaultHlsIndex": null,
+              "defaultStreamIndex": null
+            },
+            "exactSubtitleHls": {
+              "protocol": 1,
+              "enabled": true,
+              "cacheEligible": true,
+              "reason": "enabled",
+              "maxRenditions": 8,
+              "maxCacheableRenditions": 8,
+              "sourceTrackCount": 2,
+              "preparedTrackCount": 2,
+              "delivery": {
+                "protocol": 1,
+                "kind": "committed-webvtt",
+                "clock": "source-pes-v1",
+                "streamIndexes": [
+                  2,
+                  3
+                ]
+              }
+            },
+            "vaapiFastReadiness": true,
+            "vaapiFastReadinessBufferSeconds": 6,
+            "beforeFfmpegMs": 10,
+            "retainedSharedCacheHlsOutput": false,
+            "hlsDiskReservationMs": 20,
+            "finiteTsFastInput": false,
+            "finiteTsDurationScanSkipped": false,
+            "finiteTsResumeAligned": false,
+            "finiteMp4ResumeAligned": false,
+            "exactSubtitleBootstrap": {
+              "protocol": 1,
+              "preparedTrackCount": 2,
+              "firstMediaSequence": 1
+            },
+            "ffmpegSpawnDelayMs": 28,
+            "videoEncoder": "vaapi",
+            "videoDecode": "vaapi",
+            "vaapiHardwareDecodeFallbacks": 0,
+            "providerValidatorEvidence": "weak-or-absent",
+            "finiteMkvSeekProviderIdentityBound": true,
+            "firstSegmentReadyMs": 51640.290283203125,
+            "playlistProductionSpanMs": 6392.749755859375,
+            "playlistPostFirstBufferSeconds": 4.004,
+            "sustainedMediaProductionRateX": 0.626,
+            "mediaProductionRateX": 0.626,
+            "inputProbeMode": "known-fast",
+            "fastInputProbeFallbacks": 0
+          },
+          "requestedSeekOffset": 600,
+          "actualStartOffset": 600,
+          "localSeekTarget": 0,
+          "sourceTimestamps": false,
+          "audioStreamIndex": 1,
+          "subtitleStreamIndex": 2,
+          "audioMode": "transcode",
+          "atUtc": "2026-10-09T07:31:46.484787+00:00",
+          "label": "before-park",
+          "process": {
+            "pids": [
+              "77"
+            ],
+            "externalSockets": 1
+          }
+        },
+        {
+          "label": "parkResult",
+          "atUtc": "2026-10-09T07:31:49.070155+00:00",
+          "status": "retained",
+          "elapsedMs": 2506
+        },
+        {
+          "label": "parked",
+          "atUtc": "2026-10-09T07:31:49.126811+00:00",
+          "process": {
+            "pids": [
+              "77"
+            ],
+            "externalSockets": 0
+          }
+        },
+        {
+          "status": "ready",
+          "codecProfileSource": "request",
+          "audioRenditions": [],
+          "multiAudioHls": {
+            "protocol": 1,
+            "enabled": false,
+            "reason": "audio_track_count_below_minimum",
+            "maxAudioRenditions": 12,
+            "sourceTrackCount": 1,
+            "preparedTrackCount": 0,
+            "masterPlaylist": "playlist.m3u8",
+            "videoPlaylist": "playlist.m3u8",
+            "defaultHlsIndex": null,
+            "defaultStreamIndex": null
+          },
+          "subtitleRenditions": [
+            {
+              "hlsIndex": 0,
+              "streamIndex": 2,
+              "language": "fre",
+              "title": "VFQ Forced",
+              "sourceCodec": "ass",
+              "outputCodec": "webvtt",
+              "default": true,
+              "forced": true,
+              "hearingImpaired": false,
+              "playlistName": "subtitle_0.m3u8",
+              "segmentPattern": "subtitle_0-%05d.vtt"
+            },
+            {
+              "hlsIndex": 1,
+              "streamIndex": 3,
+              "language": "fre",
+              "title": "VFQ SDH",
+              "sourceCodec": "ass",
+              "outputCodec": "webvtt",
+              "default": false,
+              "forced": false,
+              "hearingImpaired": true,
+              "playlistName": "subtitle_1.m3u8",
+              "segmentPattern": "subtitle_1-%05d.vtt"
+            }
+          ],
+          "exactSubtitleHls": {
+            "protocol": 1,
+            "enabled": true,
+            "cacheEligible": true,
+            "reason": "enabled",
+            "maxRenditions": 8,
+            "maxCacheableRenditions": 8,
+            "sourceTrackCount": 2,
+            "preparedTrackCount": 2,
+            "delivery": {
+              "protocol": 1,
+              "kind": "committed-webvtt",
+              "clock": "source-pes-v1",
+              "streamIndexes": [
+                2,
+                3
+              ]
+            }
+          },
+          "startupPolicy": {
+            "protocol": 2,
+            "eligible": false,
+            "pipeline": "video-transcode",
+            "targetBufferSeconds": null,
+            "minimumEncodeRateX": 1.15,
+            "observedEncodeRateX": null,
+            "reason": "requested-transcode"
+          },
+          "startupTimings": {
+            "recentDeliveryTargetUsed": true,
+            "retainedSessionValidationMs": 3972,
+            "retainedSessionHit": true,
+            "ffmpegSpawnCount": 0,
+            "analyzerSpawnCount": 0,
+            "fileSizeBytes": 3093967019,
+            "retainedSessionTransferMs": 3976,
+            "totalMs": 3976
+          },
+          "requestedSeekOffset": 678.095928,
+          "actualStartOffset": 600,
+          "localSeekTarget": 78.09592799999996,
+          "sourceTimestamps": false,
+          "audioStreamIndex": 1,
+          "subtitleStreamIndex": 2,
+          "audioMode": "transcode",
+          "atUtc": "2026-10-09T07:31:53.600207+00:00",
+          "label": "resumed",
+          "process": {
+            "pids": [
+              "77"
+            ],
+            "externalSockets": 0
+          }
+        },
+        {
+          "label": "sameDecoder",
+          "same": true
+        },
+        {
+          "status": "ready",
+          "codecProfileSource": "request",
+          "audioRenditions": [],
+          "multiAudioHls": {
+            "protocol": 1,
+            "enabled": false,
+            "reason": "audio_track_count_below_minimum",
+            "maxAudioRenditions": 12,
+            "sourceTrackCount": 1,
+            "preparedTrackCount": 0,
+            "masterPlaylist": "playlist.m3u8",
+            "videoPlaylist": "playlist.m3u8",
+            "defaultHlsIndex": null,
+            "defaultStreamIndex": null
+          },
+          "subtitleRenditions": [
+            {
+              "hlsIndex": 0,
+              "streamIndex": 2,
+              "language": "fre",
+              "title": "VFQ Forced",
+              "sourceCodec": "ass",
+              "outputCodec": "webvtt",
+              "default": true,
+              "forced": true,
+              "hearingImpaired": false,
+              "playlistName": "subtitle_0.m3u8",
+              "segmentPattern": "subtitle_0-%05d.vtt"
+            },
+            {
+              "hlsIndex": 1,
+              "streamIndex": 3,
+              "language": "fre",
+              "title": "VFQ SDH",
+              "sourceCodec": "ass",
+              "outputCodec": "webvtt",
+              "default": false,
+              "forced": false,
+              "hearingImpaired": true,
+              "playlistName": "subtitle_1.m3u8",
+              "segmentPattern": "subtitle_1-%05d.vtt"
+            }
+          ],
+          "exactSubtitleHls": {
+            "protocol": 1,
+            "enabled": true,
+            "cacheEligible": true,
+            "reason": "enabled",
+            "maxRenditions": 8,
+            "maxCacheableRenditions": 8,
+            "sourceTrackCount": 2,
+            "preparedTrackCount": 2,
+            "delivery": {
+              "protocol": 1,
+              "kind": "committed-webvtt",
+              "clock": "source-pes-v1",
+              "streamIndexes": [
+                2,
+                3
+              ]
+            }
+          },
+          "startupPolicy": {
+            "protocol": 2,
+            "eligible": false,
+            "pipeline": "video-transcode",
+            "targetBufferSeconds": null,
+            "minimumEncodeRateX": 1.15,
+            "observedEncodeRateX": null,
+            "reason": "requested-transcode"
+          },
+          "startupTimings": {
+            "recentDeliveryTargetUsed": true,
+            "retainedSessionValidationMs": 3972,
+            "retainedSessionHit": true,
+            "ffmpegSpawnCount": 0,
+            "analyzerSpawnCount": 0,
+            "fileSizeBytes": 3093967019,
+            "retainedSessionTransferMs": 3976,
+            "totalMs": 3976
+          },
+          "requestedSeekOffset": 678.095928,
+          "actualStartOffset": 600,
+          "localSeekTarget": 78.09592799999996,
+          "sourceTimestamps": false,
+          "audioStreamIndex": 1,
+          "subtitleStreamIndex": 2,
+          "audioMode": "transcode",
+          "atUtc": "2026-10-09T07:33:44.101670+00:00",
+          "label": "before-finish",
+          "process": {
+            "pids": [
+              "77"
+            ],
+            "externalSockets": 1
+          }
+        }
+      ],
+      "heartbeatFailures": [],
+      "finalProcess": {
+        "pids": [],
+        "externalSockets": 0
+      },
+      "feedback": {
+        "requests": 418,
+        "maxReportedPosition": 78.095,
+        "maxSequence": 39,
+        "maxProducedSequence": 62
+      },
+      "maxCompletedProviderWindowMs": 141117,
+      "completedWindows": 14,
+      "rollingOvertakeNotReproducedOnSlowRealSource": true,
+      "audibleAcceptance": false
+    },
+    "audio": {
+      "atUtc": "2026-10-09T07:33:33.254Z",
+      "outputs": [
+        {
+          "segments": [
+            "video-00038.ts",
+            "video-00039.ts",
+            "video-00040.ts"
+          ],
+          "streams": [
+            {
+              "type": "video",
+              "codec": "h264",
+              "profile": "High"
+            },
+            {
+              "type": "audio",
+              "codec": "aac",
+              "profile": "LC",
+              "sampleRate": "48000",
+              "channels": 2
+            }
+          ],
+          "packets": {
+            "audio": {
+              "count": 282,
+              "first": 676.053667,
+              "last": 682.048333,
+              "maxGap": 0.02133400000002439,
+              "gapsOver100ms": 0
+            },
+            "video": {
+              "count": 144,
+              "first": 676.05,
+              "last": 682.015,
+              "maxGap": 0.04200000000003001,
+              "gapsOver100ms": 0
+            }
+          },
+          "probeExit": 0,
+          "probeErrorLines": 0,
+          "decodeExit": 0,
+          "decodeErrorLines": 0,
+          "mediaDeleted": true
+        }
+      ],
+      "providerRequests": 0,
+      "audibleAcceptance": false
+    },
+    "subtitleRead": {
+      "atUtc": "2026-10-09T07:27:16.596348+00:00",
+      "tracks": [
+        {
+          "index": 2,
+          "accepted": false,
+          "error": "SUBTITLE_SNAPSHOT_PENDING",
+          "vttHeader": "\"WEBVTT\\n\"",
+          "vttTimes": [],
+          "journalLines": []
+        },
+        {
+          "index": 3,
+          "accepted": true,
+          "error": null,
+          "vttHeader": "\"WEBVTT\\n\\n\"",
+          "vttTimes": [
+            "09:56.596 --> 09:58.765",
+            "09:58.890 --> 10:01.143",
+            "10:01.268 --> 10:03.228"
+          ],
+          "journalLines": [
+            "0,  596596000,  596596000,  2169000,       52, 0xfcfc13b7",
+            "0,  598890000,  598890000,  2253000,       56, 0x6bcc1654",
+            "0,  601268000,  601268000,  1960000,       47, 0x91e110a2"
+          ]
+        }
+      ]
+    },
+    "cleanup": {
+      "atUtc": "2026-10-09T07:33:58.217530+00:00",
+      "productionChanged": false,
+      "claims": [
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T07:24:35.993861+00:00",
+          "expiresAt": "2026-10-09T07:31:49.35+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T07:31:49.536862+00:00",
+          "expiresAt": "2026-10-09T07:33:46.889+00:00"
+        }
+      ],
+      "testClaimsOrdinarilyClosed": true,
+      "candidateRemoved": true,
+      "controlStopped": true,
+      "removedTemporaryData": [
+        "output",
+        "candidate.private.env",
+        "candidate.private.json",
+        "control.pid",
+        "real-subtitle-2.vtt.private",
+        "real-subtitle-2.commit.private",
+        "real-subtitle-3.vtt.private",
+        "real-subtitle-3.commit.private"
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "activeSessions": 0,
+          "retainedEnabled": false,
+          "recentOwnerScope": "owner-allowlist",
+          "sharedVideoEncoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "activeSessions": 0,
+          "retainedEnabled": false,
+          "recentOwnerScope": "owner-allowlist",
+          "sharedVideoEncoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          }
+        }
+      ],
+      "dispatcherActive": true,
+      "freeDiskBytes": 161733328896,
+      "offlineContainerAbsent": true,
+      "hardwareClockContainerAbsent": true,
+      "remainingMediaFiles": []
+    },
+    "evidenceDirectory": ".codex-artifacts/retained-rendered-window-20261009"
   }
 }

@@ -31,6 +31,17 @@ test('real writer keeps the rendered position inside 64 segments despite 120s br
  done=false;const second=put(a.urlFor('video-00112.ts')).then(s=>{done=true;return s;}).catch(()=>null);await settle();assert.equal(done,false);
  const text=await fs.readFile(path.join(root,'video.m3u8'),'utf8');const origin=a.resumePlaylistClock.originFor('video.m3u8',text);
  assert.ok(origin<=101);assert.ok(origin+64*2.002>101);
+ // The same product predicate that refused PR729 now admits this position.
+ const start=gatewaySource.indexOf('async function retainedSessionPositionAvailable(');
+ const end=gatewaySource.indexOf('\nfunction acknowledgeRetainedViewerSegment',start);
+ const available=vm.runInNewContext('('+gatewaySource.slice(start,end)+')',{
+  parseResumeMediaPlaylist:require('../services/media-gateway/src/private-resume-hls-cache').parseResumeMediaPlaylist,
+  exactSubtitleHlsEnabled:()=>true,readPrivateResumeAsset:(_s,name)=>fs.readFile(path.join(root,name))
+ });
+ const session={actualStartOffset:600,hlsOutputAdmission:a};
+ assert.equal(await available(session,701),true);
+ assert.equal(session.retainedViewCandidate.origin,origin);
+ assert.equal(await available(session,601),false);
  assert.equal(a.snapshot().maxBytes,1024*1024);assert.ok(a.snapshot().bytes<=1024*1024);
  await a.stop();await second;
 });
