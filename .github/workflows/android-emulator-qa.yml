@@ -21,6 +21,14 @@ on:
         options:
           - swiftshader_indirect
           - swiftshader
+      phone-vulkan:
+        description: 'Keep default rendering, or compare the documented Chromium/GLES emulator fallback'
+        required: false
+        default: 'enabled'
+        type: choice
+        options:
+          - enabled
+          - disabled
   pull_request:
     paths:
       - '.github/workflows/android-emulator-qa.yml'
@@ -90,7 +98,7 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_7
-          emulator-options: -no-window -gpu ${{ inputs['phone-gpu'] || 'swiftshader_indirect' }} -no-snapshot -no-boot-anim -show-kernel
+          emulator-options: -no-window -gpu ${{ inputs['phone-gpu'] || 'swiftshader_indirect' }} -no-snapshot -no-boot-anim -show-kernel ${{ inputs['phone-vulkan'] == 'disabled' && '-feature -Vulkan' || '' }}
           script: bash scripts/qa/run-android-emulator-tests.sh phone ${{ matrix.navigation }} ${{ matrix.font_scale }}
       - name: Upload phone test reports
         if: always()
