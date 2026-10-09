@@ -1047,3 +1047,12 @@ Le manifeste i18n doit être régénéré après WatchPage : premier contrôle a
 Une huitième régression reproduit un blocage du nouveau mécanisme : après une discontinuité de playlist, l'horloge refuse correctement toute conservation, mais l'ancien crédit de position reste figé. La correction `a5668eade` retire ce seul crédit quand l'horloge vidéo ne peut plus être attestée. La production ordinaire garde sa limite de téléchargement et son budget ; la réutilisation du décodeur reste refusée. Aucune position ni continuité n'est inventée.
 
 La régression échoue avant correction, puis **110 tests ciblés réussissent**. À **09:40:11 Paris**, le canary FFmpeg sans réseau repasse avec ce dernier code : mêmes bornes 61/111, origine 96 s pour position 101 s, même pic disque. Les mesures Conclave précédentes concernent `4031c065e` et ne sont pas présentées comme un nouveau rejeu de ce dernier correctif défensif. Les classes et assets Android sont inchangés depuis la matrice ciblée réussie ; les matrices automatiques doublons sont annulées. Production Gateway inchangée.
+
+
+## Activation du pilote autorisée — 9 octobre, 10:07 Paris
+
+À la demande explicite du propriétaire, la révision PR730 est déployée sur les deux Gateways et le raccordement Edge. La conservation du décodeur est maintenant **active uniquement pour le compte du pilote**, vérifié dans le navigateur. Les mentions précédentes « désactivée » restent les états historiques de leurs essais.
+
+Les nouveaux canaries image/GPU/fenêtre rendue/sous-titres/garde propriétaire réussissent. Les deux essais dans le lecteur public, Conclave puis Le Robot Sauvage, échouent cependant à la limite de préparation de 60 secondes, avant toute première image. Aucun transfert public réussi, nouvelle accélération ou validation à l’écoute. Les serveurs sont sains, les essais arrêtés et les admissions restaurées. Le pilote reste restreint ; la généralisation n’est pas validée.
+
+Le [rapport de déploiement](2026-10-09-retained-owner-pilot.md) et son JSON conservent les empreintes, les pauses d’admission de 85,662008 puis 21,132741 secondes, les refus de fixture/prélecture, la restauration et les limites des deux essais réels.

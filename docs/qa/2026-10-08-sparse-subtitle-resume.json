@@ -13467,5 +13467,16 @@
         "admissionSha256": "9eb56568dfbde1bec5a27ac75498ba4e8d516df575933c78c1553d608559a718"
       }
     }
+  },
+  "ownerPilotDeployment20261009": {
+    "report": "2026-10-09-retained-owner-pilot.md",
+    "outcome": "deployed-owner-only-real-startup-validation-failed",
+    "activatedOwners": 1,
+    "revision": "56736d049aad28a0342f0a2f2801d4b41c609a37",
+    "gatewayImage": "sha256:b7daa15239a9e156792eb684601eb8f76fdfd3916ad8217a02e5006484e23624",
+    "publicTrials": 2,
+    "successfulPublicTrials": 0,
+    "audibleAcceptance": false,
+    "finalHealthAt": "2026-10-09T08:07:23.229224+00:00"
   }
 }
