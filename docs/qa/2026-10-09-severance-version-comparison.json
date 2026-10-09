@@ -1,0 +1,465 @@
+{
+  "date": "2026-10-09",
+  "scope": "Severance S1E1, one authorized owner, four sequential public zero starts",
+  "baseline": "2026-10-09-zero-start-recovery.json",
+  "newPlaybackAttempts": 4,
+  "copies": [
+    {
+      "label": "strng-fr-4k",
+      "clickAtUtc": "2026-10-09T10:48:37.424Z",
+      "session": {
+        "error": null,
+        "state": "expired",
+        "source": "Strng IPTV 8K",
+        "createdAt": "2026-10-09T10:48:38.69997+00:00",
+        "sameFileAsSlowReference": false,
+        "sameItemAsSlowReference": false,
+        "events": [
+          {
+            "at": "2026-10-09T10:48:52.456739+00:00",
+            "code": null,
+            "event": "first_frame",
+            "ttffMs": 14639,
+            "position": 0
+          }
+        ]
+      },
+      "samples": [
+        {
+          "copy": "strng-fr-4k",
+          "atUtc": "2026-10-09T10:49:21.991Z",
+          "video": {
+            "buffer": [
+              [
+                0.064333,
+                16.065333
+              ]
+            ],
+            "error": null,
+            "paused": true,
+            "ready": 4,
+            "time": 0
+          }
+        },
+        {
+          "copy": "strng-fr-4k",
+          "atUtc": "2026-10-09T10:49:57.941Z",
+          "video": {
+            "buffer": [
+              [
+                0.064333,
+                22.065333
+              ]
+            ],
+            "error": null,
+            "paused": true,
+            "ready": 4,
+            "time": 0
+          }
+        },
+        {
+          "copy": "strng-fr-4k",
+          "atUtc": "2026-10-09T10:50:32.169Z",
+          "video": {
+            "buffer": [
+              [
+                0.064333,
+                26.065333
+              ]
+            ],
+            "error": null,
+            "paused": true,
+            "ready": 4,
+            "time": 0
+          }
+        }
+      ],
+      "timings": {
+        "totalMs": 12408,
+        "ffmpegReadyMs": 7783,
+        "admissionWaitMs": 1,
+        "ownerProviderLockWaitMs": 0,
+        "fileSizeBytes": 3480858589,
+        "providerProxySlot": 1,
+        "videoEncoder": "vaapi",
+        "videoDecode": "vaapi",
+        "boundedMkvInputPump": true,
+        "retainedSharedCacheHlsOutput": false,
+        "mediaProductionRateX": 0.568,
+        "playlistBufferSeconds": 6
+      },
+      "firstFrameFromClickSeconds": 15.032739,
+      "playStartedFromClickSeconds": null,
+      "lastObservationFromClickSeconds": 114.745
+    },
+    {
+      "label": "strng-en",
+      "clickAtUtc": "2026-10-09T10:51:16.199Z",
+      "session": {
+        "error": null,
+        "state": "expired",
+        "source": "Strng IPTV 8K",
+        "createdAt": "2026-10-09T10:51:17.14009+00:00",
+        "sameFileAsSlowReference": false,
+        "sameItemAsSlowReference": false,
+        "events": [
+          {
+            "at": "2026-10-09T10:51:21.094196+00:00",
+            "code": null,
+            "event": "first_frame",
+            "ttffMs": 4569,
+            "position": 0
+          },
+          {
+            "at": "2026-10-09T10:51:21.20569+00:00",
+            "code": null,
+            "event": "play_started",
+            "ttffMs": null,
+            "position": 0
+          },
+          {
+            "at": "2026-10-09T10:53:48.825026+00:00",
+            "code": null,
+            "event": "pause",
+            "ttffMs": null,
+            "position": 147
+          }
+        ]
+      },
+      "samples": [
+        {
+          "copy": "strng-en",
+          "atUtc": "2026-10-09T10:51:45.285Z",
+          "video": {
+            "buffer": [
+              [
+                0,
+                144.019
+              ]
+            ],
+            "error": null,
+            "paused": false,
+            "ready": 4,
+            "time": 23.99502
+          }
+        },
+        {
+          "copy": "strng-en",
+          "atUtc": "2026-10-09T10:52:22.569Z",
+          "video": {
+            "buffer": [
+              [
+                30.03,
+                180.012
+              ]
+            ],
+            "error": null,
+            "paused": false,
+            "ready": 4,
+            "time": 61.299148
+          }
+        },
+        {
+          "copy": "strng-en",
+          "atUtc": "2026-10-09T10:53:07.735Z",
+          "video": {
+            "buffer": [
+              [
+                76.035,
+                226.018
+              ]
+            ],
+            "error": null,
+            "paused": false,
+            "ready": 4,
+            "time": 106.465516
+          }
+        },
+        {
+          "copy": "strng-en",
+          "atUtc": "2026-10-09T10:53:37.845Z",
+          "video": {
+            "buffer": [
+              [
+                106.023,
+                256.006
+              ]
+            ],
+            "error": null,
+            "paused": false,
+            "ready": 4,
+            "time": 136.575563
+          }
+        }
+      ],
+      "timings": {
+        "totalMs": 2700,
+        "ffmpegReadyMs": 510,
+        "admissionWaitMs": 0,
+        "ownerProviderLockWaitMs": 0,
+        "fileSizeBytes": 475790063,
+        "providerProxySlot": 1,
+        "videoEncoder": "vaapi",
+        "videoDecode": "vaapi",
+        "boundedMkvInputPump": true,
+        "retainedSharedCacheHlsOutput": false,
+        "mediaProductionRateX": 20,
+        "playlistBufferSeconds": 8.008
+      },
+      "firstFrameFromClickSeconds": 4.895196,
+      "playStartedFromClickSeconds": 5.00669,
+      "lastObservationFromClickSeconds": 141.646
+    },
+    {
+      "label": "dino-fr",
+      "clickAtUtc": "2026-10-09T10:55:20.824Z",
+      "session": {
+        "error": null,
+        "state": "expired",
+        "source": "Dino",
+        "createdAt": "2026-10-09T10:55:21.529402+00:00",
+        "sameFileAsSlowReference": false,
+        "sameItemAsSlowReference": false,
+        "events": [
+          {
+            "at": "2026-10-09T10:55:28.339582+00:00",
+            "code": null,
+            "event": "first_frame",
+            "ttffMs": 7084,
+            "position": 0
+          }
+        ]
+      },
+      "samples": [
+        {
+          "copy": "dino-fr",
+          "atUtc": "2026-10-09T10:55:38.245Z",
+          "video": {
+            "buffer": [
+              [
+                0,
+                9.979
+              ]
+            ],
+            "error": null,
+            "paused": true,
+            "ready": 4,
+            "time": 0
+          }
+        },
+        {
+          "copy": "dino-fr",
+          "atUtc": "2026-10-09T10:56:13.535Z",
+          "video": {
+            "buffer": [
+              [
+                0,
+                17.979
+              ]
+            ],
+            "error": null,
+            "paused": true,
+            "ready": 4,
+            "time": 0
+          }
+        },
+        {
+          "copy": "dino-fr",
+          "atUtc": "2026-10-09T10:57:05.655Z",
+          "video": {
+            "buffer": [
+              [
+                0,
+                37.989666
+              ]
+            ],
+            "error": null,
+            "paused": true,
+            "ready": 4,
+            "time": 0
+          }
+        },
+        {
+          "copy": "dino-fr",
+          "atUtc": "2026-10-09T10:57:18.435Z",
+          "video": {
+            "buffer": [
+              [
+                0,
+                41.979
+              ]
+            ],
+            "error": null,
+            "paused": true,
+            "ready": 4,
+            "time": 0
+          }
+        }
+      ],
+      "timings": {
+        "totalMs": 5693,
+        "ffmpegReadyMs": 3522,
+        "admissionWaitMs": 0,
+        "ownerProviderLockWaitMs": 0,
+        "fileSizeBytes": 1436474944,
+        "providerProxySlot": 1,
+        "videoEncoder": "vaapi",
+        "videoDecode": "vaapi",
+        "boundedMkvInputPump": true,
+        "retainedSharedCacheHlsOutput": false,
+        "mediaProductionRateX": 1.346,
+        "playlistBufferSeconds": 6.006
+      },
+      "firstFrameFromClickSeconds": 7.515582,
+      "playStartedFromClickSeconds": null,
+      "lastObservationFromClickSeconds": 117.611
+    },
+    {
+      "label": "max-fr",
+      "clickAtUtc": "2026-10-09T10:57:41.635Z",
+      "session": {
+        "error": null,
+        "state": "expired",
+        "source": "MAX OTT",
+        "createdAt": "2026-10-09T10:57:42.628834+00:00",
+        "sameFileAsSlowReference": false,
+        "sameItemAsSlowReference": false,
+        "events": [
+          {
+            "at": "2026-10-09T10:57:46.94407+00:00",
+            "code": null,
+            "event": "play_started",
+            "ttffMs": null,
+            "position": 0
+          },
+          {
+            "at": "2026-10-09T10:57:47.050529+00:00",
+            "code": null,
+            "event": "first_frame",
+            "ttffMs": 5096,
+            "position": 0
+          }
+        ]
+      },
+      "samples": [
+        {
+          "copy": "max-fr",
+          "atUtc": "2026-10-09T10:58:05.917Z",
+          "video": {
+            "buffer": [
+              [
+                0,
+                26.025
+              ]
+            ],
+            "error": null,
+            "paused": false,
+            "ready": 4,
+            "time": 19.102616
+          }
+        },
+        {
+          "copy": "max-fr",
+          "atUtc": "2026-10-09T10:58:29.941Z",
+          "video": {
+            "buffer": [
+              [
+                0,
+                28.027
+              ]
+            ],
+            "error": null,
+            "paused": true,
+            "ready": 4,
+            "time": 24.026666
+          }
+        },
+        {
+          "copy": "max-fr",
+          "atUtc": "2026-10-09T10:59:19.271Z",
+          "video": {
+            "buffer": [
+              [
+                0,
+                32.031
+              ]
+            ],
+            "error": null,
+            "paused": true,
+            "ready": 4,
+            "time": 24.026666
+          }
+        }
+      ],
+      "timings": {
+        "totalMs": 2809,
+        "ffmpegReadyMs": 509,
+        "admissionWaitMs": 0,
+        "ownerProviderLockWaitMs": 0,
+        "fileSizeBytes": 4679005577,
+        "providerProxySlot": 1,
+        "videoEncoder": "vaapi",
+        "videoDecode": "vaapi",
+        "boundedMkvInputPump": true,
+        "retainedSharedCacheHlsOutput": false,
+        "mediaProductionRateX": 20,
+        "playlistBufferSeconds": 6.006
+      },
+      "firstFrameFromClickSeconds": 5.415529,
+      "playStartedFromClickSeconds": 5.30907,
+      "lastObservationFromClickSeconds": 97.636
+    }
+  ],
+  "health": {
+    "atUtc": "2026-10-09T10:59:36.833372+00:00",
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "healthy": true,
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "image": "sha256:9e6f0849014864b13c756b2a4c79a6ce000f089273021fa4f85fb582760775f5",
+        "startedAt": "2026-10-09T08:50:23.807354823Z",
+        "environmentUnchanged": true,
+        "sharedVideoEncoderCapacity": {
+          "limit": 8,
+          "occupied": 0
+        }
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "healthy": true,
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "image": "sha256:9e6f0849014864b13c756b2a4c79a6ce000f089273021fa4f85fb582760775f5",
+        "startedAt": "2026-10-09T08:50:26.384927991Z",
+        "environmentUnchanged": true,
+        "sharedVideoEncoderCapacity": {
+          "limit": 8,
+          "occupied": 0
+        }
+      }
+    ],
+    "pilotOwnerCount": 1,
+    "audibleAcceptance": false,
+    "ownerLiveClaims": 0,
+    "admissions": {
+      "paused": false,
+      "cron": true
+    },
+    "dispatcherRunning": true,
+    "workerRunning": true,
+    "canaryAbsent": true
+  },
+  "applicationChange": false,
+  "deployment": false,
+  "audibleAcceptance": false,
+  "exhaustiveVersionsOrEpisodes": false,
+  "limitations": [
+    "UI FR/EN labels are not a new human language confirmation",
+    "Sequential samples, not a randomized repeated A/B",
+    "Server first_frame and play_started may arrive in different orders",
+    "No frame-callback or listening assessment; DOM progression and events only",
+    "No attribution of delivery versus common relay"
+  ]
+}
