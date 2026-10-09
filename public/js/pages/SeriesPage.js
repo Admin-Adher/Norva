@@ -3594,8 +3594,8 @@ class SeriesPage {
     // sibling versions, group them like the grid, and open the matching group.
     // Falls back to a single-item group; returns false on failure so the caller
     // can fall back to its own path.
-    async openByItem(item, { intentToken = null } = {}) {
-        const token = intentToken ?? this.beginFicheIntent();
+    async openByItem(item, { intentToken = null, focusVersions = false, requireOwned = false, beforeOpen = null } = {}) {
+        let token = intentToken ?? this.beginFicheIntent();
         try {
             if (!item || item.series_id == null) return false;
             const tapped = { ...item };
@@ -3615,7 +3615,7 @@ class SeriesPage {
                     }
                     if (!seen.has(k)) { seen.add(k); items.push(s); }
                 }
-            } catch (_) { /* best-effort: keep just the tapped item */ }
+            } catch (_) { if (requireOwned) return false; /* best-effort for ordinary rails only */ }
             if (!this.isFicheIntentCurrent(token)) return false;
             const inGroup = (g) => g.items.some(i =>
                 String(i.series_id) === String(item.series_id) && String(i.sourceId) === String(item.sourceId));
@@ -3623,11 +3623,37 @@ class SeriesPage {
                 || { key: 'search', items: [tapped], representative: tapped };
             const series = group.items.find(i => String(i.series_id) === String(item.series_id)
                 && String(i.sourceId) === String(item.sourceId)) || group.representative || tapped;
-            await this.showSeriesDetailsV2(series, group, { intentToken: token });
+            if (beforeOpen) {
+                const next = beforeOpen();
+                if (next === false) return false;
+                if (Number.isInteger(next)) token = next;
+            }
+            await this.showSeriesDetailsV2(series, group, { intentToken: token, focusVersions, manualPick: requireOwned });
             return this.isFicheIntentCurrent(token);
         } catch (_) {
             return false;
         }
+    }
+
+    async openPlaybackRecovery(item, { focusVersions = true, isCurrent = () => true } = {}) {
+        if (item?.sourceId == null || item?.series_id == null || !this.app?.currentUser?.id) return false;
+        const owner = this.app.currentUser;
+        const ownerId = owner.id;
+        const scope = window.NorvaPlaybackRefusals?.capture(this.app);
+        return this.openByItem({ sourceId: item.sourceId, series_id: item.series_id }, {
+            intentToken: this.beginFicheIntent(), focusVersions, requireOwned: true,
+            beforeOpen: () => {
+                if (!isCurrent() || this.app.currentUser !== owner || this.app.currentUser?.id !== ownerId
+                    || this.app._signOutInFlight
+                    || (window.NorvaPlaybackRefusals && window.NorvaPlaybackRefusals.capture(this.app) !== scope)) return false;
+                if (this.app.currentPage !== 'series') this.app.navigateTo('series', true);
+                if (this.app.currentPage !== 'series') return false;
+                // Keep the current exact series selected. Sibling selection and
+                // its own episode selection remain explicit; no episode IDs or
+                // audio/subtitle indices are copied across files.
+                return this.beginFicheIntent();
+            },
+        });
     }
 
     async showSeriesDetailsV2(series, group = null, {

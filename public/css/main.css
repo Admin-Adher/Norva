@@ -11984,6 +11984,26 @@ html.tv-mode .navbar-menu .nav-link.active .norva-ui-icon {
   font-weight: 500;
 }
 
+.watch-loading.has-slow-preparation .watch-loading-art { width: min(144px, 24dvh); }
+.watch-loading.has-slow-preparation .watch-loading-status { display: none; }
+
+.watch-slow-preparation {
+  max-width: 40ch;
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.watch-slow-preparation p { margin: 0 0 var(--space-sm); line-height: 1.5; }
+.watch-slow-preparation p + p { color: var(--color-text-secondary); }
+.watch-slow-preparation-actions { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+.watch-slow-preparation-actions .btn { flex: 1 1 12rem; min-height: 48px; white-space: normal; }
+.watch-slow-preparation-actions .btn:focus-visible { outline: 2px solid var(--color-accent-hover); outline-offset: var(--space-xs); }
+.watch-loading.is-rebuffering.has-slow-preparation { pointer-events: auto; max-height: calc(100% - var(--space-2xl)); overflow: auto; }
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
