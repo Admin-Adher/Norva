@@ -24,6 +24,14 @@ internal sealed partial class PlayerWindow
             var seconds = message.GetProperty("resumeSeconds").GetDouble();
             if (!double.IsFinite(seconds) || seconds < 0 || seconds > 86400) throw new InvalidDataException();
             initialSeek = (long)(seconds * 1000);
+            PlayerStrings.Language = message.TryGetProperty("uiLanguage",out var locale) ? locale.GetString() ?? "en" : "en";
+            back.Text=back.AccessibleName=PlayerStrings.Get("back");
+            fullscreen.Text=fullscreen.AccessibleName=PlayerStrings.Get("fullscreen");
+            audio.AccessibleName=PlayerStrings.Get("audio");subtitles.AccessibleName=PlayerStrings.Get("subtitles");
+            timeline.AccessibleName=PlayerStrings.Get("position");volume.AccessibleName=volumeLabel.Text=PlayerStrings.Get("volume");
+            status.Text=PlayerStrings.Get("preparing");
+            if(message.TryGetProperty("playbackPreferences",out var selected)) preferences=selected.Clone();
+            if(message.TryGetProperty("volume",out var sound) && sound.TryGetInt32(out var level)) volume.Value=Math.Clamp(level,0,100);
             Text = "Norva — " + (message.GetProperty("title").GetString() ?? "Vidéo")[..Math.Min(240, (message.GetProperty("title").GetString() ?? "Vidéo").Length)];
             media = new Media(engine, uri);
             media.AddOption(":network-caching=1500");
@@ -43,10 +51,12 @@ internal sealed partial class PlayerWindow
         lastPosition = position; lastDuration = length;
         if (!dragging && length > 0) timeline.Value = (int)Math.Clamp(position * 10_000d / length, 0, 10_000);
         timeline.Enabled = player.IsSeekable;
-        pause.Text = player.IsPlaying ? "Pause" : "Lecture";
+        pause.Text = pause.AccessibleName = PlayerStrings.Get(player.IsPlaying ? "pause" : "play");
         status.Text = player.IsPlaying || player.State == VLCState.Paused
             ? $"{TimeSpan.FromMilliseconds(position):hh\\:mm\\:ss} / {TimeSpan.FromMilliseconds(length):hh\\:mm\\:ss}"
-            : "Réception de la vidéo en cours…";
+            : PlayerStrings.Get("preparing");
+        ApplyPreference("audio", TrackType.Audio, ref audioPreferenceApplied);
+        ApplyPreference("subtitle", TrackType.Text, ref subtitlePreferenceApplied);
         RefreshTracks(audio, player.AudioTrackDescription, player.AudioTrack);
         RefreshTracks(subtitles, player.SpuDescription, player.Spu);
         if (Environment.TickCount64 - lastProgress > 1000) { lastProgress = Environment.TickCount64; Emit("progress"); }
@@ -55,10 +65,9 @@ internal sealed partial class PlayerWindow
     void RefreshTracks(ComboBox combo, TrackDescription[] tracks, int selected)
     {
         if (combo.DroppedDown || tracks.Length > 128) return;
-        var values = tracks.Select(t => new TrackChoice(t.Id, t.Id == -1 ? "Désactivés" : t.Name)).ToArray();
-        if (combo.Items.Cast<TrackChoice>().SequenceEqual(values)) return;
+        var values = tracks.Select(t => new TrackChoice(t.Id, t.Id == -1 ? PlayerStrings.Get("off") : t.Name)).ToArray();
         refreshingTracks = true;
-        combo.Items.Clear(); combo.Items.AddRange(values);
+        if (!combo.Items.Cast<TrackChoice>().SequenceEqual(values)) { combo.Items.Clear(); combo.Items.AddRange(values); }
         combo.SelectedIndex = Array.FindIndex(values, t => t.Id == selected);
         combo.Enabled = values.Length > 0; refreshingTracks = false;
     }

@@ -13,6 +13,9 @@ internal sealed partial class PlayerWindow : Form
     readonly Label status = new() { Dock = DockStyle.Fill, AutoSize = false, TextAlign = ContentAlignment.MiddleLeft };
     readonly TrackBar timeline = new() { Dock = DockStyle.Fill, Maximum = 10_000, TickStyle = TickStyle.None, AccessibleName = "Position de lecture" };
     readonly Button pause;
+    readonly Button back, fullscreen;
+    readonly Label volumeLabel = new() { AutoSize=true };
+    readonly TrackBar volume = new() { Minimum=0, Maximum=100, Value=100, Width=150, TickStyle=TickStyle.None };
     readonly ComboBox audio = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, AccessibleName = "Piste audio" };
     readonly ComboBox subtitles = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, AccessibleName = "Sous-titres" };
     readonly System.Windows.Forms.Timer clock = new() { Interval = 500 };
@@ -31,15 +34,16 @@ internal sealed partial class PlayerWindow : Form
         engine = new LibVLC("--no-video-title-show", "--no-sub-autodetect-file", "--quiet");
         player = new MediaPlayer(engine) { EnableHardwareDecoding = true, EnableKeyInput = false, EnableMouseInput = false };
         view = new VideoView { Dock = DockStyle.Fill, MediaPlayer = player, BackColor = BackColor, TabStop = false };
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(16) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(16) };
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         var heading = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
         heading.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
         heading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        heading.Controls.Add(PlayerTheme.Button("Retour", Close), 0, 0); heading.Controls.Add(status, 1, 0);
+        back=PlayerTheme.Button("Back",Close); heading.Controls.Add(back, 0, 0); heading.Controls.Add(status, 1, 0);
         layout.Controls.Add(heading, 0, 0); layout.Controls.Add(view, 0, 1); layout.Controls.Add(timeline, 0, 2);
         var controls = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true };
         pause = PlayerTheme.Button("Pause", () => { if (opened && !failed) player.Pause(); });
@@ -47,14 +51,17 @@ internal sealed partial class PlayerWindow : Form
         controls.Controls.Add(PlayerTheme.Button("−10 s", () => Seek(player.Time - 10_000)));
         controls.Controls.Add(PlayerTheme.Button("+10 s", () => Seek(player.Time + 10_000)));
         controls.Controls.Add(audio); controls.Controls.Add(subtitles);
-        controls.Controls.Add(PlayerTheme.Button("Plein écran", ToggleFullScreen));
+        fullscreen=PlayerTheme.Button("Fullscreen",ToggleFullScreen);controls.Controls.Add(fullscreen);
         layout.Controls.Add(controls, 0, 3); Controls.Add(layout);
+        var sound = new FlowLayoutPanel { Dock=DockStyle.Fill, WrapContents=false };
+        sound.Controls.Add(volumeLabel);sound.Controls.Add(volume);layout.Controls.Add(sound,0,4);
+        volume.ValueChanged += (_,_) => { player.Volume=volume.Value;Program.Emit(new {type="volume",sessionId=session,value=volume.Value}); };
         status.Text = "Préparation de la lecture…";
         timeline.MouseDown += (_, _) => dragging = true;
         timeline.MouseUp += (_, _) => { dragging = false; Seek((long)(timeline.Value / 10_000d * player.Length)); };
         timeline.KeyUp += (_, e) => { if (e.KeyCode is Keys.Left or Keys.Right or Keys.Home or Keys.End) Seek((long)(timeline.Value / 10_000d * player.Length)); };
-        audio.SelectedIndexChanged += (_, _) => { if (!refreshingTracks && audio.SelectedItem is TrackChoice t) player.SetAudioTrack(t.Id); };
-        subtitles.SelectedIndexChanged += (_, _) => { if (!refreshingTracks && subtitles.SelectedItem is TrackChoice t) player.SetSpu(t.Id); };
+        audio.SelectedIndexChanged += (_, _) => { if (!refreshingTracks && audio.SelectedItem is TrackChoice t) { player.SetAudioTrack(t.Id);audioPreferenceApplied=true;EmitPreference("audio",t.Id); } };
+        subtitles.SelectedIndexChanged += (_, _) => { if (!refreshingTracks && subtitles.SelectedItem is TrackChoice t) { player.SetSpu(t.Id);subtitlePreferenceApplied=true;EmitPreference("subtitle",t.Id); } };
         player.Playing += (_, _) => OnUi(() => {
             if (initialSeek > 0 && player.IsSeekable) { player.Time = initialSeek; initialSeek = 0; }
             Emit("playing");
@@ -80,7 +87,7 @@ internal sealed partial class PlayerWindow : Form
     void FailPlayback() {
         if (failed || closing) return;
         failed = true; player.Stop();
-        status.Text = "Cette version ne peut pas être lue. Revenez à la fiche pour choisir une autre version.";
+        status.Text = PlayerStrings.Get("failure");
         pause.Enabled = timeline.Enabled = audio.Enabled = subtitles.Enabled = false;
         Emit("failed");
     }
@@ -91,7 +98,7 @@ internal sealed partial class PlayerWindow : Form
     }
     internal void CloseWithReason(string value) { reason = value; Close(); }
     void Emit(string type) => Program.Emit(new { type, sessionId = session,
-        positionSeconds = Math.Max(0, player.Time) / 1000d, durationSeconds = Math.Max(0, player.Length) / 1000d,
+        positionSeconds = (failed ? lastPosition : Math.Max(0, player.Time)) / 1000d, durationSeconds = Math.Max(lastDuration, Math.Max(0, player.Length)) / 1000d,
         playing = player.IsPlaying, savedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
         decodedAudio = media?.Statistics.DecodedAudio ?? 0,
         decodedVideo = media?.Statistics.DecodedVideo ?? 0,

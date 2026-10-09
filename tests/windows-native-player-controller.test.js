@@ -65,3 +65,27 @@ test('closed is withheld until the byte transport has drained',async()=>{
     release();await new Promise(resolve=>setImmediate(resolve));
     assert.equal(h.events[0].type,'closed');assert.equal(h.controller.active,null);
 });
+
+test('native track preferences are bounded and carry no provider data',async()=>{
+    const h=fixture();await h.controller.open({...request,uiLanguage:'fr',playbackPreferences:{audio:{stableId:'vlc-v1:1:123:fra',language:'fra',url:'secret'},subtitle:{disabled:true}}});
+    h.event({type:'ready',protocol:1});
+    assert.equal(h.writes[0].uiLanguage,'fr');assert.equal(h.writes[0].playbackPreferences.audio.url,undefined);
+    h.event({type:'preferences',sessionId:request.sessionId,preferences:{subtitle:{disabled:true,url:'secret'},audio:{language:'und',stableId:'bad\nvalue'}}});
+    assert.deepEqual(h.events[0].preferences,{subtitle:{disabled:true}});h.child.emit('exit',0);
+});
+
+test('next episode notification waits for exact cloud close acknowledgement',async()=>{
+    const h=fixture();await h.controller.open(request);h.event({type:'closed',sessionId:request.sessionId,reason:'ended'});h.child.emit('exit',0);
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.deepEqual(h.events.map(e=>e.type),['closed']);h.controller.acknowledge('wrong');assert.equal(h.events.length,1);
+    h.controller.acknowledge(request.sessionId);assert.equal(h.events[1].type,'ended');
+    assert.equal(h.events[1].itemId,request.itemId);assert.equal(h.events[1].url,undefined);
+    h.controller.acknowledge(request.sessionId);assert.equal(h.events.length,2);
+});
+
+test('volume changes are bounded to the owning player',async()=>{
+    const h=fixture();await h.controller.open(request);h.event({type:'ready',protocol:1});
+    h.event({type:'volume',sessionId:'other',value:20});assert.equal(h.controller.volume,100);
+    h.event({type:'volume',sessionId:request.sessionId,value:101});assert.equal(h.controller.volume,100);
+    h.event({type:'volume',sessionId:request.sessionId,value:30});assert.equal(h.controller.volume,30);h.child.emit('exit',0);
+});

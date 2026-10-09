@@ -41,3 +41,25 @@ Tests : 179 assertions/tests ciblés réussis dans le groupe natif et contrats A
 - Construire et inspecter le paquet portable final ; compléter les notices et les sources correspondantes des dépendances avant distribution. Le fichier de notices actuel documente l'état expérimental, sans prétendre à une validation de distribution.
 
 L'intégration est donc un prototype local vérifié, pas une généralisation du lecteur Windows ni une preuve que toutes les VOD démarrent rapidement.
+
+## Préparation de la version Windows 2.1.5-native.1 — 9 octobre, soirée
+
+À la demande explicite du propriétaire, préparation d’une préversion portable Windows x64 avec lecteur LibVLC activé par défaut lorsque le runtime est présent. La vidéo est native ; les écrans restent dans Electron. Aucune activation du moteur WebAssembly, modification du Gateway ou nouvelle concurrence fournisseur.
+
+Le parcours Windows transmet maintenant les préférences audio/sous-titres validées, restaure un identifiant de piste natif exact ou une langue technique unique, et préserve la désactivation explicite des sous-titres. Volume natif, libellés issus des traductions Norva et historique échantillonné toutes les quinze secondes avec enregistrement final avant fermeture. La fin naturelle ne déclenche l’épisode suivant qu’après l’accusé exact de fermeture cloud.
+
+### Copies réelles, sessions ordinaires
+
+Les essais utilisent les profils/fichiers exacts, une seule requête fournisseur en vol, les heartbeats et expirations ordinaires. Les demandes système séquentielles et leurs redirections ne sont pas des connexions simultanées.
+
+- **Conclave, Dino** : départ et saut de dix secondes réellement contrôlés ; nouvelle ouverture à 120 s avec événement LibVLC `playing` à 4,764 s depuis le début du banc incluant la création de session. Près de trois minutes de progression, compteur `lostPictures=0`, fermeture/drainage attestés. Ce compteur ne prouve pas chaque intervalle d’image, et l’événement n’est pas une mesure de première image.
+- **Vice-versa 2, MAX OTT** : événement `playing` vers 19 s, puis attente/interruption importante. Les plages de 2 Mio prennent environ 5,6–5,9 s ; la lecture avance ensuite jusqu’à 112 s dans la fenêtre observée, avec images perdues signalées. La limite de réception reste ouverte ; aucune responsabilité réseau précise attribuée.
+- **Application complète** : catalogue réel authentifié → reprise de Conclave → commandes natives en français → sous-titres désactivés et volume modifié → Retour. Heartbeat HTTP 200, historique HTTP 201, fermeture de session HTTP 200. Le premier essai révélait une sauvegarde chaque seconde ; cadence corrigée à quinze secondes et test de régression ajouté. La session QA est courte, isolée et sans jeton de rafraîchissement.
+
+Reçus locaux : `.codex-artifacts/windows-native-20261009/real-4-resume.safe.json`, `real-1-instrumented.safe.json`, `full-app.safe.json` et capture `full-app-controls.jpg`. Aucun accès fournisseur dans ce rapport.
+
+### Distribution et limites
+
+Notices complètes ajoutées, licences .NET/LibVLC/VLC incluses, dépendances verrouillées et sources officielles de VLC 3.0.24 et LibVLCSharp 3.10.1 conservées avec leurs SHA-256 pour publication avec l’exécutable. Les runtimes x86/ARM inutilisés sont exclus du paquet x64. Version non signée ; aucune promesse de certification Windows.
+
+81 tests ciblés réussis avant le dernier test d’historique ; le sous-groupe actualisé de 27 tests natifs/historique réussit (groupes recoupés). Compilation native réussie. Contrôles CI, matrice Android et inspection de l’exécutable final à compléter avant publication. Cette préversion ne certifie ni tous les formats existants, ni toutes les VOD, ni la qualité humaine à l’écoute. Les limites du transport lent restent distinctes.

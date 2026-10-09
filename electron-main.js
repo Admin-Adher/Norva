@@ -88,7 +88,7 @@ function isAuthNavigation(targetUrl) {
 function createWindow(url, transcoderUrl) {
     const nativeExecutable = path.join(app.isPackaged ? process.resourcesPath : __dirname,
         'native-player', 'Norva.NativePlayer.exe');
-    const nativeEnabled = process.platform === 'win32' && process.env.NORVA_DESKTOP_NATIVE_PLAYER === '1'
+    const nativeEnabled = process.platform === 'win32' && process.env.NORVA_DESKTOP_NATIVE_PLAYER !== '0'
         && fs.existsSync(nativeExecutable);
     const window = new BrowserWindow({
         width: 1280,

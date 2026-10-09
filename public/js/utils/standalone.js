@@ -1201,6 +1201,7 @@
                 } catch (_) { /* art is optional */ }
                 bridge.playVideoJson(JSON.stringify({
                     url: streamUrl,
+                    ...(bridge === window.NorvaDesktop?.nativePlayer ? { uiLanguage:document.documentElement.lang || 'en' } : {}),
                     fallbackUrl: fb,
                     title: title || 'Norva',
                     sourceId: String(meta.sourceId || ''),

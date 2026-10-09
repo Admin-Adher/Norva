@@ -12,7 +12,7 @@ async function createNativeInput(sourceUrl, { windowBytes = 2 * 1024 * 1024, tim
     let stopped = false, total = null, pending = Promise.resolve(), activeRequest = null;
     let validator = null, cache = null;
     const agents = { 'http:':new http.Agent({keepAlive:true,maxSockets:1}), 'https:':new https.Agent({keepAlive:true,maxSockets:1}) };
-    const counters = { sourceRequests:0, maximumConcurrentSourceRequests:0, activeSourceRequests:0 };
+    const counters = { sourceRequests:0, maximumConcurrentSourceRequests:0, activeSourceRequests:0, completedBytes:0, ranges:[] };
     const drains = new Set();
     async function requestRange(address, start, end, redirects = 0) {
         if (stopped) throw Error('NATIVE_INPUT_CLOSED');
@@ -22,9 +22,11 @@ async function createNativeInput(sourceUrl, { windowBytes = 2 * 1024 * 1024, tim
         // That barrier precedes the next bounded provider GET.
         const result = await new Promise((resolve,reject) => {
             const transport = url.protocol === 'https:' ? https : http;
-            let outcome = null, failure = null, responseBody;
+            let outcome = null, failure = null, responseBody, status = null;
+            const began = Date.now();
             const request = transport.get(url, {agent:agents[url.protocol],headers:{Range:`bytes=${start}-${end}`,'Accept-Encoding':'identity','User-Agent':'VLC/3.0.24 LibVLC/3.0.24'}}, response => {
                 responseBody=response;
+                status=response.statusCode;
                 const fail = code => { failure ||= Error(code); response.destroy(); request.destroy(); };
                 response.once('error', () => fail('NATIVE_INPUT_NETWORK'));
                 response.once('aborted', () => fail('NATIVE_INPUT_INCOMPLETE'));
@@ -60,6 +62,9 @@ async function createNativeInput(sourceUrl, { windowBytes = 2 * 1024 * 1024, tim
             const drain=new Promise(done=>request.once('close',()=>{
                 clearTimeout(deadline);counters.activeSourceRequests--;if(activeRequest===request)activeRequest=null;
                 if(stopped)failure ||= Error('NATIVE_INPUT_CLOSED');
+                counters.completedBytes += outcome?.payload?.length || 0;
+                counters.ranges.push({start,end,status,elapsedMs:Date.now()-began,bytes:outcome?.payload?.length||0,error:failure?.message||null});
+                if(counters.ranges.length>64)counters.ranges.shift();
                 if(failure || !outcome)reject(failure || Error('NATIVE_INPUT_INCOMPLETE'));else resolve(outcome);
                 done();
             }));
