@@ -145,7 +145,7 @@
 <p>A mobile device may update its zone automatically while a TV or browser retains a prior zone. Record each device’s current zone, whether guide settings override it, and the exact same event identifier. Then run <a href="/blog/read-now-and-next-guide/">the now-and-next checksum</a> on both.</p>
 <p>If both displays are internally consistent but use different zones, the times can differ without either schedule record being corrupt. The interface should label the zone or make it discoverable.</p>
 <h2 id="check-freshness-separately">Check freshness separately</h2>
-<p>A zone correction cannot repair an old schedule. If converted boundaries are sensible but “Now” remains stuck on an ended event, use the program-guide freshness audit. Clock, zone, and freshness are independent failure modes.</p>
+<p>A zone correction cannot repair an old schedule. If converted boundaries are sensible but “Now” remains stuck on an ended event, use <a href="/blog/check-program-guide-freshness/">the program-guide freshness audit</a>. Clock, zone, and freshness are independent failure modes.</p>
 <p>Norva can present guide information from compatible sources a user is authorized to access. The source supplies event data; device and interface settings influence presentation. Current support documentation should be checked for exact zone controls in the build under review.</p>
 <h2 id="example-without-assuming-a-locale">Example without assuming a locale</h2>
 <p>Suppose a source event starts at 23:30 UTC and lasts 90 minutes. In a display zone whose applicable offset is +02:00, it appears at 01:30 on the following date and ends at 03:00. The arithmetic must use the offset valid for that date. This example demonstrates conversion only; it does not establish a real service schedule.</p>
@@ -172,6 +172,12 @@
           <div class="card-title">How to Read Now-and-Next Information Quickly</div>
 
           <p>A now-and-next checksum turns two compact labels into a traceable service, clock, interval, sequence, and freshness decision.</p>
+        </a>
+        <a class="card" href="/blog/check-program-guide-freshness/">
+          <span class="tag">Live Guide Literacy</span>
+          <div class="card-title">How to Judge Whether Program Guide Data Is Current</div>
+
+          <p>A guide freshness ledger separates when data was retrieved, how far it covers, whether boundaries transition, and what the source currently reports.</p>
         </a>
       </div>
     </section>
