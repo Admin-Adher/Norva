@@ -15798,6 +15798,7 @@ function privateResumeHlsBindingForSession(session) {
     const resumeProfile = privateResumeProfile({ format, audio, audioMode: session.audioMode,
         clientAudioPassthrough: session.clientAudioPassthrough, encoder: VIDEO_ENCODER_CONFIG.backend,
         subtitleClock: retainedSubtitleClock(session) ? SOURCE_CLOCK : undefined,
+        subtitleInputClock: retainedSubtitleClock(session) ? 'absolute-v1' : undefined,
         subtitles: exactSubtitleRenditionsForSession(session).map(r => ({
             streamIndex: r.streamIndex, language: r.language, sourceCodec: r.sourceCodec,
             default: r.default, forced: r.forced, hearingImpaired: r.hearingImpaired,
@@ -17766,7 +17767,10 @@ function startFfmpeg(session) {
         // A copied video needs stream discovery, not one decoder thread per
         // logical CPU. Bound that brief work during simultaneous cold starts.
         ...(!encodeVideo || vaapiHardwareDecode ? ['-threads', '1'] : []),
-        ...(preserveCopySeekTimestamps || session.finiteTsIndexPlan
+        // Keep pre-seek subtitle packets on the same absolute clock as A/V.
+        // Otherwise a crossing cue acquires a negative PTS and the WebVTT
+        // muxer independently shifts it, contradicting its commit journal.
+        ...(preserveCopySeekTimestamps || session.finiteTsIndexPlan || retainedSubtitleClock(session)
             || (session.privateResumeLease && exactSubtitleHlsEnabled(session)
                 && (isFiniteMkvVodSession(session) || session.finiteMp4SeekBroker === true)) ? ['-copyts'] : []),
         ...(session.finiteTsIndexPlan ? ['-protocol_whitelist', 'subfile,http,tcp'] : []),
