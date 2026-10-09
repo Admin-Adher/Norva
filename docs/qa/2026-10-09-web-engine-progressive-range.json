@@ -722,6 +722,17 @@
     "url": "https://github.com/Admin-Adher/Norva/pull/756",
     "draft": true,
     "merged": false,
-    "ciStatus": "pending-new-head"
+    "ciStatus": "contracts-passed-packages-running-at-code-observation",
+    "codeHead": "37b9e3f49a723a058ced43d3c90763b0c0497f4f"
+  },
+  "ci": {
+    "run": 37996658517,
+    "contracts": "success",
+    "tests": 6358,
+    "passed": 6324,
+    "skipped": 34,
+    "failed": 0,
+    "isolatedSqlPassed": 40,
+    "packages": "in-progress-at-observation"
   }
 }

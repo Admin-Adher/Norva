@@ -81,3 +81,15 @@ Aucune erreur de décodage intermédiaire relevée. Les erreurs média 4 initial
 Contrôleurs, tunnel, serveurs locaux et onglets temporaires arrêtés ; zéro écouteur sur les trois ports de preuve. **16 fichiers médias/sous-titres synthétiques supprimés**, hashes et métriques conservés, zéro média restant. Aucune copie média fournisseur n'a été sauvegardée. Reçus bruts contenant les coordonnées de session gardés privés, extractions publiques sans URL privée.
 
 Production publique vérifiée : révision 48 et SHA-256 `ec21b67c217d6407e0f3d37eaa0d8991fe77cc0f4b5b3e693c096c6b3f007f78`, shell/intégrité conformes, 60 entrées du manifeste concordantes. Le candidat 49 reste en **PR756 brouillon**, sans fusion. Les quatre checks de la tête précédente `f094e8e4d` passent ; la nouvelle tête doit encore recevoir sa propre validation CI. Aucun rendu WebView ni lecteur Android natif modifié et aucune nouvelle matrice émulateur revendiquée. Le manifeste d'assets est régénéré et vérifié ; aucune traduction native ne change.
+
+## Contrôle CI du code et différence entre plateformes
+
+Code `37b9e3f49a723a058ced43d3c90763b0c0497f4f` : contrats cloud réussis, run `37996658517`, job `114044359171`. **6 358 tests, 6 324 réussis, 34 ignorés, zéro échec** ; groupe SQL isolé distinct : 40 réussis. Résultat de la suite à **00:00:59 Paris le 10 octobre**. Vercel Preview Comments réussi. Paquets Android Phone/TV et Windows encore en construction à cette observation, sans prétendre qu'ils sont validés. Le complément documentaire suivant ne modifie pas le moteur.
+
+| Plateforme | Parcours vérifié dans le code |
+| --- | --- |
+| Windows publié | LibVLC natif, `LibVLCSharp.WinForms` / `VideoLAN.LibVLC.Windows`, fichier ouvert dans `Media(engine, uri)` ; décodage matériel activé |
+| Android téléphone/TV | Media3/ExoPlayer natif, extracteurs de conteneurs et `NativeRenderersFactory` ; le User-Agent contenant « VLC » ne signifie pas que LibVLC est exécuté |
+| Web | Élément vidéo et MediaSource ; NorvaEngine utilise FFmpeg/LibAV en WebAssembly pour démuxer, remuxer et convertir l'audio si nécessaire, puis remet la vidéo aux codecs du navigateur. Le routage public conserve le Gateway pour MKV ; les Conclave de ce rapport forcent le parcours moteur dans le seul banc isolé |
+
+Références locales : `clients/windows-player/PlayerWindow.cs` et `PlayerProtocol.cs`, `clients/android-phone/app/src/main/java/tv/norva/phone/PlayerActivity.java`, équivalent TV, `public/js/norvaEngine.js`, `public/js/api.js`. Les pauses réelles de ce relevé correspondent à une réserve épuisée pendant l'attente de données/fragments. Le banc contrôlé prouve une attente évitable dans le moteur ; les sessions réelles ne départagent pas livraison et relais. Il n'existe pas de preuve que la même réception irrégulière serait systématiquement fluide sur tous les lecteurs natifs. Intégrer du code ouvert n'enlève ni la contrainte de débit ni les étapes supplémentaires imposées par le navigateur.
