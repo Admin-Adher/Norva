@@ -1,0 +1,282 @@
+{
+  "scope": "owner pilot, exact English Strng Severance S1E1",
+  "codePr": 745,
+  "codeCommit": "0f6737bbaca1470534e0776ae855c9f3aeac000f",
+  "fixtureCommit": "8e10b49f5",
+  "mergeCommit": "3696c26b85f2f779aaae5b32890e01b9fd9651d3",
+  "isolated": {
+    "pass": 60,
+    "fail": 0,
+    "skip": 0,
+    "cancelled": 0,
+    "network": "none",
+    "syntheticPrivateAheadSeconds": 44,
+    "providerMaximumConcurrent": 1,
+    "partialSharedPublications": 0,
+    "baselineFailure": "stores=0/session-ineligible"
+  },
+  "ci": {
+    "total": 6227,
+    "pass": 6195,
+    "fail": 0,
+    "skip": 32,
+    "initialFailure": "old VM fixture omitted new privateResumeProducerReleased dependency; fixed and retested",
+    "followupLocalPass": 24
+  },
+  "deployment": {
+    "deployment.safe.json": {
+      "revision": "0f6737bbaca1470534e0776ae855c9f3aeac000f",
+      "image": "sha256:3472d834c7095cbf4c1776117e704f19ae1e1c0bce49fa37b8b81c701d486c10",
+      "startedAt": "2026-10-09T16:34:53.618391+00:00",
+      "pausedAt": "2026-10-09T16:34:53.676375+00:00",
+      "gatewaysApplied": [
+        {
+          "name": "norva-media-gateway",
+          "at": "2026-10-09T16:35:01.513372+00:00"
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "at": "2026-10-09T16:35:04.277166+00:00"
+        }
+      ],
+      "edgesUnchanged": true,
+      "leasesForced": false,
+      "dispatcherRestarted": false,
+      "completedAt": "2026-10-09T16:35:04.352129+00:00",
+      "restoredAt": "2026-10-09T16:35:04.659808+00:00",
+      "admissionsRestored": true,
+      "workerStateRestored": true,
+      "dispatcherPreserved": true
+    },
+    "post-deployment.safe.json": {
+      "at": "2026-10-09T16:35:16.959350+00:00",
+      "revision": "0f6737bbaca1470534e0776ae855c9f3aeac000f",
+      "image": "sha256:3472d834c7095cbf4c1776117e704f19ae1e1c0bce49fa37b8b81c701d486c10",
+      "sourceTreeSha256": "5d5327b73c6fc9a140201f7563a304c26e195a59d860ed0c951cebf4e5c79bdd",
+      "replicas": [
+        {
+          "name": "norva-media-gateway",
+          "startedAt": "2026-10-09T16:35:00.13213326Z",
+          "healthy": true,
+          "all94SourceHashesMatch": true,
+          "retainedOwnerCount": 1
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "startedAt": "2026-10-09T16:35:02.924198467Z",
+          "healthy": true,
+          "all94SourceHashesMatch": true,
+          "retainedOwnerCount": 1
+        }
+      ],
+      "admissions": {
+        "cron": {
+          "id": 159,
+          "active": true
+        },
+        "paused": false
+      },
+      "stopAbsent": true,
+      "dispatcherRunning": true,
+      "workerRunning": true
+    },
+    "image.safe.json": {
+      "image": "sha256:3472d834c7095cbf4c1776117e704f19ae1e1c0bce49fa37b8b81c701d486c10",
+      "revision": "0f6737bbaca1470534e0776ae855c9f3aeac000f",
+      "sourceTreeSha256": "5d5327b73c6fc9a140201f7563a304c26e195a59d860ed0c951cebf4e5c79bdd",
+      "files": 94,
+      "runtimeBase": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40"
+    },
+    "canary.safe.json": {
+      "at": "2026-10-09T16:30:44.744160+00:00",
+      "image": "sha256:3472d834c7095cbf4c1776117e704f19ae1e1c0bce49fa37b8b81c701d486c10",
+      "revision": "0f6737bbaca1470534e0776ae855c9f3aeac000f",
+      "healthy": true,
+      "user": "1000:1000",
+      "network": "none",
+      "productionVolumes": false,
+      "sourceHashesMatch": true,
+      "health": {
+        "ok": true,
+        "videoEncoder": {
+          "protocol": 1,
+          "backend": "vaapi",
+          "hardware": true,
+          "ready": true,
+          "preflight": "vaapi-ready",
+          "deviceConfigured": true,
+          "decode": "vaapi-exact-profile-with-software-fallback",
+          "outputCodec": "h264"
+        },
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "recentOwnerScope": "owner-allowlist"
+      },
+      "providerRequests": 0,
+      "gpuEncodePassed": true,
+      "allSourceFiles0644": true,
+      "packagePermissionsPreserved": true,
+      "functional": {
+        "producerResumeTestsPassed": true,
+        "ownerGatePassed": true,
+        "syntheticFilesRemoved": true
+      },
+      "proofFiles": {
+        "tests/private-resume-producer-release.test.js": "58bbdfc8fd6d35339c9a87f7dcdae53f7026829f411a06e17f1a34537ccf6548",
+        "tests/media-cache-producer-control.test.js": "e1688f91dfd2108b301be1d94a62dab49223b2b79d8cc39784f5a16a7eba5059",
+        "tests/private-resume-cache.test.js": "43fb3d443a68a8806fc50bee9cd1d349852a4dc8c0619a90427523abdac8ec7a",
+        "tests/private-resume-provider-identity-policy.test.js": "9c602818059d2dab6243d0202232f757a79acec6af333932abe55e7ad3fb8802",
+        "tests/media-gateway-shared-cache-publication-wiring.test.js": "b263318d2ee4bca4386314f9f0f282cf1ba37de0a02ba49b5ec75be6bfb15463"
+      }
+    }
+  },
+  "real": {
+    "firstFrameFromClickSeconds": 11.478498,
+    "playStartedFromClickSeconds": 75.502202,
+    "telemetryFirstFrameMs": 10964,
+    "finalDom": {
+      "at": "2026-10-09T16:36:54.408Z",
+      "buffered": [
+        [
+          0.042333,
+          112.071333
+        ]
+      ],
+      "error": null,
+      "paused": false,
+      "ready": 4,
+      "time": 12.808362
+    },
+    "reopenPerformed": false,
+    "reason": "No reusable window stored; no cache-hit comparison is possible."
+  },
+  "closeout": {
+    "atUtc": "2026-10-09T16:37:06.218892+00:00",
+    "ownerLiveClaims": [
+      {
+        "count": 0
+      }
+    ],
+    "gateways": [
+      {
+        "healthy": true,
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "privateResume": {
+          "enabled": true,
+          "recentOwnerScope": "owner-allowlist",
+          "ownerScoped": false,
+          "protocol": 1,
+          "stores": 0,
+          "hits": 0,
+          "misses": 0,
+          "invalidations": 0,
+          "evictions": 0,
+          "inputStores": 0,
+          "inputHits": 0,
+          "sampledStores": 0,
+          "sampledHits": 0,
+          "captureRejects": 0,
+          "lastCaptureRejection": null,
+          "entries": 0,
+          "bytes": 0,
+          "reservedBytes": 0,
+          "maxBytes": 268435456,
+          "perFileBytes": 67108864,
+          "ttlMs": 1800000,
+          "windowSeconds": 48,
+          "recentRevalidation": true,
+          "recentTtlMs": 600000,
+          "scope": "private-owner-source-revision",
+          "revalidation": "current-strong-etag-size-target"
+        },
+        "producer": {
+          "protocol": 1,
+          "active": true,
+          "attached": 0,
+          "pulses": 0,
+          "renewals": 0,
+          "preemptions": 0,
+          "demandStops": 0,
+          "expirations": 0,
+          "completions": 0,
+          "abandons": 0,
+          "failures": 0,
+          "heartbeatMs": 20000
+        }
+      },
+      {
+        "healthy": true,
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "privateResume": {
+          "enabled": true,
+          "recentOwnerScope": "owner-allowlist",
+          "ownerScoped": false,
+          "protocol": 1,
+          "stores": 0,
+          "hits": 0,
+          "misses": 0,
+          "invalidations": 0,
+          "evictions": 0,
+          "inputStores": 0,
+          "inputHits": 0,
+          "sampledStores": 0,
+          "sampledHits": 0,
+          "captureRejects": 2,
+          "lastCaptureRejection": "unverified-input",
+          "entries": 0,
+          "bytes": 0,
+          "reservedBytes": 0,
+          "maxBytes": 268435456,
+          "perFileBytes": 67108864,
+          "ttlMs": 1800000,
+          "windowSeconds": 48,
+          "recentRevalidation": true,
+          "recentTtlMs": 600000,
+          "scope": "private-owner-source-revision",
+          "revalidation": "current-strong-etag-size-target"
+        },
+        "producer": {
+          "protocol": 1,
+          "active": true,
+          "attached": 1,
+          "pulses": 4,
+          "renewals": 4,
+          "preemptions": 0,
+          "demandStops": 0,
+          "expirations": 0,
+          "completions": 0,
+          "abandons": 1,
+          "failures": 0,
+          "heartbeatMs": 20000
+        }
+      }
+    ]
+  },
+  "limits": [
+    "No real private cache hit",
+    "Weak or absent provider validator on this response",
+    "Ordinary full-body pump has no completed range sample snapshots before EOF",
+    "No actual listening validation",
+    "No new gain on Normal",
+    "Only 13 seconds of actual playback observed in this trial; not a durability or fluency acceptance"
+  ],
+  "artifactHashes": {
+    "isolated.safe.json": "c25f3f093708b019ce70b1521b502820e53ef0dd8d1168e6f7bcfe1774df0afe",
+    "isolated-final.safe.json": "65a0c208a5b8bf845c5d762d3ed2f1558edbeb4848c6ce66e956d8758909d1c5",
+    "baseline.safe.json": "899935457720339dd639a7ccff105b1f3f4d82bb38b755fa0a94e36b4c56eed7",
+    "browser.safe.json": "e3bdb1c5c599f1c40de8b287657743d7f46791dc100a46f164002b7dce5e1f3f",
+    "real-start.safe.json": "0dba3706808a5fd510d07fb5ebe72cc0ac3f04dee0e5ae3c6dba51f74c443f78",
+    "real-buffering.safe.json": "46df5394694f22241b94d118b4bb675708740aa28a6945f5a56623b18b6818e6",
+    "real-closed.safe.json": "4857270b69444298d0b2c8458f19130ef0f3dc4757a450e692dd31f14c830871",
+    "candidate.safe.json": "25fea83f65f6b1ec8fd43857bd9eb3e38f7de57abf798d13055a8a965d38e7e5",
+    "deployment-bundle.safe.json": "7f34acdfef81504efe7599e336218ae1fa639bccbcf1450f711933d4be0ebb7e",
+    "closed-series.png": "7e7e099fd2f25bc6e32f09bf392aed891b407f0024f5b7af4111182f9cc346ea",
+    "run-isolated.py": "cdc57776369af2432a6bd16f245a6ddea6184d7911872bed5407a9f8d7d01250",
+    "run-baseline.py": "5e9c37385e5f043b964a59e63405db8ce023d8f41b27b740958a3b6f1023240e",
+    "audit.py": "dd1b355566d9a023a4152a72e823811afb683ec386b649a33230616a7a6081cd",
+    "apply.py": "ce531abb121d752b9e10b89251426c4d54c901783a42a67d0c5d62f791c32a56",
+    "deploy.py": "2270676454b6a23b02aaaae2086874f01ae59ac49cb35d1ea5dd2daca4276e91"
+  }
+}
