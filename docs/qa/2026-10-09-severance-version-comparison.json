@@ -461,5 +461,88 @@
     "Server first_frame and play_started may arrive in different orders",
     "No frame-callback or listening assessment; DOM progression and events only",
     "No attribution of delivery versus common relay"
-  ]
+  ],
+  "transferTraceAnalysis": {
+    "method": "Differences between two cumulative pump samples of the same session; no new provider IO",
+    "durationSecondsApproxFromVisiblePlayer": 3434,
+    "copies": [
+      {
+        "label": "FR 4K Strng",
+        "receipts": [
+          "fr4k-start",
+          "fr4k-progress"
+        ],
+        "intervalSeconds": 54.414393,
+        "receivedByteDelta": 6605936,
+        "receivedMbpsDuringInterval": 0.971204217972256,
+        "wholeFileMeanMbpsApprox": 8.109163864880605,
+        "providerReadSeconds": 54.24781599999999,
+        "downstreamWriteSeconds": 0.05758299999999997,
+        "networkCapacityEstimateValid": false
+      },
+      {
+        "label": "FR Dino",
+        "receipts": [
+          "dino-start",
+          "dino-final"
+        ],
+        "intervalSeconds": 99.66714099999999,
+        "receivedByteDelta": 9280208,
+        "receivedMbpsDuringInterval": 0.7448960936884906,
+        "wholeFileMeanMbpsApprox": 3.346476281887012,
+        "providerReadSeconds": 99.40559899999998,
+        "downstreamWriteSeconds": 0.09371900000000005,
+        "networkCapacityEstimateValid": false
+      },
+      {
+        "label": "FR MAX OTT",
+        "receipts": [
+          "max-start",
+          "max-stall"
+        ],
+        "intervalSeconds": 51.113132,
+        "receivedByteDelta": 18569136,
+        "receivedMbpsDuringInterval": 2.9063585459799253,
+        "wholeFileMeanMbpsApprox": 10.90042068025626,
+        "providerReadSeconds": 50.826394,
+        "downstreamWriteSeconds": 0.10449000000000001,
+        "networkCapacityEstimateValid": false
+      },
+      {
+        "label": "EN Strng",
+        "receipts": [
+          "en-start",
+          "en-progress"
+        ],
+        "intervalSeconds": 83.14542999999999,
+        "receivedByteDelta": 7864320,
+        "receivedMbpsDuringInterval": 0.75668091439301,
+        "wholeFileMeanMbpsApprox": 1.1084218124635992,
+        "providerReadSeconds": 0.010850000000000365,
+        "downstreamWriteSeconds": 83.12692999999999,
+        "networkCapacityEstimateValid": false
+      }
+    ],
+    "maxStartup": {
+      "playlistProductionSpanMs": 170.993408203125,
+      "playlistPostFirstBufferSeconds": 4.004,
+      "sustainedMediaProductionRateX": 20,
+      "policy": {
+        "protocol": 2,
+        "eligible": true,
+        "pipeline": "video-transcode",
+        "targetBufferSeconds": 6,
+        "minimumEncodeRateX": 2,
+        "observedEncodeRateX": 20,
+        "reason": "vaapi-transcode-ready"
+      }
+    },
+    "caveats": [
+      "Rates describe observed short intervals, not permanent route capacity",
+      "Whole-file average includes all container streams and is not instantaneous bitrate",
+      "EN is predominantly downstream-backpressured: its pump average is not a network throughput test",
+      "MAX startup production estimate is derived from only 171 ms between segment completions, not sustained network delivery",
+      "No causal separation of provider delivery and common relay"
+    ]
+  }
 }

@@ -59,6 +59,49 @@ pas un changement de codec, de réserve ou une substitution automatique.
 
 ## Preuves et clôture
 
+### Relecture des traces de transfert
+
+Analyse locale supplémentaire, sans nouvelle lecture ni appel fournisseur :
+différence de deux compteurs cumulatifs de la même pompe. La moyenne du fichier
+est calculée sur les 57:14 affichées ; elle inclut les autres pistes et le
+conteneur, et ne représente pas le besoin instantané au début de l'épisode.
+
+| Copie | Réception dans l'intervalle | Durée observée | Moyenne du fichier entier |
+| --- | ---: | ---: | ---: |
+| FR 4K Strng | 0,97 Mbit/s | 54,4 s | environ 8,1 Mbit/s |
+| FR Dino | 0,74 Mbit/s | 99,7 s | environ 3,3 Mbit/s |
+| FR MAX OTT | 2,91 Mbit/s | 51,1 s | environ 10,9 Mbit/s |
+
+Ces trois intervalles passent respectivement 54,25 / 99,41 / 50,83 s dans
+`provider-read`, contre 0,058 / 0,094 / 0,104 s en écriture aval. Les octets reçus
+et transférés concordent dans les relevés. Ce sont des mesures courtes de
+réception, pas la capacité permanente d'un fournisseur ou du relais.
+
+À l'inverse, l'anglais Strng passe 83,127 des 83,145 s observées en attente
+d'écriture aval, avec une réserve navigateur proche de 120 s. Sa moyenne brute
+de pompe (0,76 Mbit/s sur cet intervalle) **ne mesure pas sa capacité réseau** :
+le consommateur ralentit alors volontairement le transfert des données déjà
+arrivées. Ne pas la comparer naïvement aux trois mesures françaises.
+
+Une limite de la qualification rapide est également visible sur MAX : la
+politique observée autorise six secondes de réserve à partir d'une estimation
+de production plafonnée à 20×. Le calcul du Gateway repose ici sur 4,004 s de
+vidéo produites entre les dates de fin de segments espacées de **170,993 ms**.
+`observedMediaProductionRateX` reprend cette estimation ; WatchPage accepte
+`vaapi-transcode-ready` et sa réserve de six secondes. Cette courte rafale
+initiale ne prouve pas la durabilité du débit qui suit. Elle explique la
+qualification rapide de cet essai, mais pas l'origine de la réception lente.
+
+Un futur test de qualification sur une observation plus longue devra vérifier
+à la fois les interruptions et le coût de démarrage sur la copie anglaise
+rapide. Aucun nouveau seuil ou correctif n'est appliqué sur cette seule
+relecture. Reçu : `transfer-analysis.safe.json`, également intégré dans le JSON
+du rapport ; sources inspectées : `services/media-gateway/src/index.js`
+(`inspectHlsStartupPlaylist`/statistiques, `observedMediaProductionRateX`) et
+`public/js/pages/WatchPage.js` (`gatewayStartupBufferOptions`).
+
+### Fermeture des essais
+
 Reçus locaux : `.codex-artifacts/severance-versions-20261009/`, notamment les
 audits `*-start`, `*-progress`, `*-closed`, `browser-samples.safe.json`, les
 captures et les contrôles de santé. Le JSON associé contient les temps précis,
