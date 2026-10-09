@@ -75,7 +75,7 @@ test('Gateway buffered-ahead measurement fails closed when live TimeRanges mutat
 
 test('Gateway startup aligns the observed positive first sample without lowering its reserve', async () => {
     const measure = loadMethod('gatewayBufferedAheadSeconds', 'normalizeGatewayStartupPolicy');
-    const gate = loadMethod('waitForGatewayStartupBuffer', 'playHls');
+    const gate = loadMethod('waitForGatewayStartupBuffer', 'gatewayPlaybackPositionUrl');
     const hls = { levels: [{ details: { live: true, totalduration: 100 } }] };
     const video = { currentTime: 0, paused: true, readyState: 4,
         buffered: { length: 1, start: () => 0.880333, end: () => 18.899333 } };
@@ -104,7 +104,7 @@ test('Gateway startup alignment preserves gaps, pause intent, seeks, and the ful
         { name: 'changing ranges', throws: true },
     ]) {
         let now = 0;
-        const gate = loadMethod('waitForGatewayStartupBuffer', 'playHls', {
+        const gate = loadMethod('waitForGatewayStartupBuffer', 'gatewayPlaybackPositionUrl', {
             Date: { now: () => now }, setTimeout: fn => { now += 100; fn(); },
         });
         const hls = { levels: [{ details: { live: true, totalduration: 100 } }] };
@@ -403,7 +403,7 @@ test('Gateway recovery waits for the reserve even when media time was already ad
 test('Gateway autoplay gate holds at 56 and 95.9 seconds, then admits 96.1 seconds', async () => {
     const waitForGatewayStartupBuffer = loadMethod(
         'waitForGatewayStartupBuffer',
-        'playHls',
+        'gatewayPlaybackPositionUrl',
     );
     const hls = { levels: [{ details: { live: true, totalduration: 60 } }] };
     let ahead = 24.1;
@@ -435,7 +435,7 @@ test('Gateway autoplay gate holds at 56 and 95.9 seconds, then admits 96.1 secon
 test('Gateway startup gate never tears down playback the viewer already started', async () => {
     const waitForGatewayStartupBuffer = loadMethod(
         'waitForGatewayStartupBuffer',
-        'playHls',
+        'gatewayPlaybackPositionUrl',
     );
     const hls = { levels: [{ details: { live: true, totalduration: 24 } }] };
     const video = { currentTime: 0, paused: false, ended: false };
@@ -461,7 +461,7 @@ test('Gateway startup gate never tears down playback the viewer already started'
 test('Gateway autoplay gate is cancellation-safe and admits a fully buffered short VOD', async () => {
     const waitForGatewayStartupBuffer = loadMethod(
         'waitForGatewayStartupBuffer',
-        'playHls',
+        'gatewayPlaybackPositionUrl',
     );
     const completeHls = { levels: [{ details: { live: false, totalduration: 10 } }] };
     const completePage = {
@@ -990,7 +990,7 @@ test('fresh first-fragment origin admits A Breed Apart only with matching seekab
         { name: 'pending seek', pending: 12 },
     ]) {
         let now = 0;
-        const gate = loadMethod('waitForGatewayStartupBuffer', 'playHls', {
+        const gate = loadMethod('waitForGatewayStartupBuffer', 'gatewayPlaybackPositionUrl', {
             Date: { now: () => now }, setTimeout: fn => { now += 100; fn(); },
         });
         const start = 3.569333;
@@ -1013,7 +1013,7 @@ test('fresh first-fragment origin admits A Breed Apart only with matching seekab
 test('a positive startup origin earns adaptive growth without moving before admission', async () => {
     let now = 0, movedAt = null, position = 0;
     const measure = loadMethod('gatewayBufferedAheadSeconds', 'normalizeGatewayStartupPolicy');
-    const gate = loadMethod('waitForGatewayStartupBuffer', 'playHls', {
+    const gate = loadMethod('waitForGatewayStartupBuffer', 'gatewayPlaybackPositionUrl', {
         Date: { now: () => now }, setTimeout: fn => { now += 100; fn(); },
     });
     const start = 3.569333;
