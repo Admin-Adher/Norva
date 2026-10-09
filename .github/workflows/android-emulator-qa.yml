@@ -21,6 +21,7 @@ on:
         options:
           - swiftshader_indirect
           - swiftshader
+          - swangle
       phone-vulkan:
         description: 'Keep default rendering, or compare the documented Chromium/GLES emulator fallback'
         required: false
