@@ -732,3 +732,38 @@ La dernière revue `911f6c95f5ecf06b33b0280896b8aa51cee66036` refuse un indice d
 Reçus : `.codex-artifacts/retained-public-subtitles-20261009/`, dont `summary.safe.json`, `browser-proof-first.safe.json`, `browser-proof.safe.json`, `decode-and-subtitles.safe.json`, `expanded-tests.tap`, `runtime-check.safe.json` et `browser-result.jpg`. L'attachement PR722 a été refusé à la limite de cent pièces; aucune pièce retirée.
 
 Dernière relecture serveur à **02:58:44 Paris** : deux Gateways toujours sains, mêmes images et démarrages, conservation désactivée, cache récent limité au propriétaire, dispatcher actif et tous les conteneurs de preuve absents. Reçus `runtime-final.safe.json` et `final-code-checks.safe.json`. La dernière mise à jour du rapport seule ne change pas le code testé.
+
+
+## Parcours HTTP authentifié complet en environnement isolé — 9 octobre, 05:18 Paris
+
+PR722 est intégrée par `e170a3bea30c632540d219b6a53d5eb753f7d3de`. Ce passage utilise son code applicatif sans modification. Il remplace les adaptateurs de création/expiration et l'assertion de visibilité synthétique des anciens essais par **le routeur et le handler Edge complets**, PostgREST, les fonctions PostgreSQL et leurs propriétaires/ACL restaurés depuis un export de structure uniquement. Aucune ligne client, clé de production, session utilisateur réelle ou donnée fournisseur n'est copiée.
+
+### Périmètre et contrôles d'accès
+
+Le réseau Docker de preuve est interne. Deux identités et une source locales sont créées; des JWT temporaires sont signés avec une clé propre au test. L'abonnement est contrôlé en mode `enforce`. Les lectures de visibilité, générations, profils, claims et reçus de fermeture passent par les RPC et tables réelles. Le singleton de visibilité est initialisé comme donnée de fixture. Le module complet du relais exécute ses contrôles et sa coordination; seul son stockage Durable Object est local et sérialisé, avec alarmes. L'import `cloudflare:sockets` est remplacé par un adaptateur qui refuse tout appel; aucun socket Cloudflare n'est utilisé.
+
+Ce montage ne constitue pas un test du frontal Kong/TLS, de l'émetteur de sessions de production, de la contention Cloudflare ou d'un catalogue fournisseur. Un pont TCP local relie PostgREST au PostgreSQL isolé qui écoute sur loopback. La base conserve ses protections SQL; aucune fonction d'autorisation ni règle RLS n'est remplacée par un résultat forcé.
+
+Contrôles négatifs par le même POST HTTP : **401** pour un jeton invalide, **404** pour une source d'un autre propriétaire, **409** pour une source désactivée, **404** pour un appareil révoqué, **402** pour un abonnement expiré. Zéro ouverture média pendant chacun de ces cinq essais. L'autre propriétaire ne peut pas fermer la session existante : **403**, décodeur toujours présent. Ces résultats ne sont pas additionnés aux suites unitaires historiques.
+
+Le cycle HTTP sans navigateur termine à **05:07:25 Paris** : création en 660 ms, réponse de reprise en 140 ms. Ces durées ne sont pas des temps jusqu'à l'image. Même PID conservé, ancien jeton refusé pendant la pause (401), ancienne URL absente après transfert (404), piste VTT publique disponible et journal interne refusé (404). Les deux compteurs observés — requêtes et sockets source — sont nuls pendant le stationnement.
+
+### WatchPage avec cette chaîne authentifiée
+
+Une page de mesure monte le vrai WatchPage et HLS.js 1.7.3. Ses boutons transmettent la création et la fermeture à l'Edge complet avec le JWT de fixture. L'adaptateur expose la réponse publique au lecteur et réécrit seulement l'origine média vers le tunnel loopback; il n'injecte ni logique de décodeur, ni délai de démarrage, ni sous-titres. Les assets Gateway, Edge, relais et WatchPage correspondent au code de PR722; 239 fichiers source sont recensés dans le manifeste local.
+
+- Lecture initiale effective **6,395 s**, première image **1,633 s**. Des données du cache de la fixture existent déjà : ce n'est pas une mesure à froid.
+- Fermeture à la position source **68,156943 s**, origine 30 s, cible locale **38,156943 s**. Reprise effective **3,264 s**, première image **1,483 s**.
+- **130,093057 s de média parcourues après la cible**, sans pause volontaire. Zéro erreur HLS et zéro événement `waiting`. Les deux seuls écarts de callbacks >250 ms sont les gates initial et de reprise, à 0,042 et 38,250 s; aucun après la première seconde suivant la cible. Cela reste une observation bornée, pas une certification du film entier.
+- Les répliques attendues sont actives à **40,277055 s** et **120,277984 s**, dans leurs intervalles 40–45 et 120–125 s. Une piste affichée, aucun doublon observé. Le menu avait été couvert par PR722; il n'est pas compté comme un nouveau replay de changement de piste ici.
+- Le même décodeur est conservé. L'ancien accès est révoqué, la connexion source est fermée pendant la pause, maximum une requête/socket simultanée. Une nouvelle plage **32–40 Mio** est reçue après les quatre échantillons de revalidation. Les requêtes de ce replay n'atteignent pas EOF; le fichier mesure 67 429 636 octets. Les essais précédents du même fichier sont exclus de cette borne temporelle et les bornes demandées ne sont pas présentées comme des octets effectivement livrés.
+
+Deux extraits distincts de douze secondes, dont un englobant la position reprise (segments 9–11), sont décodés localement sans réseau. Chacun contient **288 paquets H264 et 563 paquets AAC-LC stéréo 48 kHz**, sans erreur FFprobe/FFmpeg. Autour de la reprise, pas maximal de timestamps : vidéo **42 ms**, audio **21,334 ms**. Le navigateur était muet : **aucune validation à l'écoute** n'est revendiquée.
+
+### Incidents du harnais et clôture
+
+Les erreurs de préparation restent distinctes des résultats produit : export initial incomplet de dépendances SQL; réseau PostgreSQL local et reconstruction des fixtures après redémarrage de son stockage volatil; préfixe de route normalement retiré par Kong; jeton Gateway de fixture trop court pour le routeur; assertion de statut 404 au lieu du 403 réel; snapshot de sous-titres demandé avant disponibilité (503 normal); confusion entre identifiant de ligne SQL Gateway et identifiant externe; URL relative de test refusée par WatchPage. Le premier arrêt du frontal de test utilisait un utilitaire absent; l'arrêt a ensuite ciblé son processus exact. Ces corrections concernent uniquement le montage de preuve. Les sources produit sont inchangées.
+
+À **05:18:13 Paris**, zéro session SQL active, zéro encodeur réservé, zéro producteur HLS et zéro connexion source dans la preuve. Les cinq conteneurs, leur réseau et le tunnel sont arrêtés/retirés, les médias synthétiques et clés éphémères supprimés. Les deux Gateways de production restent sains, même image PR706 et mêmes démarrages du 8 octobre à 14:25 UTC, dispatcher actif; conservation du décodeur désactivée, cache récent limité au propriétaire. Aucune lecture fournisseur, modification ou déploiement de production, aucune nouvelle vérification Google Play.
+
+**Ce passage valide la chaîne applicative authentifiée sur fixture.** Les fournisseurs et formats variés, la qualité à l'écoute, la contention distribuée et l'activation contrôlée restent à valider. Aucun nouveau gain sur Normal et aucune extension du pilote ne sont annoncés. Reçus : `.codex-artifacts/retained-authenticated-20261009/`, notamment `summary.safe.json`, `flow-proof.safe.json`, `negative-access.safe.json`, `browser-proof.safe.json`, `audio-boundary-check.safe.json`, `final-inspection.safe.json`, `cleanup.safe.json` et `browser-result.jpg`.

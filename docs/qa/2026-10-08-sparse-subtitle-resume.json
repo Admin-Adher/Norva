@@ -9987,5 +9987,383 @@
       },
       "proofContainerAbsent": true
     }
+  },
+  "authenticatedHttpProof20261009": {
+    "atUtc": "2026-10-09T03:18:13.378161+00:00",
+    "productHead": "911f6c95f5ecf06b33b0280896b8aa51cee66036",
+    "parentMerge": "e170a3bea30c632540d219b6a53d5eb753f7d3de",
+    "scope": "Isolated actual Edge HTTP handler, JWT authentication, restored schema/ownership/ACL, PostgREST, actual relay module with synthetic Durable Object storage, Gateway and WatchPage; no production account or provider media",
+    "productionChanged": false,
+    "fullEdgeHttp": {
+      "atUtc": "2026-10-09T03:07:25.082Z",
+      "fullEdgeHttp": true,
+      "realSchemaAcl": true,
+      "realSqlClaims": true,
+      "realCoordinatorModule": true,
+      "syntheticCoordinatorStorage": true,
+      "productionChanged": false,
+      "externalProviderRequests": 0,
+      "firstStartupMs": 660,
+      "transferMs": 140,
+      "sameDecoder": true,
+      "retainedSessionHit": true,
+      "oldDuringPark": 401,
+      "oldAfterTransfer": 404,
+      "parkedConnections": 0,
+      "committedSubtitleDelivery": true,
+      "rawJournalRefused": true,
+      "wrongOwnerExpiryRefused": true,
+      "trace": [
+        {
+          "path": "/ff291f59-8582-40ee-bd0b-fe1bea421a2f/expire",
+          "method": "POST",
+          "status": 200,
+          "elapsedMs": 72
+        },
+        {
+          "path": "",
+          "method": "POST",
+          "status": 201,
+          "elapsedMs": 660
+        },
+        {
+          "path": "/04a36fcd-4e12-4e9a-8695-42e30a382507/expire",
+          "method": "POST",
+          "status": 403,
+          "elapsedMs": 12
+        },
+        {
+          "path": "/04a36fcd-4e12-4e9a-8695-42e30a382507/expire",
+          "method": "POST",
+          "status": 200,
+          "elapsedMs": 57
+        },
+        {
+          "path": "",
+          "method": "POST",
+          "status": 201,
+          "elapsedMs": 140
+        }
+      ]
+    },
+    "negativeAccess": [
+      {
+        "case": "invalid-token",
+        "status": 401,
+        "providerRequests": 0,
+        "error": "Invalid bearer token",
+        "code": null
+      },
+      {
+        "case": "other-owner",
+        "status": 404,
+        "providerRequests": 0,
+        "error": "Source not found",
+        "code": null
+      },
+      {
+        "case": "hidden-source",
+        "status": 409,
+        "providerRequests": 0,
+        "error": "Source catalog is not available",
+        "code": null
+      },
+      {
+        "case": "revoked-device",
+        "status": 404,
+        "providerRequests": 0,
+        "error": "Device not found",
+        "code": null
+      },
+      {
+        "case": "expired-entitlement",
+        "status": 402,
+        "providerRequests": 0,
+        "error": "Norva access required",
+        "code": null
+      }
+    ],
+    "browser": {
+      "initial": {
+        "firstFrameMs": 1632.8999999523166,
+        "lastMediaTime": 38.125,
+        "frames": 916,
+        "playingMs": 6395.400000095367
+      },
+      "resumed": {
+        "firstFrameMs": 1483.4000000000015,
+        "lastMediaTime": 168.25,
+        "frames": 3120,
+        "playingMs": 3263.600000143051
+      },
+      "resumePosition": 68.156943,
+      "localSeekTarget": 38.156943,
+      "mediaSecondsAfterResume": 130.093057,
+      "frameGaps": [
+        {
+          "phase": "initial",
+          "gap": 4.8425,
+          "at": 0.042
+        },
+        {
+          "phase": "resumed",
+          "gap": 2.0304000000000015,
+          "at": 38.25
+        }
+      ],
+      "waiting": [],
+      "errors": [],
+      "sameDecoder": true,
+      "parkProof": {
+        "zeroConnections": true,
+        "oldStatus": 401
+      },
+      "oldAccessRevoked": true,
+      "activeCues": [
+        {
+          "phase": "resumed",
+          "at": 40.277055,
+          "tracks": [
+            {
+              "mode": "showing",
+              "cues": [
+                {
+                  "start": 40,
+                  "end": 45,
+                  "text": "Forced"
+                },
+                {
+                  "start": 120,
+                  "end": 125,
+                  "text": "Forced second"
+                }
+              ],
+              "active": [
+                "Forced"
+              ]
+            }
+          ]
+        },
+        {
+          "phase": "resumed",
+          "at": 120.277984,
+          "tracks": [
+            {
+              "mode": "showing",
+              "cues": [
+                {
+                  "start": 40,
+                  "end": 45,
+                  "text": "Forced"
+                },
+                {
+                  "start": 120,
+                  "end": 125,
+                  "text": "Forced second"
+                }
+              ],
+              "active": [
+                "Forced second"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "sourceAndCleanup": {
+      "initialCreatedAt": "2026-10-09 03:13:04.037974+00",
+      "resumeCreatedAt": "2026-10-09T03:13:49.272932+00:00",
+      "sourceFileBytes": 67429636,
+      "maxRequestedByteBeforeResume": 33554431,
+      "newRangesAfterResume": [
+        {
+          "start": 33554432,
+          "end": 41943039
+        }
+      ],
+      "requestsDidNotReachEof": true,
+      "currentRunRequestLog": [
+        {
+          "at": 1791515584108,
+          "start": 0,
+          "end": 262143
+        },
+        {
+          "at": 1791515589546,
+          "start": 16777216,
+          "end": 25165823
+        },
+        {
+          "at": 1791515618421,
+          "start": 25165824,
+          "end": 33554431
+        },
+        {
+          "at": 1791515629294,
+          "start": 0,
+          "end": 65535
+        },
+        {
+          "at": 1791515629298,
+          "start": 25165824,
+          "end": 25231359
+        },
+        {
+          "at": 1791515629302,
+          "start": 29327360,
+          "end": 29392895
+        },
+        {
+          "at": 1791515629306,
+          "start": 33488896,
+          "end": 33554431
+        },
+        {
+          "at": 1791515709800,
+          "start": 33554432,
+          "end": 41943039
+        }
+      ],
+      "sqlFinal": {
+        "activePlayback": 0,
+        "activeGatewayRows": 0
+      },
+      "gatewayFinal": {
+        "ok": true,
+        "encoder": 0,
+        "output": 0
+      },
+      "sourceFinal": {
+        "active": 0,
+        "sockets": 0,
+        "maxActive": 1,
+        "maxSockets": 1
+      }
+    },
+    "audio": [
+      {
+        "atUtc": "2026-10-09T03:14:17.040980+00:00",
+        "scope": "12 seconds of resumed synthetic output; not audible acceptance",
+        "segments": [
+          "video-00055.ts",
+          "video-00056.ts",
+          "video-00057.ts"
+        ],
+        "streams": [
+          {
+            "codec_type": "video",
+            "codec_name": "h264",
+            "profile": "Constrained Baseline",
+            "sample_rate": null,
+            "channels": null,
+            "channel_layout": null
+          },
+          {
+            "codec_type": "audio",
+            "codec_name": "aac",
+            "profile": "LC",
+            "sample_rate": "48000",
+            "channels": 2,
+            "channel_layout": "stereo"
+          }
+        ],
+        "packets": {
+          "audio": 563,
+          "video": 288
+        },
+        "probeExit": 0,
+        "decodeExit": 0,
+        "probeErrors": "",
+        "decodeErrors": ""
+      },
+      {
+        "atUtc": "2026-10-09T03:15:14.350502+00:00",
+        "scope": "12 seconds spanning the resume position in the unchanged decoder output; not audible acceptance",
+        "segments": [
+          "video-00009.ts",
+          "video-00010.ts",
+          "video-00011.ts"
+        ],
+        "streams": [
+          {
+            "codec_type": "video",
+            "codec_name": "h264",
+            "profile": "Constrained Baseline",
+            "sample_rate": null,
+            "channels": null,
+            "channel_layout": null
+          },
+          {
+            "codec_type": "audio",
+            "codec_name": "aac",
+            "profile": "LC",
+            "sample_rate": "48000",
+            "channels": 2,
+            "channel_layout": "stereo"
+          }
+        ],
+        "packets": {
+          "audio": 563,
+          "video": 288
+        },
+        "probeExit": 0,
+        "decodeExit": 0,
+        "probeErrors": "",
+        "decodeErrors": "",
+        "maxPacketStepSeconds": {
+          "audio": 0.021334,
+          "video": 0.042
+        }
+      }
+    ],
+    "productionHealth": {
+      "atUtc": "2026-10-09T03:18:13.378161+00:00",
+      "productionChanged": false,
+      "removed": [
+        "norva-retained-auth-edge-20261009",
+        "norva-retained-auth-rest-20261009",
+        "norva-retained-auth-media-20261009",
+        "norva-retained-auth-dbbridge-20261009",
+        "norva-retained-auth-db-20261009"
+      ],
+      "networkRemoved": true,
+      "syntheticMediaAndEphemeralCredentialsRemoved": true,
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "retainedEnabled": false,
+          "recentOwnerScope": "owner-allowlist"
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "retainedEnabled": false,
+          "recentOwnerScope": "owner-allowlist"
+        }
+      ],
+      "dispatcherActive": true,
+      "allProofContainersAbsent": true
+    },
+    "artifacts": ".codex-artifacts/retained-authenticated-20261009/",
+    "limitations": [
+      "One synthetic H264/AAC stereo MKV with two text subtitle tracks",
+      "Synthetic JWT issuer, PostgreSQL fixtures and Durable Object storage; not live customer authentication, Kong/TLS, Cloudflare contention or real supplier delivery",
+      "Browser muted; no audible acceptance",
+      "No new varied-provider tests, no deployment, no activation, no new Normal gain"
+    ],
+    "historicalFixtureFailures": [
+      "Schema-only bootstrap needed complete dependencies, roles and ACL",
+      "Isolated PostgreSQL default local listener and tmpfs restart reset fixture; restored before final tests; TCP bridge inside isolated network",
+      "Isolated router expects path stripped as by Kong",
+      "Fixture gateway service token below minimum accepted routing length corrected",
+      "Expected wrong-owner expiry status was 403, not 404; early subtitle request returns 503 before committed snapshot",
+      "DB gateway row id differed from external Gateway session id; inspection corrected",
+      "Browser proof first supplied relative media URL rejected by WatchPage; absolute loopback URL restored; first frontend stop utility absent, replaced with exact fixture process match"
+    ]
   }
 }
