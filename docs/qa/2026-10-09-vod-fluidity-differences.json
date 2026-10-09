@@ -1,0 +1,3992 @@
+{
+  "atUtc": "2026-10-09T12:33:42.993034+00:00",
+  "productionModified": false,
+  "playbackOrAudibleAcceptance": false,
+  "profiles": [
+    {
+      "copy": "en-default-agent",
+      "bytes": 475790063,
+      "durationSeconds": 3434.773,
+      "wholeFileAverageMbps": 1.1081723607353382,
+      "video": [
+        {
+          "index": 0,
+          "codec_name": "h264",
+          "profile": "Main",
+          "codec_type": "video",
+          "width": 1918,
+          "height": 802,
+          "pix_fmt": "yuv420p",
+          "r_frame_rate": "24000/1001",
+          "tags": {}
+        }
+      ],
+      "audio": [
+        {
+          "index": 1,
+          "codec_name": "aac",
+          "profile": "LC",
+          "codec_type": "audio",
+          "sample_rate": "48000",
+          "channels": 6,
+          "channel_layout": "5.1",
+          "r_frame_rate": "0/0",
+          "tags": {
+            "language": "eng"
+          }
+        }
+      ],
+      "subtitleCount": 1,
+      "audioLanguageIsTechnicalTagOnly": true
+    },
+    {
+      "copy": "fr4k-default-agent",
+      "bytes": 3480858589,
+      "durationSeconds": 3434.816,
+      "wholeFileAverageMbps": 8.107237392628893,
+      "video": [
+        {
+          "index": 0,
+          "codec_name": "h264",
+          "profile": "High",
+          "codec_type": "video",
+          "width": 3840,
+          "height": 2160,
+          "pix_fmt": "yuv420p",
+          "r_frame_rate": "30/1",
+          "tags": {}
+        }
+      ],
+      "audio": [
+        {
+          "index": 1,
+          "codec_name": "aac",
+          "profile": "LC",
+          "codec_type": "audio",
+          "sample_rate": "48000",
+          "channels": 8,
+          "channel_layout": "7.1",
+          "r_frame_rate": "0/0",
+          "tags": {
+            "language": "fre"
+          }
+        },
+        {
+          "index": 2,
+          "codec_name": "aac",
+          "profile": "LC",
+          "codec_type": "audio",
+          "sample_rate": "48000",
+          "channels": 8,
+          "channel_layout": "7.1",
+          "r_frame_rate": "0/0",
+          "tags": {
+            "language": "eng"
+          }
+        }
+      ],
+      "subtitleCount": 0,
+      "audioLanguageIsTechnicalTagOnly": true
+    },
+    {
+      "copy": "max-default-agent",
+      "bytes": 4679005577,
+      "durationSeconds": 3434.752,
+      "wholeFileAverageMbps": 10.89803415676008,
+      "video": [
+        {
+          "index": 0,
+          "codec_name": "h264",
+          "profile": "High",
+          "codec_type": "video",
+          "width": 1918,
+          "height": 802,
+          "pix_fmt": "yuv420p",
+          "r_frame_rate": "24000/1001",
+          "tags": {}
+        }
+      ],
+      "audio": [
+        {
+          "index": 1,
+          "codec_name": "eac3",
+          "codec_type": "audio",
+          "sample_rate": "48000",
+          "channels": 6,
+          "channel_layout": "5.1(side)",
+          "r_frame_rate": "0/0",
+          "tags": {
+            "language": "eng"
+          }
+        }
+      ],
+      "subtitleCount": 42,
+      "audioLanguageIsTechnicalTagOnly": true
+    }
+  ],
+  "independentReads": [
+    {
+      "at": "2026-10-09T12:11:26.083943+00:00",
+      "question": "Compare exact slow and fluent episodes using the same independent 16 MiB prefix read, outside Norva media processing",
+      "copy": "en",
+      "rangeStart": 0,
+      "rangeBytes": 16777216,
+      "expectedFullFileBytes": 475790063,
+      "reader": "system libcurl to bounded temporary file",
+      "route": "unchanged production HTTP CONNECT relay and port",
+      "initialGets": 1,
+      "newProductionCode": false,
+      "routeCheck": {
+        "slot": 1,
+        "transport": "http",
+        "controlShadow": true,
+        "verifiedFromProductionModule": true,
+        "productionRouteUnchanged": true,
+        "diagnosticUsesProxy": true,
+        "diagnosticPort": 5432
+      },
+      "result": {
+        "httpStatus": 206,
+        "seconds": 90.000057,
+        "firstByteSeconds": 2.043416,
+        "connectSeconds": 0.280862,
+        "bytes": 4476504,
+        "sha256": "5908cdd21fdba78d5ce8304b186b68c71d802e3cecaac5b2a3f3f87618117c5d",
+        "exit": 28,
+        "contentRanges": [
+          "bytes 0-16777215/475790063"
+        ],
+        "redirects": 1,
+        "effectiveScheme": "http",
+        "proxyUsed": null
+      },
+      "errorType": "AssertionError",
+      "guard": "bounded_response_incomplete",
+      "heartbeatFailures": [],
+      "expired": true,
+      "temporaryFilesRemoved": true,
+      "endedAt": "2026-10-09T12:12:56.915241+00:00",
+      "observedMbps": 0.3979112146562307,
+      "sampleSummary": {
+        "count": 173,
+        "last": {
+          "seconds": 89.732,
+          "fileBytes": 4427776,
+          "cpuTicks": 8,
+          "state": "S",
+          "waitChannel": "do_poll.constprop.0",
+          "sockets": [
+            {
+              "rto": 406.0,
+              "bytes_received": 782.0,
+              "segs_in": 8.0,
+              "data_segs_in": 2.0,
+              "lastrcv": 88779.0,
+              "rcv_space": 14480.0,
+              "rcv_ssthresh": 29184.0,
+              "rttMs": 142.315,
+              "rttVariationMs": 41.584,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            },
+            {
+              "rto": 397.0,
+              "bytes_retrans": 165.0,
+              "bytes_received": 4431246.0,
+              "segs_in": 3202.0,
+              "data_segs_in": 3199.0,
+              "lastrcv": 30.0,
+              "rcv_space": 85440.0,
+              "rcv_ssthresh": 416849.0,
+              "rttMs": 138.951,
+              "rttVariationMs": 40.187,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            }
+          ]
+        },
+        "maxCpuTicks": 8,
+        "maxReceiveQueue": 0
+      }
+    },
+    {
+      "at": "2026-10-09T12:13:06.740895+00:00",
+      "question": "Compare exact slow and fluent episodes using the same independent 16 MiB prefix read, outside Norva media processing",
+      "copy": "fr4k",
+      "rangeStart": 0,
+      "rangeBytes": 16777216,
+      "expectedFullFileBytes": 3480858589,
+      "reader": "system libcurl to bounded temporary file",
+      "route": "unchanged production HTTP CONNECT relay and port",
+      "initialGets": 1,
+      "newProductionCode": false,
+      "routeCheck": {
+        "slot": 1,
+        "transport": "http",
+        "controlShadow": true,
+        "verifiedFromProductionModule": true,
+        "productionRouteUnchanged": true,
+        "diagnosticUsesProxy": true,
+        "diagnosticPort": 5432
+      },
+      "result": {
+        "httpStatus": 206,
+        "seconds": 90.013078,
+        "firstByteSeconds": 1.782514,
+        "connectSeconds": 0.270146,
+        "bytes": 4176038,
+        "sha256": "43242497254381bff01a2be15da866b26afb34045b5ddfb9d6b4ee128d497b17",
+        "exit": 28,
+        "contentRanges": [
+          "bytes 0-16777215/3480858589"
+        ],
+        "redirects": 1,
+        "effectiveScheme": "http",
+        "proxyUsed": null
+      },
+      "errorType": "AssertionError",
+      "guard": "bounded_response_incomplete",
+      "heartbeatFailures": [],
+      "expired": true,
+      "offlineProbe": {
+        "exit": 0,
+        "details": {
+          "programs": [],
+          "streams": [
+            {
+              "index": 0,
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "width": 3840,
+              "height": 2160,
+              "pix_fmt": "yuv420p",
+              "r_frame_rate": "30/1",
+              "tags": {}
+            },
+            {
+              "index": 1,
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 8,
+              "channel_layout": "7.1",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fre"
+              }
+            },
+            {
+              "index": 2,
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 8,
+              "channel_layout": "7.1",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            }
+          ],
+          "format": {
+            "format_name": "matroska,webm",
+            "duration": "3434.816000"
+          }
+        },
+        "diagnosticLines": 0,
+        "network": "none"
+      },
+      "temporaryFilesRemoved": true,
+      "endedAt": "2026-10-09T12:14:38.113188+00:00",
+      "observedMbps": 0.37114944563944363,
+      "sampleSummary": {
+        "count": 173,
+        "last": {
+          "seconds": 89.672,
+          "fileBytes": 4124672,
+          "cpuTicks": 13,
+          "state": "S",
+          "waitChannel": "do_poll.constprop.0",
+          "sockets": [
+            {
+              "rto": 370.0,
+              "bytes_received": 4122238.0,
+              "segs_in": 3018.0,
+              "data_segs_in": 3015.0,
+              "lastrcv": 14.0,
+              "rcv_space": 54112.0,
+              "rcv_ssthresh": 287280.0,
+              "rttMs": 127.589,
+              "rttVariationMs": 36.947,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            },
+            {
+              "rto": 404.0,
+              "bytes_received": 783.0,
+              "segs_in": 7.0,
+              "data_segs_in": 2.0,
+              "lastrcv": 88669.0,
+              "rcv_space": 14480.0,
+              "rcv_ssthresh": 29184.0,
+              "rttMs": 140.461,
+              "rttVariationMs": 42.452,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            }
+          ]
+        },
+        "maxCpuTicks": 13,
+        "maxReceiveQueue": 0
+      }
+    },
+    {
+      "at": "2026-10-09T12:15:00.048394+00:00",
+      "question": "Compare exact slow and fluent episodes using the same independent 16 MiB prefix read, outside Norva media processing",
+      "copy": "max",
+      "rangeStart": 0,
+      "rangeBytes": 16777216,
+      "expectedFullFileBytes": 4679005577,
+      "reader": "system libcurl to bounded temporary file",
+      "route": "unchanged production HTTP CONNECT relay and port",
+      "initialGets": 1,
+      "newProductionCode": false,
+      "routeCheck": {
+        "slot": 1,
+        "transport": "http",
+        "controlShadow": true,
+        "verifiedFromProductionModule": true,
+        "productionRouteUnchanged": true,
+        "diagnosticUsesProxy": true,
+        "diagnosticPort": 5432
+      },
+      "result": {
+        "httpStatus": 206,
+        "seconds": 90.00852,
+        "firstByteSeconds": 2.248189,
+        "connectSeconds": 0.249597,
+        "bytes": 7827353,
+        "sha256": "0c8244e55b05a7a8be75c7eaf0294038dcac7c483dc26eeb61df3f580680fe3c",
+        "exit": 28,
+        "contentRanges": [
+          "bytes 0-16777215/4679005577"
+        ],
+        "redirects": 1,
+        "effectiveScheme": "http",
+        "proxyUsed": null
+      },
+      "errorType": "AssertionError",
+      "guard": "bounded_response_incomplete",
+      "heartbeatFailures": [],
+      "expired": true,
+      "offlineProbe": {
+        "exit": 0,
+        "details": {
+          "programs": [],
+          "streams": [
+            {
+              "index": 0,
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "width": 1918,
+              "height": 802,
+              "pix_fmt": "yuv420p",
+              "r_frame_rate": "24000/1001",
+              "tags": {}
+            },
+            {
+              "index": 1,
+              "codec_name": "eac3",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 6,
+              "channel_layout": "5.1(side)",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 2,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 3,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 4,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ara"
+              }
+            },
+            {
+              "index": 5,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "bul"
+              }
+            },
+            {
+              "index": 6,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            },
+            {
+              "index": 7,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            },
+            {
+              "index": 8,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "cze"
+              }
+            },
+            {
+              "index": 9,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "dan"
+              }
+            },
+            {
+              "index": 10,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ger"
+              }
+            },
+            {
+              "index": 11,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "gre"
+              }
+            },
+            {
+              "index": 12,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "spa"
+              }
+            },
+            {
+              "index": 13,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "spa"
+              }
+            },
+            {
+              "index": 14,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "est"
+              }
+            },
+            {
+              "index": 15,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fin"
+              }
+            },
+            {
+              "index": 16,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fre"
+              }
+            },
+            {
+              "index": 17,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fre"
+              }
+            },
+            {
+              "index": 18,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "heb"
+              }
+            },
+            {
+              "index": 19,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "hin"
+              }
+            },
+            {
+              "index": 20,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "hun"
+              }
+            },
+            {
+              "index": 21,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ind"
+              }
+            },
+            {
+              "index": 22,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ita"
+              }
+            },
+            {
+              "index": 23,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "jpn"
+              }
+            },
+            {
+              "index": 24,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "kor"
+              }
+            },
+            {
+              "index": 25,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "lit"
+              }
+            },
+            {
+              "index": 26,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "lav"
+              }
+            },
+            {
+              "index": 27,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "may"
+              }
+            },
+            {
+              "index": 28,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "dut"
+              }
+            },
+            {
+              "index": 29,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "nor"
+              }
+            },
+            {
+              "index": 30,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "pol"
+              }
+            },
+            {
+              "index": 31,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "por"
+              }
+            },
+            {
+              "index": 32,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "por"
+              }
+            },
+            {
+              "index": 33,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "rus"
+              }
+            },
+            {
+              "index": 34,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "slo"
+              }
+            },
+            {
+              "index": 35,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "slv"
+              }
+            },
+            {
+              "index": 36,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "swe"
+              }
+            },
+            {
+              "index": 37,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tam"
+              }
+            },
+            {
+              "index": 38,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tel"
+              }
+            },
+            {
+              "index": 39,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tha"
+              }
+            },
+            {
+              "index": 40,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tur"
+              }
+            },
+            {
+              "index": 41,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ukr"
+              }
+            },
+            {
+              "index": 42,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "vie"
+              }
+            },
+            {
+              "index": 43,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            }
+          ],
+          "format": {
+            "format_name": "matroska,webm",
+            "duration": "3434.752000"
+          }
+        },
+        "diagnosticLines": 0,
+        "network": "none"
+      },
+      "temporaryFilesRemoved": true,
+      "endedAt": "2026-10-09T12:16:31.446302+00:00",
+      "observedMbps": 0.6956988516198244,
+      "sampleSummary": {
+        "count": 173,
+        "last": {
+          "seconds": 89.722,
+          "fileBytes": 7761920,
+          "cpuTicks": 16,
+          "state": "S",
+          "waitChannel": "do_poll.constprop.0",
+          "sockets": [
+            {
+              "rto": 366.0,
+              "bytes_received": 7763687.0,
+              "segs_in": 5605.0,
+              "data_segs_in": 5602.0,
+              "lastrcv": 8.0,
+              "rcv_space": 52688.0,
+              "rcv_ssthresh": 184554.0,
+              "rttMs": 127.561,
+              "rttVariationMs": 39.908,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            }
+          ]
+        },
+        "maxCpuTicks": 16,
+        "maxReceiveQueue": 1
+      }
+    },
+    {
+      "at": "2026-10-09T12:17:25.525206+00:00",
+      "question": "Compare exact slow and fluent episodes using the same independent 16 MiB prefix read, outside Norva media processing",
+      "copy": "en-default-agent",
+      "rangeStart": 0,
+      "rangeBytes": 16777216,
+      "expectedFullFileBytes": 475790063,
+      "reader": "system libcurl to bounded temporary file",
+      "route": "unchanged production HTTP CONNECT relay and port",
+      "initialGets": 1,
+      "newProductionCode": false,
+      "routeCheck": {
+        "slot": 1,
+        "transport": "http",
+        "controlShadow": true,
+        "verifiedFromProductionModule": true,
+        "productionRouteUnchanged": true,
+        "diagnosticUsesProxy": true,
+        "diagnosticPort": 5432
+      },
+      "userAgentPolicy": "Gateway source default",
+      "result": {
+        "httpStatus": 206,
+        "seconds": 12.559679,
+        "firstByteSeconds": 1.299848,
+        "connectSeconds": 0.243591,
+        "bytes": 16777216,
+        "sha256": "3fd2e498446f9328b00ea27d919ce663d85da4fa589226fb1589fbb06644bdc8",
+        "exit": 0,
+        "contentRanges": [
+          "bytes 0-16777215/475790063"
+        ],
+        "redirects": 1,
+        "effectiveScheme": "http",
+        "proxyUsed": null
+      },
+      "historicalBodyHashAvailable": false,
+      "rangeAndSizeMatchPreviousTrace": true,
+      "comparisonBodyHashAvailable": false,
+      "firstPrefixHeaderHex": "1a45dfa3",
+      "heartbeatFailures": [],
+      "expired": true,
+      "offlineProbe": {
+        "exit": 0,
+        "details": {
+          "programs": [],
+          "streams": [
+            {
+              "index": 0,
+              "codec_name": "h264",
+              "profile": "Main",
+              "codec_type": "video",
+              "width": 1918,
+              "height": 802,
+              "pix_fmt": "yuv420p",
+              "r_frame_rate": "24000/1001",
+              "tags": {}
+            },
+            {
+              "index": 1,
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 6,
+              "channel_layout": "5.1",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 2,
+              "codec_name": "ass",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            }
+          ],
+          "format": {
+            "format_name": "matroska,webm",
+            "duration": "3434.773000"
+          }
+        },
+        "diagnosticLines": 0,
+        "network": "none"
+      },
+      "temporaryFilesRemoved": true,
+      "endedAt": "2026-10-09T12:17:39.810195+00:00",
+      "observedMbps": 10.686397956508284,
+      "sampleSummary": {
+        "count": 25,
+        "last": {
+          "seconds": 12.532,
+          "fileBytes": 16662528,
+          "cpuTicks": 16,
+          "state": "S",
+          "waitChannel": "do_poll.constprop.0",
+          "sockets": [
+            {
+              "rto": 359.0,
+              "bytes_received": 776.0,
+              "segs_in": 5.0,
+              "data_segs_in": 2.0,
+              "lastrcv": 11819.0,
+              "rcv_space": 14480.0,
+              "rcv_ssthresh": 28672.0,
+              "rttMs": 125.816,
+              "rttVariationMs": 45.079,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            },
+            {
+              "rto": 353.0,
+              "bytes_received": 16629287.0,
+              "segs_in": 11820.0,
+              "data_segs_in": 11817.0,
+              "rcv_space": 555803.0,
+              "rcv_ssthresh": 2119697.0,
+              "rttMs": 120.448,
+              "rttVariationMs": 35.545,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            }
+          ]
+        },
+        "maxCpuTicks": 16,
+        "maxReceiveQueue": 0
+      }
+    },
+    {
+      "at": "2026-10-09T12:19:25.460614+00:00",
+      "question": "Compare exact slow and fluent episodes using the same independent 16 MiB prefix read, outside Norva media processing",
+      "copy": "en-minimal-check",
+      "rangeStart": 0,
+      "rangeBytes": 16777216,
+      "expectedFullFileBytes": 475790063,
+      "reader": "system libcurl to bounded temporary file",
+      "route": "unchanged production HTTP CONNECT relay and port",
+      "initialGets": 1,
+      "newProductionCode": false,
+      "routeCheck": {
+        "slot": 1,
+        "transport": "http",
+        "controlShadow": true,
+        "verifiedFromProductionModule": true,
+        "productionRouteUnchanged": true,
+        "diagnosticUsesProxy": true,
+        "diagnosticPort": 5432
+      },
+      "userAgentPolicy": "legacy diagnostic minimal Mozilla",
+      "result": {
+        "httpStatus": 206,
+        "seconds": 34.121556,
+        "firstByteSeconds": 1.833772,
+        "connectSeconds": 0.288724,
+        "bytes": 16777216,
+        "sha256": "3fd2e498446f9328b00ea27d919ce663d85da4fa589226fb1589fbb06644bdc8",
+        "exit": 0,
+        "contentRanges": [
+          "bytes 0-16777215/475790063"
+        ],
+        "redirects": 1,
+        "effectiveScheme": "http",
+        "proxyUsed": null
+      },
+      "historicalBodyHashAvailable": false,
+      "rangeAndSizeMatchPreviousTrace": true,
+      "comparisonBodyHashAvailable": false,
+      "firstPrefixHeaderHex": "1a45dfa3",
+      "heartbeatFailures": [],
+      "expired": true,
+      "offlineProbe": {
+        "exit": 0,
+        "details": {
+          "programs": [],
+          "streams": [
+            {
+              "index": 0,
+              "codec_name": "h264",
+              "profile": "Main",
+              "codec_type": "video",
+              "width": 1918,
+              "height": 802,
+              "pix_fmt": "yuv420p",
+              "r_frame_rate": "24000/1001",
+              "tags": {}
+            },
+            {
+              "index": 1,
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 6,
+              "channel_layout": "5.1",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 2,
+              "codec_name": "ass",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            }
+          ],
+          "format": {
+            "format_name": "matroska,webm",
+            "duration": "3434.773000"
+          }
+        },
+        "diagnosticLines": 0,
+        "network": "none"
+      },
+      "temporaryFilesRemoved": true,
+      "endedAt": "2026-10-09T12:20:01.114784+00:00",
+      "observedMbps": 3.9335172170929136,
+      "sampleSummary": {
+        "count": 66,
+        "last": {
+          "seconds": 33.88,
+          "fileBytes": 16748544,
+          "cpuTicks": 20,
+          "state": "S",
+          "waitChannel": "do_poll.constprop.0",
+          "sockets": [
+            {
+              "rto": 417.0,
+              "bytes_received": 16750158.0,
+              "segs_in": 11920.0,
+              "data_segs_in": 11917.0,
+              "lastrcv": 266.0,
+              "rcv_space": 446416.0,
+              "rcv_ssthresh": 1038146.0,
+              "rttMs": 144.746,
+              "rttVariationMs": 47.573,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            },
+            {
+              "rto": 402.0,
+              "bytes_received": 782.0,
+              "segs_in": 5.0,
+              "data_segs_in": 2.0,
+              "lastrcv": 33085.0,
+              "rcv_space": 14480.0,
+              "rcv_ssthresh": 29184.0,
+              "rttMs": 141.046,
+              "rttVariationMs": 41.726,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            }
+          ]
+        },
+        "maxCpuTicks": 20,
+        "maxReceiveQueue": 1424
+      }
+    },
+    {
+      "at": "2026-10-09T12:20:20.778466+00:00",
+      "question": "Compare exact slow and fluent episodes using the same independent 16 MiB prefix read, outside Norva media processing",
+      "copy": "fr4k-default-agent",
+      "rangeStart": 0,
+      "rangeBytes": 16777216,
+      "expectedFullFileBytes": 3480858589,
+      "reader": "system libcurl to bounded temporary file",
+      "route": "unchanged production HTTP CONNECT relay and port",
+      "initialGets": 1,
+      "newProductionCode": false,
+      "routeCheck": {
+        "slot": 1,
+        "transport": "http",
+        "controlShadow": true,
+        "verifiedFromProductionModule": true,
+        "productionRouteUnchanged": true,
+        "diagnosticUsesProxy": true,
+        "diagnosticPort": 5432
+      },
+      "userAgentPolicy": "Gateway source default",
+      "result": {
+        "httpStatus": 206,
+        "seconds": 49.608318,
+        "firstByteSeconds": 2.085053,
+        "connectSeconds": 0.239285,
+        "bytes": 16777216,
+        "sha256": "fbb52ae38e603f31cce7c8d5fe9f192d733329f903dec780984a8bf1a3e52c3d",
+        "exit": 0,
+        "contentRanges": [
+          "bytes 0-16777215/3480858589"
+        ],
+        "redirects": 1,
+        "effectiveScheme": "http",
+        "proxyUsed": null
+      },
+      "historicalBodyHashAvailable": false,
+      "rangeAndSizeMatchPreviousTrace": true,
+      "comparisonBodyHashAvailable": false,
+      "firstPrefixHeaderHex": "1a45dfa3",
+      "heartbeatFailures": [],
+      "expired": true,
+      "offlineProbe": {
+        "exit": 0,
+        "details": {
+          "programs": [],
+          "streams": [
+            {
+              "index": 0,
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "width": 3840,
+              "height": 2160,
+              "pix_fmt": "yuv420p",
+              "r_frame_rate": "30/1",
+              "tags": {}
+            },
+            {
+              "index": 1,
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 8,
+              "channel_layout": "7.1",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fre"
+              }
+            },
+            {
+              "index": 2,
+              "codec_name": "aac",
+              "profile": "LC",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 8,
+              "channel_layout": "7.1",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            }
+          ],
+          "format": {
+            "format_name": "matroska,webm",
+            "duration": "3434.816000"
+          }
+        },
+        "diagnosticLines": 0,
+        "network": "none"
+      },
+      "temporaryFilesRemoved": true,
+      "endedAt": "2026-10-09T12:21:12.932070+00:00",
+      "observedMbps": 2.7055488557382654,
+      "sampleSummary": {
+        "count": 96,
+        "last": {
+          "seconds": 49.582,
+          "fileBytes": 16756736,
+          "cpuTicks": 29,
+          "state": "S",
+          "waitChannel": "do_poll.constprop.0",
+          "sockets": [
+            {
+              "rto": 378.0,
+              "bytes_received": 789.0,
+              "segs_in": 5.0,
+              "data_segs_in": 2.0,
+              "lastrcv": 48145.0,
+              "rcv_space": 14480.0,
+              "rcv_ssthresh": 29184.0,
+              "rttMs": 135.403,
+              "rttVariationMs": 49.839,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            },
+            {
+              "rto": 331.0,
+              "bytes_received": 16753399.0,
+              "segs_in": 12128.0,
+              "data_segs_in": 12125.0,
+              "lastrcv": 4.0,
+              "rcv_space": 579568.0,
+              "rcv_ssthresh": 2678784.0,
+              "rttMs": 114.685,
+              "rttVariationMs": 37.702,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            }
+          ]
+        },
+        "maxCpuTicks": 29,
+        "maxReceiveQueue": 0
+      }
+    },
+    {
+      "at": "2026-10-09T12:21:45.761253+00:00",
+      "question": "Compare exact slow and fluent episodes using the same independent 16 MiB prefix read, outside Norva media processing",
+      "copy": "max-default-agent",
+      "rangeStart": 0,
+      "rangeBytes": 16777216,
+      "expectedFullFileBytes": 4679005577,
+      "reader": "system libcurl to bounded temporary file",
+      "route": "unchanged production HTTP CONNECT relay and port",
+      "initialGets": 1,
+      "newProductionCode": false,
+      "routeCheck": {
+        "slot": 1,
+        "transport": "http",
+        "controlShadow": true,
+        "verifiedFromProductionModule": true,
+        "productionRouteUnchanged": true,
+        "diagnosticUsesProxy": true,
+        "diagnosticPort": 5432
+      },
+      "userAgentPolicy": "Gateway source default",
+      "result": {
+        "httpStatus": 206,
+        "seconds": 90.068479,
+        "firstByteSeconds": 2.531323,
+        "connectSeconds": 0.268908,
+        "bytes": 13050585,
+        "sha256": "dca3980dc483644806b86637fafe4c2800f280f7c32828e7baa2f9aec0724106",
+        "exit": 28,
+        "contentRanges": [
+          "bytes 0-16777215/4679005577"
+        ],
+        "redirects": 1,
+        "effectiveScheme": "http",
+        "proxyUsed": null
+      },
+      "errorType": "AssertionError",
+      "guard": "bounded_response_incomplete",
+      "heartbeatFailures": [],
+      "expired": true,
+      "offlineProbe": {
+        "exit": 0,
+        "details": {
+          "programs": [],
+          "streams": [
+            {
+              "index": 0,
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "width": 1918,
+              "height": 802,
+              "pix_fmt": "yuv420p",
+              "r_frame_rate": "24000/1001",
+              "tags": {}
+            },
+            {
+              "index": 1,
+              "codec_name": "eac3",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 6,
+              "channel_layout": "5.1(side)",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 2,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 3,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 4,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ara"
+              }
+            },
+            {
+              "index": 5,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "bul"
+              }
+            },
+            {
+              "index": 6,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            },
+            {
+              "index": 7,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            },
+            {
+              "index": 8,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "cze"
+              }
+            },
+            {
+              "index": 9,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "dan"
+              }
+            },
+            {
+              "index": 10,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ger"
+              }
+            },
+            {
+              "index": 11,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "gre"
+              }
+            },
+            {
+              "index": 12,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "spa"
+              }
+            },
+            {
+              "index": 13,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "spa"
+              }
+            },
+            {
+              "index": 14,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "est"
+              }
+            },
+            {
+              "index": 15,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fin"
+              }
+            },
+            {
+              "index": 16,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fre"
+              }
+            },
+            {
+              "index": 17,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fre"
+              }
+            },
+            {
+              "index": 18,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "heb"
+              }
+            },
+            {
+              "index": 19,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "hin"
+              }
+            },
+            {
+              "index": 20,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "hun"
+              }
+            },
+            {
+              "index": 21,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ind"
+              }
+            },
+            {
+              "index": 22,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ita"
+              }
+            },
+            {
+              "index": 23,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "jpn"
+              }
+            },
+            {
+              "index": 24,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "kor"
+              }
+            },
+            {
+              "index": 25,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "lit"
+              }
+            },
+            {
+              "index": 26,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "lav"
+              }
+            },
+            {
+              "index": 27,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "may"
+              }
+            },
+            {
+              "index": 28,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "dut"
+              }
+            },
+            {
+              "index": 29,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "nor"
+              }
+            },
+            {
+              "index": 30,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "pol"
+              }
+            },
+            {
+              "index": 31,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "por"
+              }
+            },
+            {
+              "index": 32,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "por"
+              }
+            },
+            {
+              "index": 33,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "rus"
+              }
+            },
+            {
+              "index": 34,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "slo"
+              }
+            },
+            {
+              "index": 35,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "slv"
+              }
+            },
+            {
+              "index": 36,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "swe"
+              }
+            },
+            {
+              "index": 37,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tam"
+              }
+            },
+            {
+              "index": 38,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tel"
+              }
+            },
+            {
+              "index": 39,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tha"
+              }
+            },
+            {
+              "index": 40,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tur"
+              }
+            },
+            {
+              "index": 41,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ukr"
+              }
+            },
+            {
+              "index": 42,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "vie"
+              }
+            },
+            {
+              "index": 43,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            }
+          ],
+          "format": {
+            "format_name": "matroska,webm",
+            "duration": "3434.752000"
+          }
+        },
+        "diagnosticLines": 0,
+        "network": "none"
+      },
+      "temporaryFilesRemoved": true,
+      "endedAt": "2026-10-09T12:23:17.179587+00:00",
+      "observedMbps": 1.1591700132962164,
+      "sampleSummary": {
+        "count": 173,
+        "last": {
+          "seconds": 89.787,
+          "fileBytes": 13049856,
+          "cpuTicks": 25,
+          "state": "S",
+          "waitChannel": "do_poll.constprop.0",
+          "sockets": [
+            {
+              "rto": 370.0,
+              "bytes_received": 13050999.0,
+              "segs_in": 9372.0,
+              "data_segs_in": 9369.0,
+              "lastrcv": 50.0,
+              "rcv_space": 435744.0,
+              "rcv_ssthresh": 2678784.0,
+              "rttMs": 127.495,
+              "rttVariationMs": 37.216,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            }
+          ]
+        },
+        "maxCpuTicks": 25,
+        "maxReceiveQueue": 1424
+      }
+    },
+    {
+      "at": "2026-10-09T12:24:07.407013+00:00",
+      "question": "Compare exact slow and fluent episodes using the same independent 16 MiB prefix read, outside Norva media processing",
+      "copy": "max-forward",
+      "rangeStart": 0,
+      "rangeBytes": 16777216,
+      "expectedFullFileBytes": 4679005577,
+      "reader": "system libcurl to bounded temporary file",
+      "route": "diagnostic HTTP forward on same configured proxy URL/port; production unchanged",
+      "initialGets": 1,
+      "newProductionCode": false,
+      "routeCheck": {
+        "slot": 1,
+        "transport": "http",
+        "controlShadow": true,
+        "verifiedFromProductionModule": true,
+        "productionRouteUnchanged": true,
+        "diagnosticUsesProxy": true,
+        "diagnosticPort": 5432
+      },
+      "userAgentPolicy": "Gateway source default",
+      "result": {
+        "httpStatus": 206,
+        "seconds": 68.793863,
+        "firstByteSeconds": 2.243092,
+        "connectSeconds": 0.286113,
+        "bytes": 16777216,
+        "sha256": "77c00910bd2b2c4b2ba6d57d145fb853540006a701991618c884075a43437f94",
+        "exit": 0,
+        "contentRanges": [
+          "bytes 0-16777215/4679005577"
+        ],
+        "redirects": 1,
+        "effectiveScheme": "http",
+        "proxyUsed": null
+      },
+      "prefixComparisons": [
+        {
+          "reference": "max",
+          "bytes": 7827353,
+          "available": true,
+          "equal": true
+        },
+        {
+          "reference": "max-default-agent",
+          "bytes": 13050585,
+          "available": true,
+          "equal": true
+        }
+      ],
+      "historicalBodyHashAvailable": false,
+      "rangeAndSizeMatchPreviousTrace": true,
+      "comparisonBodyHashAvailable": false,
+      "firstPrefixHeaderHex": "1a45dfa3",
+      "heartbeatFailures": [],
+      "expired": true,
+      "offlineProbe": {
+        "exit": 0,
+        "details": {
+          "programs": [],
+          "streams": [
+            {
+              "index": 0,
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "width": 1918,
+              "height": 802,
+              "pix_fmt": "yuv420p",
+              "r_frame_rate": "24000/1001",
+              "tags": {}
+            },
+            {
+              "index": 1,
+              "codec_name": "eac3",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 6,
+              "channel_layout": "5.1(side)",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 2,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 3,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 4,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ara"
+              }
+            },
+            {
+              "index": 5,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "bul"
+              }
+            },
+            {
+              "index": 6,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            },
+            {
+              "index": 7,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            },
+            {
+              "index": 8,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "cze"
+              }
+            },
+            {
+              "index": 9,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "dan"
+              }
+            },
+            {
+              "index": 10,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ger"
+              }
+            },
+            {
+              "index": 11,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "gre"
+              }
+            },
+            {
+              "index": 12,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "spa"
+              }
+            },
+            {
+              "index": 13,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "spa"
+              }
+            },
+            {
+              "index": 14,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "est"
+              }
+            },
+            {
+              "index": 15,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fin"
+              }
+            },
+            {
+              "index": 16,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fre"
+              }
+            },
+            {
+              "index": 17,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fre"
+              }
+            },
+            {
+              "index": 18,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "heb"
+              }
+            },
+            {
+              "index": 19,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "hin"
+              }
+            },
+            {
+              "index": 20,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "hun"
+              }
+            },
+            {
+              "index": 21,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ind"
+              }
+            },
+            {
+              "index": 22,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ita"
+              }
+            },
+            {
+              "index": 23,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "jpn"
+              }
+            },
+            {
+              "index": 24,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "kor"
+              }
+            },
+            {
+              "index": 25,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "lit"
+              }
+            },
+            {
+              "index": 26,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "lav"
+              }
+            },
+            {
+              "index": 27,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "may"
+              }
+            },
+            {
+              "index": 28,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "dut"
+              }
+            },
+            {
+              "index": 29,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "nor"
+              }
+            },
+            {
+              "index": 30,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "pol"
+              }
+            },
+            {
+              "index": 31,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "por"
+              }
+            },
+            {
+              "index": 32,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "por"
+              }
+            },
+            {
+              "index": 33,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "rus"
+              }
+            },
+            {
+              "index": 34,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "slo"
+              }
+            },
+            {
+              "index": 35,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "slv"
+              }
+            },
+            {
+              "index": 36,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "swe"
+              }
+            },
+            {
+              "index": 37,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tam"
+              }
+            },
+            {
+              "index": 38,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tel"
+              }
+            },
+            {
+              "index": 39,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tha"
+              }
+            },
+            {
+              "index": 40,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tur"
+              }
+            },
+            {
+              "index": 41,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ukr"
+              }
+            },
+            {
+              "index": 42,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "vie"
+              }
+            },
+            {
+              "index": 43,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            }
+          ],
+          "format": {
+            "format_name": "matroska,webm",
+            "duration": "3434.752000"
+          }
+        },
+        "diagnosticLines": 0,
+        "network": "none"
+      },
+      "temporaryFilesRemoved": true,
+      "endedAt": "2026-10-09T12:25:17.500785+00:00",
+      "observedMbps": 1.951013101270385,
+      "sampleSummary": {
+        "count": 132,
+        "last": {
+          "seconds": 68.298,
+          "fileBytes": 16707584,
+          "cpuTicks": 22,
+          "state": "S",
+          "waitChannel": "do_poll.constprop.0",
+          "sockets": [
+            {
+              "rto": 438.0,
+              "bytes_received": 16709777.0,
+              "segs_in": 11937.0,
+              "data_segs_in": 11935.0,
+              "lastrcv": 61.0,
+              "rcv_space": 702224.0,
+              "rcv_ssthresh": 2678784.0,
+              "rttMs": 145.11,
+              "rttVariationMs": 57.115,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            }
+          ]
+        },
+        "maxCpuTicks": 22,
+        "maxReceiveQueue": 0
+      }
+    },
+    {
+      "at": "2026-10-09T12:28:22.486602+00:00",
+      "question": "Compare exact slow and fluent episodes using the same independent 16 MiB prefix read, outside Norva media processing",
+      "copy": "max-continuous-default-agent",
+      "rangeStart": 0,
+      "rangeBytes": 4679005577,
+      "localReadCapBytes": 16777216,
+      "expectedFullFileBytes": 4679005577,
+      "reader": "system libcurl full-file Range request, terminated after 16 MiB; no media processing",
+      "route": "unchanged production HTTP CONNECT relay and port",
+      "initialGets": 1,
+      "newProductionCode": false,
+      "routeCheck": {
+        "slot": 1,
+        "transport": "http",
+        "controlShadow": true,
+        "verifiedFromProductionModule": true,
+        "productionRouteUnchanged": true,
+        "diagnosticUsesProxy": true,
+        "diagnosticPort": 5432
+      },
+      "userAgentPolicy": "Gateway source default",
+      "result": {
+        "httpStatus": 206,
+        "seconds": 4.609382429989637,
+        "firstByteSeconds": 1.4819089439988602,
+        "bytes": 16777216,
+        "sha256": "77c00910bd2b2c4b2ba6d57d145fb853540006a701991618c884075a43437f94",
+        "exit": -15,
+        "intentionalStopAtCap": true,
+        "readerError": null,
+        "contentRanges": [
+          "bytes 0-4679005576/4679005577"
+        ],
+        "redirectResponses": 1
+      },
+      "prefixComparisons": [
+        {
+          "reference": "max",
+          "bytes": 7827353,
+          "available": true,
+          "equal": true
+        },
+        {
+          "reference": "max-default-agent",
+          "bytes": 13050585,
+          "available": true,
+          "equal": true
+        },
+        {
+          "reference": "max-forward",
+          "bytes": 16777216,
+          "available": true,
+          "equal": true
+        }
+      ],
+      "historicalBodyHashAvailable": false,
+      "rangeAndSizeMatchPreviousTrace": true,
+      "comparisonBodyHashAvailable": false,
+      "firstPrefixHeaderHex": "1a45dfa3",
+      "heartbeatFailures": [],
+      "expired": true,
+      "offlineProbe": {
+        "exit": 0,
+        "details": {
+          "programs": [],
+          "streams": [
+            {
+              "index": 0,
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "width": 1918,
+              "height": 802,
+              "pix_fmt": "yuv420p",
+              "r_frame_rate": "24000/1001",
+              "tags": {}
+            },
+            {
+              "index": 1,
+              "codec_name": "eac3",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 6,
+              "channel_layout": "5.1(side)",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 2,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 3,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 4,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ara"
+              }
+            },
+            {
+              "index": 5,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "bul"
+              }
+            },
+            {
+              "index": 6,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            },
+            {
+              "index": 7,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            },
+            {
+              "index": 8,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "cze"
+              }
+            },
+            {
+              "index": 9,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "dan"
+              }
+            },
+            {
+              "index": 10,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ger"
+              }
+            },
+            {
+              "index": 11,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "gre"
+              }
+            },
+            {
+              "index": 12,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "spa"
+              }
+            },
+            {
+              "index": 13,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "spa"
+              }
+            },
+            {
+              "index": 14,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "est"
+              }
+            },
+            {
+              "index": 15,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fin"
+              }
+            },
+            {
+              "index": 16,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fre"
+              }
+            },
+            {
+              "index": 17,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fre"
+              }
+            },
+            {
+              "index": 18,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "heb"
+              }
+            },
+            {
+              "index": 19,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "hin"
+              }
+            },
+            {
+              "index": 20,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "hun"
+              }
+            },
+            {
+              "index": 21,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ind"
+              }
+            },
+            {
+              "index": 22,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ita"
+              }
+            },
+            {
+              "index": 23,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "jpn"
+              }
+            },
+            {
+              "index": 24,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "kor"
+              }
+            },
+            {
+              "index": 25,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "lit"
+              }
+            },
+            {
+              "index": 26,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "lav"
+              }
+            },
+            {
+              "index": 27,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "may"
+              }
+            },
+            {
+              "index": 28,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "dut"
+              }
+            },
+            {
+              "index": 29,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "nor"
+              }
+            },
+            {
+              "index": 30,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "pol"
+              }
+            },
+            {
+              "index": 31,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "por"
+              }
+            },
+            {
+              "index": 32,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "por"
+              }
+            },
+            {
+              "index": 33,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "rus"
+              }
+            },
+            {
+              "index": 34,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "slo"
+              }
+            },
+            {
+              "index": 35,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "slv"
+              }
+            },
+            {
+              "index": 36,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "swe"
+              }
+            },
+            {
+              "index": 37,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tam"
+              }
+            },
+            {
+              "index": 38,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tel"
+              }
+            },
+            {
+              "index": 39,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tha"
+              }
+            },
+            {
+              "index": 40,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tur"
+              }
+            },
+            {
+              "index": 41,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ukr"
+              }
+            },
+            {
+              "index": 42,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "vie"
+              }
+            },
+            {
+              "index": 43,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            }
+          ],
+          "format": {
+            "format_name": "matroska,webm",
+            "duration": "3434.752000"
+          }
+        },
+        "diagnosticLines": 0,
+        "network": "none"
+      },
+      "temporaryFilesRemoved": true,
+      "endedAt": "2026-10-09T12:28:28.490031+00:00",
+      "observedMbps": 29.118375408981144,
+      "sampleSummary": {
+        "count": 9,
+        "last": {
+          "seconds": 4.213,
+          "fileBytes": 14569472,
+          "cpuTicks": 8,
+          "state": "S",
+          "waitChannel": "do_poll.constprop.0",
+          "sockets": [
+            {
+              "rto": 418.0,
+              "bytes_received": 14431936.0,
+              "segs_in": 10186.0,
+              "data_segs_in": 10183.0,
+              "rcv_space": 1450680.0,
+              "rcv_ssthresh": 3316005.0,
+              "rttMs": 145.787,
+              "rttVariationMs": 45.321,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            },
+            {
+              "rto": 347.0,
+              "bytes_received": 693.0,
+              "segs_in": 5.0,
+              "data_segs_in": 2.0,
+              "lastrcv": 3428.0,
+              "rcv_space": 14480.0,
+              "rcv_ssthresh": 25600.0,
+              "rttMs": 118.888,
+              "rttVariationMs": 34.817,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            }
+          ]
+        },
+        "maxCpuTicks": 8,
+        "maxReceiveQueue": 0
+      }
+    },
+    {
+      "at": "2026-10-09T12:29:24.722112+00:00",
+      "question": "Compare exact slow and fluent episodes using the same independent 16 MiB prefix read, outside Norva media processing",
+      "copy": "max-short-control-default-agent",
+      "rangeStart": 0,
+      "rangeBytes": 16777216,
+      "expectedFullFileBytes": 4679005577,
+      "reader": "system libcurl to bounded temporary file",
+      "route": "unchanged production HTTP CONNECT relay and port",
+      "initialGets": 1,
+      "newProductionCode": false,
+      "routeCheck": {
+        "slot": 1,
+        "transport": "http",
+        "controlShadow": true,
+        "verifiedFromProductionModule": true,
+        "productionRouteUnchanged": true,
+        "diagnosticUsesProxy": true,
+        "diagnosticPort": 5432
+      },
+      "userAgentPolicy": "Gateway source default",
+      "result": {
+        "httpStatus": 206,
+        "seconds": 90.024369,
+        "firstByteSeconds": 1.751472,
+        "connectSeconds": 0.258966,
+        "bytes": 15539737,
+        "sha256": "aca6374df4f03b9654e57e8e67c9d09bb358c94227bf75bbfae620f639125266",
+        "exit": 28,
+        "contentRanges": [
+          "bytes 0-16777215/4679005577"
+        ],
+        "redirects": 1,
+        "effectiveScheme": "http",
+        "proxyUsed": null,
+        "effectiveHostSha256": "88294d08d4d41bdf1823fc119f429e1e1400a33ca3019a90b493327a444f05a5",
+        "effectiveTargetSha256": "31a2db20f2fa3b428ae5da50c0ba2164bc682631f175ee3470485a9c35f644ad"
+      },
+      "prefixComparisons": [
+        {
+          "reference": "max-continuous-default-agent",
+          "bytes": 16777216,
+          "available": false,
+          "equal": null
+        }
+      ],
+      "errorType": "AssertionError",
+      "guard": "bounded_response_incomplete",
+      "heartbeatFailures": [],
+      "expired": true,
+      "offlineProbe": {
+        "exit": 0,
+        "details": {
+          "programs": [],
+          "streams": [
+            {
+              "index": 0,
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "width": 1918,
+              "height": 802,
+              "pix_fmt": "yuv420p",
+              "r_frame_rate": "24000/1001",
+              "tags": {}
+            },
+            {
+              "index": 1,
+              "codec_name": "eac3",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 6,
+              "channel_layout": "5.1(side)",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 2,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 3,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 4,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ara"
+              }
+            },
+            {
+              "index": 5,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "bul"
+              }
+            },
+            {
+              "index": 6,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            },
+            {
+              "index": 7,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            },
+            {
+              "index": 8,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "cze"
+              }
+            },
+            {
+              "index": 9,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "dan"
+              }
+            },
+            {
+              "index": 10,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ger"
+              }
+            },
+            {
+              "index": 11,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "gre"
+              }
+            },
+            {
+              "index": 12,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "spa"
+              }
+            },
+            {
+              "index": 13,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "spa"
+              }
+            },
+            {
+              "index": 14,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "est"
+              }
+            },
+            {
+              "index": 15,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fin"
+              }
+            },
+            {
+              "index": 16,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fre"
+              }
+            },
+            {
+              "index": 17,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fre"
+              }
+            },
+            {
+              "index": 18,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "heb"
+              }
+            },
+            {
+              "index": 19,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "hin"
+              }
+            },
+            {
+              "index": 20,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "hun"
+              }
+            },
+            {
+              "index": 21,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ind"
+              }
+            },
+            {
+              "index": 22,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ita"
+              }
+            },
+            {
+              "index": 23,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "jpn"
+              }
+            },
+            {
+              "index": 24,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "kor"
+              }
+            },
+            {
+              "index": 25,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "lit"
+              }
+            },
+            {
+              "index": 26,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "lav"
+              }
+            },
+            {
+              "index": 27,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "may"
+              }
+            },
+            {
+              "index": 28,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "dut"
+              }
+            },
+            {
+              "index": 29,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "nor"
+              }
+            },
+            {
+              "index": 30,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "pol"
+              }
+            },
+            {
+              "index": 31,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "por"
+              }
+            },
+            {
+              "index": 32,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "por"
+              }
+            },
+            {
+              "index": 33,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "rus"
+              }
+            },
+            {
+              "index": 34,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "slo"
+              }
+            },
+            {
+              "index": 35,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "slv"
+              }
+            },
+            {
+              "index": 36,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "swe"
+              }
+            },
+            {
+              "index": 37,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tam"
+              }
+            },
+            {
+              "index": 38,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tel"
+              }
+            },
+            {
+              "index": 39,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tha"
+              }
+            },
+            {
+              "index": 40,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tur"
+              }
+            },
+            {
+              "index": 41,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ukr"
+              }
+            },
+            {
+              "index": 42,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "vie"
+              }
+            },
+            {
+              "index": 43,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            }
+          ],
+          "format": {
+            "format_name": "matroska,webm",
+            "duration": "3434.752000"
+          }
+        },
+        "diagnosticLines": 0,
+        "network": "none"
+      },
+      "temporaryFilesRemoved": true,
+      "endedAt": "2026-10-09T12:30:56.103782+00:00",
+      "observedMbps": 1.3809360441060132,
+      "sampleSummary": {
+        "count": 173,
+        "last": {
+          "seconds": 89.665,
+          "fileBytes": 15491072,
+          "cpuTicks": 34,
+          "state": "S",
+          "waitChannel": "do_poll.constprop.0",
+          "sockets": [
+            {
+              "rto": 367.0,
+              "bytes_received": 15494583.0,
+              "segs_in": 11136.0,
+              "data_segs_in": 11133.0,
+              "lastrcv": 17.0,
+              "rcv_space": 291373.0,
+              "rcv_ssthresh": 834439.0,
+              "rttMs": 126.834,
+              "rttVariationMs": 37.567,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            },
+            {
+              "rto": 382.0,
+              "bytes_received": 694.0,
+              "segs_in": 6.0,
+              "data_segs_in": 2.0,
+              "lastrcv": 88551.0,
+              "rcv_space": 14480.0,
+              "rcv_ssthresh": 25600.0,
+              "rttMs": 133.332,
+              "rttVariationMs": 39.178,
+              "receiveQueueBytes": 1,
+              "sendQueueBytes": 0
+            }
+          ]
+        },
+        "maxCpuTicks": 34,
+        "maxReceiveQueue": 1424
+      }
+    },
+    {
+      "at": "2026-10-09T12:31:14.391504+00:00",
+      "question": "Compare exact slow and fluent episodes using the same independent 16 MiB prefix read, outside Norva media processing",
+      "copy": "max-continuous-sustained-default-agent",
+      "rangeStart": 0,
+      "rangeBytes": 4679005577,
+      "localReadCapBytes": 67108864,
+      "expectedFullFileBytes": 4679005577,
+      "reader": "system libcurl full-file Range request, terminated after 64 MiB; no media processing",
+      "route": "unchanged production HTTP CONNECT relay and port",
+      "initialGets": 1,
+      "newProductionCode": false,
+      "routeCheck": {
+        "slot": 1,
+        "transport": "http",
+        "controlShadow": true,
+        "verifiedFromProductionModule": true,
+        "productionRouteUnchanged": true,
+        "diagnosticUsesProxy": true,
+        "diagnosticPort": 5432
+      },
+      "userAgentPolicy": "Gateway source default",
+      "result": {
+        "httpStatus": 206,
+        "seconds": 90.02114068499941,
+        "firstByteSeconds": 1.8595707180065801,
+        "bytes": 20965173,
+        "sha256": "6052921debc54f4cd91f490cdfbc5ae9d678887d41dfeacf8abba2df4fe2d4bf",
+        "exit": 28,
+        "intentionalStopAtCap": false,
+        "readerError": null,
+        "contentRanges": [
+          "bytes 0-4679005576/4679005577"
+        ],
+        "redirectHostsSha256": [
+          "88294d08d4d41bdf1823fc119f429e1e1400a33ca3019a90b493327a444f05a5"
+        ],
+        "redirectTargetsSha256": [
+          "db4cbe15e9179a4e7e7632d5dbe97279bfd9fc85207847d718eb44e62ee4401f"
+        ],
+        "redirectResponses": 1
+      },
+      "prefixComparisons": [
+        {
+          "reference": "max-forward",
+          "bytes": 16777216,
+          "available": true,
+          "equal": true
+        },
+        {
+          "reference": "max-continuous-default-agent",
+          "bytes": 16777216,
+          "available": true,
+          "equal": true
+        },
+        {
+          "reference": "max-short-control-default-agent",
+          "bytes": 15539737,
+          "available": true,
+          "equal": true
+        }
+      ],
+      "errorType": "AssertionError",
+      "guard": "bounded_response_incomplete",
+      "heartbeatFailures": [],
+      "expired": true,
+      "offlineProbe": {
+        "exit": 0,
+        "details": {
+          "programs": [],
+          "streams": [
+            {
+              "index": 0,
+              "codec_name": "h264",
+              "profile": "High",
+              "codec_type": "video",
+              "width": 1918,
+              "height": 802,
+              "pix_fmt": "yuv420p",
+              "r_frame_rate": "24000/1001",
+              "tags": {}
+            },
+            {
+              "index": 1,
+              "codec_name": "eac3",
+              "codec_type": "audio",
+              "sample_rate": "48000",
+              "channels": 6,
+              "channel_layout": "5.1(side)",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 2,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 3,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "eng"
+              }
+            },
+            {
+              "index": 4,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ara"
+              }
+            },
+            {
+              "index": 5,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "bul"
+              }
+            },
+            {
+              "index": 6,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            },
+            {
+              "index": 7,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            },
+            {
+              "index": 8,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "cze"
+              }
+            },
+            {
+              "index": 9,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "dan"
+              }
+            },
+            {
+              "index": 10,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ger"
+              }
+            },
+            {
+              "index": 11,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "gre"
+              }
+            },
+            {
+              "index": 12,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "spa"
+              }
+            },
+            {
+              "index": 13,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "spa"
+              }
+            },
+            {
+              "index": 14,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "est"
+              }
+            },
+            {
+              "index": 15,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fin"
+              }
+            },
+            {
+              "index": 16,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fre"
+              }
+            },
+            {
+              "index": 17,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "fre"
+              }
+            },
+            {
+              "index": 18,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "heb"
+              }
+            },
+            {
+              "index": 19,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "hin"
+              }
+            },
+            {
+              "index": 20,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "hun"
+              }
+            },
+            {
+              "index": 21,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ind"
+              }
+            },
+            {
+              "index": 22,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ita"
+              }
+            },
+            {
+              "index": 23,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "jpn"
+              }
+            },
+            {
+              "index": 24,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "kor"
+              }
+            },
+            {
+              "index": 25,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "lit"
+              }
+            },
+            {
+              "index": 26,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "lav"
+              }
+            },
+            {
+              "index": 27,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "may"
+              }
+            },
+            {
+              "index": 28,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "dut"
+              }
+            },
+            {
+              "index": 29,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "nor"
+              }
+            },
+            {
+              "index": 30,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "pol"
+              }
+            },
+            {
+              "index": 31,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "por"
+              }
+            },
+            {
+              "index": 32,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "por"
+              }
+            },
+            {
+              "index": 33,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "rus"
+              }
+            },
+            {
+              "index": 34,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "slo"
+              }
+            },
+            {
+              "index": 35,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "slv"
+              }
+            },
+            {
+              "index": 36,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "swe"
+              }
+            },
+            {
+              "index": 37,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tam"
+              }
+            },
+            {
+              "index": 38,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tel"
+              }
+            },
+            {
+              "index": 39,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tha"
+              }
+            },
+            {
+              "index": 40,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "tur"
+              }
+            },
+            {
+              "index": 41,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "ukr"
+              }
+            },
+            {
+              "index": 42,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "vie"
+              }
+            },
+            {
+              "index": 43,
+              "codec_name": "subrip",
+              "codec_type": "subtitle",
+              "r_frame_rate": "0/0",
+              "tags": {
+                "language": "chi"
+              }
+            }
+          ],
+          "format": {
+            "format_name": "matroska,webm",
+            "duration": "3434.752000"
+          }
+        },
+        "diagnosticLines": 0,
+        "network": "none"
+      },
+      "temporaryFilesRemoved": true,
+      "endedAt": "2026-10-09T12:32:45.989517+00:00",
+      "observedMbps": 1.8631332898445276,
+      "sampleSummary": {
+        "count": 173,
+        "last": {
+          "seconds": 89.738,
+          "fileBytes": 20938752,
+          "cpuTicks": 28,
+          "state": "S",
+          "waitChannel": "do_poll.constprop.0",
+          "sockets": [
+            {
+              "rto": 390.0,
+              "bytes_retrans": 653.0,
+              "bytes_received": 20942807.0,
+              "segs_in": 14936.0,
+              "data_segs_in": 14933.0,
+              "lastrcv": 4.0,
+              "rcv_space": 778928.0,
+              "rcv_ssthresh": 3317760.0,
+              "rttMs": 136.989,
+              "rttVariationMs": 41.669,
+              "receiveQueueBytes": 0,
+              "sendQueueBytes": 0
+            }
+          ]
+        },
+        "maxCpuTicks": 28,
+        "maxReceiveQueue": 1
+      },
+      "afterFirst16MiB": {
+        "fromSeconds": 61.067,
+        "toSeconds": 89.738,
+        "bytes": 4042752,
+        "Mbps": 1.1280393428900284
+      }
+    }
+  ],
+  "publicRoute": {
+    "at": "2026-10-09T12:16:55.510715+00:00",
+    "purpose": "bounded public Cloudflare speedtest payload, no VOD/provider account I/O",
+    "productionChanged": false,
+    "results": [
+      {
+        "path": "direct",
+        "at": "2026-10-09T12:16:58.585969+00:00",
+        "exit": 0,
+        "http": 200,
+        "bytes": 10000000,
+        "seconds": 0.333557,
+        "firstByteSeconds": 0.246744,
+        "connectSeconds": 0.203897,
+        "tlsSeconds": 0.218919,
+        "redirects": 0,
+        "Mbps": 239.839068
+      },
+      {
+        "path": "configured-http-connect",
+        "at": "2026-10-09T12:16:58.926424+00:00",
+        "exit": 0,
+        "http": 200,
+        "bytes": 10000000,
+        "seconds": 3.574441,
+        "firstByteSeconds": 1.092369,
+        "connectSeconds": 0.140112,
+        "tlsSeconds": 0.896877,
+        "redirects": 0,
+        "Mbps": 22.381122
+      }
+    ],
+    "hostSamples": [
+      {
+        "at": "2026-10-09T12:16:58.585899+00:00",
+        "networkRxBytes": 46798777228,
+        "networkTxBytes": 59807539460,
+        "cpuTotal": 126424798,
+        "cpuIdle": 112601766,
+        "proxyEstablished": 0,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 0
+      },
+      {
+        "at": "2026-10-09T12:16:59.101642+00:00",
+        "networkRxBytes": 46809255451,
+        "networkTxBytes": 59807579894,
+        "cpuTotal": 126425620,
+        "cpuIdle": 112602425,
+        "proxyEstablished": 1,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 180
+      },
+      {
+        "at": "2026-10-09T12:16:59.616401+00:00",
+        "networkRxBytes": 46809255583,
+        "networkTxBytes": 59807580140,
+        "cpuTotal": 126426440,
+        "cpuIdle": 112603120,
+        "proxyEstablished": 1,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 180
+      },
+      {
+        "at": "2026-10-09T12:17:00.132279+00:00",
+        "networkRxBytes": 46809272767,
+        "networkTxBytes": 59807585159,
+        "cpuTotal": 126427264,
+        "cpuIdle": 112603840,
+        "proxyEstablished": 1,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 0
+      },
+      {
+        "at": "2026-10-09T12:17:00.648195+00:00",
+        "networkRxBytes": 46809719833,
+        "networkTxBytes": 59807597997,
+        "cpuTotal": 126428078,
+        "cpuIdle": 112604334,
+        "proxyEstablished": 1,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 0
+      },
+      {
+        "at": "2026-10-09T12:17:01.164101+00:00",
+        "networkRxBytes": 46811485510,
+        "networkTxBytes": 59807626016,
+        "cpuTotal": 126428900,
+        "cpuIdle": 112604992,
+        "proxyEstablished": 1,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 0
+      },
+      {
+        "at": "2026-10-09T12:17:01.679362+00:00",
+        "networkRxBytes": 46815085999,
+        "networkTxBytes": 59807674889,
+        "cpuTotal": 126429713,
+        "cpuIdle": 112605474,
+        "proxyEstablished": 1,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 0
+      },
+      {
+        "at": "2026-10-09T12:17:02.194816+00:00",
+        "networkRxBytes": 46817699863,
+        "networkTxBytes": 59807712399,
+        "cpuTotal": 126430533,
+        "cpuIdle": 112606121,
+        "proxyEstablished": 1,
+        "proxyReceiveQueueBytes": 0,
+        "proxySendQueueBytes": 0
+      }
+    ],
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "healthy": true,
+        "viewerSessions": 0,
+        "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+        "startedAt": "2026-10-09T11:44:57.29458119Z",
+        "cpuQuota": 0,
+        "cpuPeriod": 0,
+        "nanoCpus": 6000000000
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "healthy": true,
+        "viewerSessions": 0,
+        "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+        "startedAt": "2026-10-09T11:44:59.842646692Z",
+        "cpuQuota": 0,
+        "cpuPeriod": 0,
+        "nanoCpus": 6000000000
+      }
+    ],
+    "baselineStart": {
+      "at": "2026-10-09T12:16:55.554344+00:00",
+      "networkRxBytes": 46798393375,
+      "networkTxBytes": 59807527645,
+      "cpuTotal": 126419950,
+      "cpuIdle": 112598196,
+      "proxyEstablished": 0,
+      "proxyReceiveQueueBytes": 0,
+      "proxySendQueueBytes": 0
+    },
+    "baselineEnd": {
+      "at": "2026-10-09T12:16:58.570265+00:00",
+      "networkRxBytes": 46798777228,
+      "networkTxBytes": 59807539460,
+      "cpuTotal": 126424773,
+      "cpuIdle": 112601747,
+      "proxyEstablished": 0,
+      "proxyReceiveQueueBytes": 0,
+      "proxySendQueueBytes": 0
+    },
+    "endedAt": "2026-10-09T12:17:02.507676+00:00"
+  },
+  "limits": [
+    "Sequential trials at different times, not randomized or simultaneous.",
+    "Whole-file bitrate is an average including tracks/container, not instantaneous media demand.",
+    "Legacy minimal user-agent differs from production default on the first three trials and the explicit control.",
+    "Short-range and full-file-range requests differ; only later full-range requests reproduce the continuous request bounds.",
+    "HTTP 206, body hashes and ffprobe do not certify full playback or audible quality."
+  ],
+  "closeout": {
+    "atUtc": "2026-10-09T12:33:42.740871+00:00",
+    "gateways": [
+      {
+        "name": "norva-media-gateway",
+        "healthy": true,
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+        "startedAt": "2026-10-09T11:44:57.29458119Z",
+        "onlyStartupObservationEnvAdded": true,
+        "sharedVideoEncoderCapacity": {
+          "limit": 8,
+          "occupied": 0
+        }
+      },
+      {
+        "name": "norva-resume-cache-pilot-20260916",
+        "healthy": true,
+        "activeSessions": 0,
+        "rawPumpCount": 0,
+        "image": "sha256:ea9594c68c27ded59edd2c1748893f758820705ab74eb521add99411ad702c40",
+        "startedAt": "2026-10-09T11:44:59.842646692Z",
+        "onlyStartupObservationEnvAdded": true,
+        "sharedVideoEncoderCapacity": {
+          "limit": 8,
+          "occupied": 0
+        }
+      }
+    ],
+    "pilotOwnerCount": 1,
+    "audibleAcceptance": false,
+    "ownerLiveClaims": 0,
+    "admissions": {
+      "paused": false,
+      "cron": true
+    },
+    "dispatcherRunning": true,
+    "workerRunning": true,
+    "canaryAbsent": true,
+    "diagnosticTemporaryFilesRemaining": 0
+  },
+  "supportReadOnly": {
+    "newTechnicalResponse": false,
+    "lastFollowupSeen": true,
+    "newMessageSent": false,
+    "settingsChanged": false
+  },
+  "browser": {
+    "playbackStarted": false,
+    "temporaryTabsClosed": true,
+    "originalSourceFilterRestored": true
+  },
+  "priorPr739Checks": {
+    "passed": 5,
+    "packagesIncluded": true
+  }
+}

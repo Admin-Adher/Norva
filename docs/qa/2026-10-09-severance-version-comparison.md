@@ -131,3 +131,14 @@ MAX OTT ne déclenche plus le départ prématuré, mais cette copie ne lit toujo
 pas après 131 s. Le témoin anglais passe de 4,1 à 12,1 s au démarrage, puis
 progresse 135 s sans interruption observée. La préservation des démarrages
 rapides n'est donc pas validée : activation limitée au compte pilote existant.
+
+### Suite : différences de fichiers et réception indépendante
+
+Le [contrôle approfondi](2026-10-09-vod-fluidity-differences.md) compare les
+profils exacts et onze lectures bornées, hors traitement média. Le témoin
+anglais représente 1,108 Mbit/s en moyenne, contre 8,107 et 10,898 pour FR 4K
+Strng et MAX. Une pointe MAX à 29,1 Mbit/s ne se maintient pas : le contrôle
+continu suivant tombe à 1,863 Mbit/s. Aucun changement de requête ou de proxy
+ne constitue une réparation validée. La divergence du tag audio technique MAX
+avec son libellé catalogue est explicitement conservée, sans nouvelle langue
+publiée ni substitution de copie.
