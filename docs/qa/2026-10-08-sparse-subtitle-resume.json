@@ -10986,5 +10986,504 @@
       "Audible quality and diverse real sources remain unvalidated"
     ],
     "prAttachment": "Refused at 100 attachments; none removed"
+  },
+  "realConclaveAndAbsoluteSubtitleClock20261009": {
+    "atUtc": "2026-10-09T06:03:07.657519+00:00",
+    "pullRequest": 727,
+    "codeRevision": "22f2a88470239388a96b78515468d1b60440b457",
+    "productionChanged": false,
+    "retainedEnabledInProduction": false,
+    "normalRetested": false,
+    "normalPerformanceGainDemonstrated": false,
+    "scope": "Temporary candidate, exact authorized owner/source/file, real ordinary direct claims, WatchPage; no production Edge-to-Gateway replay",
+    "realConclaveBeforeClockFix": {
+      "initialPositionSeconds": 600,
+      "initial": {
+        "firstFrameMs": 28531.199999999997,
+        "lastMediaTime": 2.795,
+        "frames": 69,
+        "playingMs": 50564
+      },
+      "resumed": {
+        "firstFrameMs": 8541.999999809268,
+        "lastMediaTime": 154.279,
+        "frames": 3634,
+        "playingMs": 124447.29999995232
+      },
+      "resumePositionSeconds": 602.831218,
+      "localSeekTargetSeconds": 2.8312180000000353,
+      "mediaAdvancedAfterResumeSeconds": 151.447782,
+      "retainedSessionHit": true,
+      "sameDecoder": true,
+      "parkMs": 2504,
+      "parkedSourceSockets": 0,
+      "freshValidationMs": 3820,
+      "transferMs": 3825,
+      "deliveryTargetHintUsed": true,
+      "retainedDiagnostics": [
+        {
+          "phase": "lookup",
+          "found": false
+        },
+        {
+          "phase": "lookup",
+          "found": true,
+          "ageMs": 3426,
+          "valid": true
+        },
+        {
+          "phase": "position",
+          "available": true
+        },
+        {
+          "phase": "validation",
+          "valid": true,
+          "observed": true,
+          "sameTarget": true,
+          "sameValidator": true,
+          "timings": {
+            "recentDeliveryTargetUsed": true,
+            "retainedSessionValidationMs": 3820
+          }
+        },
+        {
+          "phase": "barrier-resume",
+          "resumed": true,
+          "ageMs": 7249
+        }
+      ],
+      "errors": [
+        {
+          "phase": "resumed",
+          "type": "networkError",
+          "details": "fragLoadTimeOut",
+          "fatal": false
+        }
+      ],
+      "waits": [],
+      "frameGaps": [],
+      "subtitlePublication503": true,
+      "fullTrackBrowserCues": 0,
+      "exactCauseOfRealSubtitle503Established": false,
+      "startupPolicyAfterTransfer": {
+        "eligible": false,
+        "reason": "requested-transcode",
+        "browserPolicy": null,
+        "fallbackReserveSeconds": 96
+      },
+      "audioChecks": [
+        {
+          "atUtc": "2026-10-09T05:42:37.945Z",
+          "outputs": [
+            {
+              "segments": [
+                "video-00013.ts",
+                "video-00014.ts",
+                "video-00015.ts"
+              ],
+              "streams": [
+                {
+                  "type": "video",
+                  "codec": "h264",
+                  "profile": "High"
+                },
+                {
+                  "type": "audio",
+                  "codec": "aac",
+                  "profile": "LC",
+                  "sampleRate": "48000",
+                  "channels": 2
+                }
+              ],
+              "packets": {
+                "audio": {
+                  "count": 282,
+                  "first": 26.069333,
+                  "last": 32.064,
+                  "maxGap": 0.021334000000003073,
+                  "gapsOver100ms": 0
+                },
+                "video": {
+                  "count": 144,
+                  "first": 26.063,
+                  "last": 32.027,
+                  "maxGap": 0.04200000000000159,
+                  "gapsOver100ms": 0
+                }
+              },
+              "probeExit": 0,
+              "probeErrorLines": 0,
+              "decodeExit": 0,
+              "decodeErrorLines": 0,
+              "mediaDeleted": true
+            }
+          ],
+          "providerRequests": 0,
+          "audibleAcceptance": false
+        },
+        {
+          "atUtc": "2026-10-09T05:45:38.042Z",
+          "outputs": [
+            {
+              "segments": [
+                "video-00091.ts",
+                "video-00092.ts",
+                "video-00093.ts"
+              ],
+              "streams": [
+                {
+                  "type": "video",
+                  "codec": "h264",
+                  "profile": "High"
+                },
+                {
+                  "type": "audio",
+                  "codec": "aac",
+                  "profile": "LC",
+                  "sampleRate": "48000",
+                  "channels": 2
+                }
+              ],
+              "packets": {
+                "audio": {
+                  "count": 282,
+                  "first": 182.058667,
+                  "last": 188.053333,
+                  "maxGap": 0.02133400000002439,
+                  "gapsOver100ms": 0
+                },
+                "video": {
+                  "count": 144,
+                  "first": 182.052,
+                  "last": 188.017,
+                  "maxGap": 0.04200000000000159,
+                  "gapsOver100ms": 0
+                }
+              },
+              "probeExit": 0,
+              "probeErrorLines": 0,
+              "decodeExit": 0,
+              "decodeErrorLines": 0,
+              "mediaDeleted": true
+            }
+          ],
+          "providerRequests": 0,
+          "audibleAcceptance": false
+        }
+      ],
+      "audioChecksCoverExactResumeBoundary": false,
+      "audibleAcceptance": false
+    },
+    "subsequentStarts": [
+      {
+        "clockFix": false,
+        "atUtc": "2026-10-09T05:49:44.499164+00:00",
+        "action": "/start",
+        "kind": "HTTPError",
+        "http": 502,
+        "code": null,
+        "guard": null
+      },
+      {
+        "clockFix": true,
+        "atUtc": "2026-10-09T05:57:57.306175+00:00",
+        "action": "/start",
+        "kind": "HTTPError",
+        "http": 502,
+        "code": null,
+        "guard": null
+      }
+    ],
+    "syntheticFix": {
+      "cause": "Input seek across a subtitle cue creates negative relative journal timestamps while WebVTT shifts independently",
+      "change": "Keep absolute source input timestamps only on admitted retained exact-subtitle graph; separate cache profile",
+      "packetChecksRelaxed": false,
+      "formats": [
+        "srt",
+        "ass"
+      ],
+      "crossingAndFutureCuesPreserved": true,
+      "hardware": {
+        "atUtc": "2026-10-09T05:55:29.069Z",
+        "network": "none",
+        "providerRequests": 0,
+        "sharedEncoderReleased": true,
+        "results": [
+          {
+            "format": "h264",
+            "seek": 2,
+            "exit": 0,
+            "encodeErrors": 2,
+            "encodeDiagnostics": [
+              "amdgpu: os_same_file_description couldn't determine if two DRM fds reference the same file description.",
+              "If they do, bad things may happen!"
+            ],
+            "decodeExit": 0,
+            "decodeErrors": 0,
+            "av": {
+              "audio": {
+                "first": 1.978667,
+                "last": 4.0265
+              },
+              "video": {
+                "first": 2.041667,
+                "last": 4
+              }
+            },
+            "cues": [
+              {
+                "start": 1.021,
+                "end": 3.021
+              },
+              {
+                "start": 10.021,
+                "end": 11.521
+              }
+            ],
+            "seconds": 10,
+            "sourceCues": [
+              {
+                "start": 1.021,
+                "end": 3.021
+              },
+              {
+                "start": 10.021,
+                "end": 11.521
+              }
+            ]
+          },
+          {
+            "format": "h264",
+            "seek": 10,
+            "exit": 0,
+            "encodeErrors": 2,
+            "encodeDiagnostics": [
+              "amdgpu: os_same_file_description couldn't determine if two DRM fds reference the same file description.",
+              "If they do, bad things may happen!"
+            ],
+            "decodeExit": 0,
+            "decodeErrors": 0,
+            "av": {
+              "audio": {
+                "first": 9.978667,
+                "last": 12.0265
+              },
+              "video": {
+                "first": 10.041667,
+                "last": 12
+              }
+            },
+            "cues": [
+              {
+                "start": 1.021,
+                "end": 3.021
+              },
+              {
+                "start": 10.021,
+                "end": 11.521
+              }
+            ],
+            "seconds": 2,
+            "sourceCues": [
+              {
+                "start": 1.021,
+                "end": 3.021
+              },
+              {
+                "start": 10.021,
+                "end": 11.521
+              }
+            ]
+          },
+          {
+            "format": "hevc10",
+            "seek": 2,
+            "exit": 0,
+            "encodeErrors": 2,
+            "encodeDiagnostics": [
+              "amdgpu: os_same_file_description couldn't determine if two DRM fds reference the same file description.",
+              "If they do, bad things may happen!"
+            ],
+            "decodeExit": 0,
+            "decodeErrors": 0,
+            "av": {
+              "audio": {
+                "first": 1.978667,
+                "last": 4.0265
+              },
+              "video": {
+                "first": 2.041667,
+                "last": 4
+              }
+            },
+            "cues": [
+              {
+                "start": 1.021,
+                "end": 3.021
+              },
+              {
+                "start": 10.021,
+                "end": 11.521
+              }
+            ],
+            "seconds": 10,
+            "sourceCues": [
+              {
+                "start": 1.021,
+                "end": 3.021
+              },
+              {
+                "start": 10.021,
+                "end": 11.521
+              }
+            ]
+          },
+          {
+            "format": "hevc10",
+            "seek": 10,
+            "exit": 0,
+            "encodeErrors": 2,
+            "encodeDiagnostics": [
+              "amdgpu: os_same_file_description couldn't determine if two DRM fds reference the same file description.",
+              "If they do, bad things may happen!"
+            ],
+            "decodeExit": 0,
+            "decodeErrors": 0,
+            "av": {
+              "audio": {
+                "first": 9.978667,
+                "last": 12.0265
+              },
+              "video": {
+                "first": 10.041667,
+                "last": 12
+              }
+            },
+            "cues": [
+              {
+                "start": 1.021,
+                "end": 3.021
+              },
+              {
+                "start": 10.021,
+                "end": 11.521
+              }
+            ],
+            "seconds": 2,
+            "sourceCues": [
+              {
+                "start": 1.021,
+                "end": 3.021
+              },
+              {
+                "start": 10.021,
+                "end": 11.521
+              }
+            ]
+          }
+        ]
+      },
+      "fixtureCorrections": [
+        "Compare against actual source timestamps including 21 ms source mux offset",
+        "Input seek can retain expired pre-seek cues from its earlier packet position; compare all source cues"
+      ],
+      "realClockFixValidated": false
+    },
+    "tests": {
+      "focused": {
+        "passed": 94,
+        "skipped": 1,
+        "failed": 0
+      },
+      "ci": {
+        "passed": 6155,
+        "skipped": 31,
+        "failed": 0,
+        "overlapsFocused": true
+      }
+    },
+    "cleanup": {
+      "atUtc": "2026-10-09T06:03:07.657519+00:00",
+      "productionChanged": false,
+      "claims": [
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T05:40:15.139773+00:00",
+          "expiresAt": "2026-10-09T05:41:11.642+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T05:41:11.836264+00:00",
+          "expiresAt": "2026-10-09T05:45:47.227+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T05:48:41.862234+00:00",
+          "expiresAt": "2026-10-09T05:49:46.037+00:00"
+        },
+        {
+          "mode": "direct",
+          "status": "expired",
+          "createdAt": "2026-10-09T05:56:54.646995+00:00",
+          "expiresAt": "2026-10-09T05:57:59.004+00:00"
+        }
+      ],
+      "testClaimsOrdinarilyClosed": true,
+      "candidateRemoved": true,
+      "controlStopped": true,
+      "removedTemporaryData": [
+        "output",
+        "offline-hardware",
+        "subtitle-fixture",
+        "candidate.private.env",
+        "candidate.private.json",
+        "control.pid"
+      ],
+      "gateways": [
+        {
+          "name": "norva-media-gateway",
+          "healthy": true,
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.981504962Z",
+          "activeSessions": 0,
+          "retainedEnabled": false,
+          "recentOwnerScope": "owner-allowlist",
+          "sharedVideoEncoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          }
+        },
+        {
+          "name": "norva-resume-cache-pilot-20260916",
+          "healthy": true,
+          "image": "sha256:efd3ae83ac95f4b8ecf563f4cc39e085e50db06550acb2664b9c94a43a36b2f9",
+          "startedAt": "2026-10-08T14:25:21.718537716Z",
+          "activeSessions": 0,
+          "retainedEnabled": false,
+          "recentOwnerScope": "owner-allowlist",
+          "sharedVideoEncoderCapacity": {
+            "limit": 8,
+            "occupied": 0
+          }
+        }
+      ],
+      "dispatcherActive": true,
+      "freeDiskBytes": 161289465856,
+      "offlineContainerAbsent": true,
+      "hardwareClockContainerAbsent": true,
+      "remainingMediaFiles": []
+    },
+    "tunnelListeningAfterStop": false,
+    "remaining": [
+      "Reliable cold preparation",
+      "Real corrected subtitle publication and synchronization",
+      "Fresh current production-rate evidence after transfer",
+      "Listening acceptance",
+      "Diverse real sources"
+    ],
+    "prAttachment": "Refused at 100 attachments; none removed"
   }
 }

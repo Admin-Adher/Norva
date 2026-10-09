@@ -21,6 +21,12 @@ test('a source-clock HLS window never shares the old mux-clock cache key', () =>
     assert.equal(legacy, privateResumeProfile({ ...input, subtitleClock: undefined }));
     assert.notEqual(legacy, privateResumeProfile({ ...input, subtitleClock: SOURCE_CLOCK }));
     assert.equal(privateResumeProfile({ ...input, subtitleClock: 'guessed-offset' }), null);
+    const sourceClock = { ...input, subtitleClock: SOURCE_CLOCK };
+    const absolute = privateResumeProfile({ ...sourceClock, subtitleInputClock: 'absolute-v1' });
+    assert.ok(absolute);
+    assert.notEqual(absolute, privateResumeProfile(sourceClock));
+    assert.equal(privateResumeProfile({ ...sourceClock, subtitleInputClock: 'guessed' }), null);
+    assert.equal(privateResumeProfile({ ...input, subtitleInputClock: 'absolute-v1' }), null);
 });
 
 test('source-clock cache preserves full cue timestamps without adding video priming', async () => {

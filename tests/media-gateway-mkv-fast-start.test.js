@@ -1913,6 +1913,20 @@ test('an admitted replay starts one FFmpeg graph with copied video and proof-sel
   assert.equal(capturedArgs.includes('-profile:a'), false);
   assert.equal(capturedArgs[capturedArgs.indexOf('-hls_time') + 1], '2');
   assert.equal(capturedArgs.includes('-force_key_frames'), false, 'copy graph must not invent segment independence');
+  assert.equal(capturedArgs.includes('-copyts'), false);
+  // A cue that straddles an input seek otherwise becomes negative in the
+  // framecrc journal while the WebVTT muxer shifts it to zero. Every output
+  // must retain the same source clock, including the input-side seek.
+  startFfmpeg({ ...session, videoMode: 'encode', seekOffset: 9,
+    retainedRequestBinding: 'admitted-owner', exactSubtitleHls: { enabled: true } });
+  assert.ok(capturedArgs.indexOf('-copyts') >= 0);
+  assert.ok(capturedArgs.indexOf('-copyts') < capturedArgs.indexOf('-i'));
+  for (const excluded of [{ retainedRequestBinding: null }, { exactSubtitleHls: { enabled: false } },
+    { multiAudioHls: { enabled: true } }, { mediaCacheProducer: {} }, { completeHlsCacheLease: {} }]) {
+    startFfmpeg({ ...session, videoMode: 'encode', retainedRequestBinding: 'admitted-owner',
+      exactSubtitleHls: { enabled: true }, ...excluded });
+    assert.equal(capturedArgs.includes('-copyts'), false);
+  }
 });
 
 test('complete-cache Gateway sessions stay authenticated, bound and fail closed through every lease lifecycle', async (t) => {
