@@ -22,7 +22,10 @@ async function verify(origin, manifest, fetcher = fetch) {
   await Promise.all(Array.from({ length: Math.min(4, manifest.assets.length) }, async () => {
     while (cursor < manifest.assets.length) {
       const asset = manifest.assets[cursor++];
-      if (digest(await get(asset.url)) !== asset.sha256) throw Error('Delivered asset hash mismatch: ' + asset.source);
+      const bytes = await get(asset.url);
+      const actualDigest = digest(bytes);
+      if (actualDigest !== asset.sha256) throw Error('Delivered asset hash mismatch: ' + asset.source
+        + ' expected=' + asset.sha256 + ' actual=' + actualDigest + ' bytes=' + bytes.length);
     }
   }));
   return { verifiedAssets: manifest.assets.length };

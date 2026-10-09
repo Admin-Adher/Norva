@@ -31,8 +31,13 @@ function fixture({ matches = [{ title_id: 'current-title' }], title = { id: 'cur
     } },
     throwDb: err => { throw new Error(err.message); },
     loadTitleById: async (owner, id) => { assert.equal(owner, 'owner'); assert.equal(id, matches[0].title_id); reads.push('hydrate'); return title; },
-    listVariantsByTitleIds: async (ids, owner) => {
+    HOME_RAIL_VARIANT_LIMIT: 10,
+    listVariantsByTitleIds: async (ids, owner, limit, audio, source, requiredFile) => {
       assert.equal(owner, 'owner'); reads.push({ variantTitleIds: Array.from(ids) });
+      assert.equal(limit, 10); assert.equal(audio, null); assert.equal(source, null);
+      assert.deepEqual(JSON.parse(JSON.stringify(requiredFile)), {
+        titleId: matches[0].title_id, sourceId, externalId: 'provider-file',
+      });
       return variantsByTitle || new Map([[matches[0].title_id, variants]]);
     },
     catalogTextStatusEligible: value => ['provider_verified', 'matched', 'manual'].includes(value),
