@@ -7,6 +7,13 @@ Gateway doivent tous deux recevoir `PRIVATE_STARTUP_CACHE_ENABLED=true` et
 `PRIVATE_STARTUP_CACHE_OWNER_HASHES`, une liste explicite de SHA256 des propriétaires.
 Une liste vide ne généralise pas le pilote.
 
+Les deux réplicas Edge (`norva-edge-functions` et `norva-edge-functions-2`)
+doivent porter le même code de lecture, la même liste de propriétaires et le
+même routage canary. Contrôler chacun avant les essais publics : une création
+sur le pilote suivie d'un heartbeat ou d'une fermeture sur le Gateway principal
+expire l'accès et empêche la capture du cache. Le Gateway principal reste hors
+du pilote ; les listes de routage préexistantes sont conservées.
+
 Le pilote traite une file privée de 1 à 8 fichiers du catalogue, un seul à la fois.
 Il couvre les fichiers Xtream actuellement détenus, avec profil exact complet,
 taille connue et pistes identifiées. Un épisode doit posséder sa propre ligne,
