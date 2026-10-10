@@ -146,4 +146,62 @@ function indexedByteCoverage(index, ranges, targetSeconds) {
     return { evidence: 'indexed-dts-bytes-only', targetSeconds, secondsAhead: end === null ? 0 : Math.max(0, end - targetSeconds), tracks };
 }
 
-module.exports = { parseMp4CoverageIndex, indexedByteCoverage };
+// Kept within one validated broker lifetime. Only its complete range store is
+// consulted at query time; eviction, termination and close remove eligibility.
+function createMp4CacheCoverage(fileSizeBytes) {
+    let index = null, lastHead = null, lastTail = null;
+    return {
+        observeCompleteWindows(windows) {
+            if (index) return null;
+            const ordered = [...windows].filter(w => Buffer.isBuffer(w.payload)
+                && w.payload.length === w.end - w.start + 1).sort((a, b) => a.start - b.start);
+            // Chromium can split the trailing moov across several exact Range
+            // reads. Join only complete, adjacent cached windows, never a hole
+            // or a partial transport response. The temporary copy is bounded.
+            const groups = [];
+            for (const w of ordered) {
+                const group = groups.at(-1);
+                if (group && w.start <= group.end + 1) {
+                    group.windows.push(w); group.end = Math.max(group.end, w.end);
+                } else groups.push({ start: w.start, end: w.end, windows: [w] });
+            }
+            for (const group of groups) {
+                const length = group.end - group.start + 1;
+                if (length > 8 * 1024 * 1024 || (group.start !== 0 && group.end !== fileSizeBytes - 1)) continue;
+                const signature = `${group.start}:${group.end}`, head = group.start === 0;
+                if (signature === (head ? lastHead : lastTail)) continue;
+                if (head) lastHead = signature; else lastTail = signature;
+                const payload = Buffer.alloc(length);
+                for (const w of group.windows) w.payload.copy(payload, w.start - group.start);
+                this.observeCompleteWindow(group, payload);
+                if (index) return { start: group.start, end: group.end, payload };
+            }
+            return null;
+        },
+        observeCompleteWindow(range, payload) {
+            if (index || !Buffer.isBuffer(payload) || payload.length > 8 * 1024 * 1024
+                || payload.length !== range.end - range.start + 1
+                || (range.start !== 0 && range.end !== fileSizeBytes - 1)) return;
+            let at = -1, candidates = 0;
+            while (++candidates <= 16 && (at = payload.indexOf('moov', at + 1, 'ascii')) >= 0) {
+                if (at < 4) continue;
+                const length = payload.readUInt32BE(at - 4);
+                if (length < 8 || at - 4 + length > payload.length) continue;
+                index = parseMp4CoverageIndex(payload.subarray(at - 4, at - 4 + length), fileSizeBytes);
+                if (index) return;
+            }
+        },
+        snapshot(windows, targetSeconds, eligible = true) {
+            if (!eligible || !index) return null;
+            const ranges = [];
+            for (const window of windows) {
+                if (!Buffer.isBuffer(window.payload) || window.payload.length !== window.end - window.start + 1) return null;
+                ranges.push({ start: window.start, end: window.end });
+            }
+            return indexedByteCoverage(index, ranges, targetSeconds);
+        },
+        clear() { index = null; lastHead = null; lastTail = null; },
+    };
+}
+
+module.exports = { parseMp4CoverageIndex, indexedByteCoverage, createMp4CacheCoverage };

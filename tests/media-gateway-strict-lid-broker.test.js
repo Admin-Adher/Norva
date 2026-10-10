@@ -165,6 +165,7 @@ function brokerHarness(diagnosticLogs = null) {
       ...require('../services/media-gateway/src/recent-delivery-target'),
       createStrictRangeCollector,
       createMp4SizeEvidence: require('../services/media-gateway/src/mp4-size-evidence').createMp4SizeEvidence,
+      createMp4CacheCoverage: require('../services/media-gateway/src/mp4-indexed-byte-coverage').createMp4CacheCoverage,
       fetch,
       http,
       isHttpUrl(value) {
@@ -189,6 +190,29 @@ function brokerHarness(diagnosticLogs = null) {
     },
   );
 }
+
+test('MP4 coverage reads the real bounded broker cache without provider I/O and follows eviction', async t => {
+  const N=65536, data=Buffer.alloc(3*N), words=(...xs)=>{const b=Buffer.alloc(xs.length*4);xs.forEach((x,i)=>b.writeUInt32BE(x,i*4));return b;};
+  const box=(name,...parts)=>{const body=Buffer.concat(parts),head=Buffer.alloc(8);head.writeUInt32BE(body.length+8);head.write(name,4);return Buffer.concat([head,body]);};
+  const track=(kind,offset)=>{const handler=Buffer.alloc(12);handler.write(kind,8);return box('trak',box('mdia',
+    box('mdhd',words(0,0,0,1000,4000)),box('hdlr',handler),box('minf',box('stbl',
+      box('stts',words(0,1,4,1000)),box('stsz',words(0,10,4)),box('stco',words(0,1,offset)),
+      box('stsc',words(0,1,1,4,1)),...(kind==='vide'?[box('stss',words(0,2,1,3))]:[])))));};
+  const moov=box('moov',track('vide',100),track('soun',200));moov.copy(data,data.length-moov.length);
+  let requests=0;
+  const server=http.createServer((req,res)=>{requests++;const [start,end]=req.headers.range.slice(6).split('-').map(Number);
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1,ETag:'"cache-proof"'});res.end(data.subarray(start,end+1));});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl:`http://127.0.0.1:${server.address().port}/file`,fileSizeBytes:data.length,
+    pathPrefix:'finite-mkv-seek',finiteWindowBytes:N,finiteFirstWindowBytes:0,finiteWarmupWindowBytes:0,finiteCacheBytes:N,finiteMp4Coverage:true});
+  t.after(async()=>{await broker.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+  const read=async(start,end)=>{const res=await fetch(broker.inputUrl,{headers:{Range:`bytes=${start}-${end}`}});assert.equal(res.status,206);assert.equal((await res.arrayBuffer()).byteLength,end-start+1);};
+  assert.equal(broker.cachedMp4Coverage(1.5),null);
+  await read(2*N,3*N-1); assert.equal(broker.cachedMp4Coverage(1.5).secondsAhead,0);
+  await read(0,N-1);const before=requests;assert.equal(broker.cachedMp4Coverage(1.5).secondsAhead,2.5);
+  assert.equal(requests,before);await read(N,2*N-1);assert.equal(broker.cachedMp4Coverage(1.5).secondsAhead,0);
+  await broker.close();assert.equal(broker.cachedMp4Coverage(1.5),null);
+});
 
 for (const changed of [false, true]) test(`a distant MP4 cue ${changed ? 'rejects a changed file after yield' : 'passes a slow continuation without truncating either local response'}`, { timeout: 5000 }, async t => {
   const N = 65536, data = Buffer.alloc(8 * N);

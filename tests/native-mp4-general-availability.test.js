@@ -25,6 +25,36 @@ function claims(patch = {}) {
         fileSizeBytes: 123456, exp: Math.floor(now / 1000) + 900, ...patch };
 }
 
+test('cached coverage authenticates, never opens a cold source and rejects revoked access', async () => {
+    let opened = 0, time = now;
+    const sessions = createNativeMp4Sessions({ now: () => time, allows: () => true,
+        open: async () => { opened++; return { close: async () => {}, cachedCoverage: target => ({ targetSeconds: target, secondsAhead: 30 }) }; } });
+    const entry = sessions.grant(claims());
+    assert.equal(await sessions.cachedCoverage(entry.sid, entry.token, 10), null);
+    assert.equal(opened, 0);
+    await assert.rejects(sessions.cachedCoverage(entry.sid, 'bad', 10), { code: 'NATIVE_MP4_ACCESS_DENIED' });
+    await sessions.resource(entry);
+    assert.equal((await sessions.cachedCoverage(entry.sid, entry.token, 10)).secondsAhead, 30);
+    await assert.rejects(sessions.cachedCoverage(entry.sid, entry.token, -1), { code: 'NATIVE_MP4_COVERAGE_INVALID' });
+    assert.equal(opened, 1);
+    await sessions.close(entry);
+    await assert.rejects(sessions.cachedCoverage(entry.sid, entry.token, 10), { code: 'NATIVE_MP4_SESSION_EXPIRED' });
+});
+for (const global of [false, true]) test(`native close snapshots before abort with ${global ? 'owner revocation' : 'ordinary stop'} reason`, async()=>{
+    const events=[];
+    const sessions=createNativeMp4Sessions({now:()=>now,allows:()=>true,open:async entry=>{
+        entry.ac.signal.addEventListener('abort',()=>events.push('abort'));
+        return {prepareClose:reason=>events.push(reason),close:async()=>events.push('closed')};
+    }});
+    const entry=sessions.grant(claims());await sessions.resource(entry);
+    const revocation = sessions.revoke(entry.ownerHash,entry.sid,global);
+    // The route immediately aborts remaining raw pumps after this call. The
+    // complete-window snapshot must already exist at that point.
+    assert.deepEqual(events,[global ? 'owner-revoked' : 'viewer-stop','abort']);
+    await revocation;
+    assert.deepEqual(events,[global ? 'owner-revoked' : 'viewer-stop','abort','closed']);
+});
+
 test('new owned provider is eligible without any owner or source rollout allowlist', async () => {
     const { useNativeMp4Gateway, browserNativeMp4Proof } = await edge;
     assert.equal(useNativeMp4Gateway({ sourceId, itemType: 'movie', container: 'mp4' }), true);

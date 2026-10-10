@@ -3,6 +3,8 @@ const { createStoryboardDurabilityPolicy } = require('./storyboard-durability');
 const { storyboardEncodingArgs } = require('./storyboard-encoding');
 const { createProgress, disposeProgress, runProgressBatch } = require('./storyboard-progress');
 const crypto = require('crypto');
+const { createMp4CacheCoverage } = require('./mp4-indexed-byte-coverage');
+const { revalidateNativeRecentInput } = require('./native-mp4-recent-input');
 const { createCatalogTransportManifest } = require('./catalog-transport-manifest');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -4310,7 +4312,14 @@ const nativeMp4Sessions = createNativeMp4Sessions({
             providerSlotKey, ownerHash: entry.ownerHash });
         const abortEntry = () => { void nativeMp4Sessions.close(entry).catch(() => {}); };
         entry.ac.signal.addEventListener('abort', abortEntry, { once: true });
-        let broker;
+        let broker, nativeRecent, nativeIdentity = null;
+        const nativeCacheBinding = claims.scope === 'native-browser-mp4'
+            && canUseStartupCache(entry.ownerHash) && canUseRecentResumeSamples(entry.ownerHash)
+            ? privateResumeBinding({ ownerKey: entry.ownerHash, sourceUrl: claims.url,
+                sourceId: claims.resumeSourceId, sourceRevision: claims.resumeSourceRevision,
+                fileSizeBytes: claims.fileSizeBytes, profile: 'native-browser-mp4-input-v1' }) : null;
+        const nativeCacheEpoch = privateResumeHlsCache.epoch;
+        const nativeFreshScope = { id: entry.sid };
         try {
             const reason = `native MP4 ${entry.sid.slice(0, 8)}`;
             let handoff = abortRawPumps(p => p !== pump && p.providerSlotKey === providerSlotKey, entry.sid, reason);
@@ -4328,6 +4337,8 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                     ? nativeAdaptiveDecision : null });
             const dispatcherFactory = pinnedProxyAgentFactoryForRoute(route);
             if (!dispatcherFactory) throw new Error('NATIVE_MP4_PINNED_ROUTE_UNAVAILABLE');
+            const nativeRouteKey = isPublicDirectRoute(route) ? 'public-direct'
+                : JSON.stringify([route.nodeTransport, route.slot, route.httpProxyMode || 'connect']);
             observeProviderProxySelection(proxyKey, route);
             const privateRanges = canUsePrivateResumeCache(entry.ownerHash) && claims.resumeSourceId && claims.resumeSourceRevision
                 ? privateResumeByteRanges.begin({ ownerKey: entry.ownerHash, sourceUrl: claims.url,
@@ -4337,9 +4348,24 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 grant: claims.sharedFragmentGrant, ownerKey: entry.ownerHash,
                 fileSizeBytes: claims.fileSizeBytes, signal: entry.ac.signal,
             }));
+            if (nativeCacheBinding) {
+                nativeRecent = await revalidateNativeRecentInput({ cache: privateResumeHlsCache,
+                    binding: nativeCacheBinding, scope: nativeFreshScope, signal: entry.ac.signal,
+                    createBroker: (signal, onProviderIdentity, scope, plan) => createStrictLidBroker({
+                        sourceUrl: claims.url, fileSizeBytes: claims.fileSizeBytes, userAgent: claims.ua,
+                        recentDeliveryTarget: plan.deliveryTarget, recentDeliveryOwner: entry.ownerHash,
+                        recentDeliveryRoute: nativeRouteKey,
+                        dispatcherFactory, abortSignal: signal, onProviderIdentity,
+                        freshResumeScope: scope, recentValidationKeepAlive: true,
+                        completedReleaseDelayMs: 0, supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
+                    }) });
+            }
             broker = await createStrictLidBroker({
                 sourceUrl: claims.url, fileSizeBytes: claims.fileSizeBytes, userAgent: claims.ua,
                 dispatcherFactory, abortSignal: entry.ac.signal,
+                captureRecentSamples: Boolean(nativeCacheBinding),
+                freshResumeScope: nativeFreshScope, freshResumeHandoff: nativeRecent?.handoff,
+                onProviderIdentity: current => { nativeIdentity = current; },
                 // Historical name: the finite broker is container-independent.
                 pathPrefix: 'finite-mkv-seek',
                 finiteWindowBytes: claims.nativeContainer === 'ts' ? 128 * 1024 : 8 * 1024 * 1024,
@@ -4352,6 +4378,7 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 // Coalesce only that bounded request inside the owner pilot.
                 finiteTailWindowBytes: claims.scope === 'native-browser-mp4' && canUseStartupCache(entry.ownerHash)
                     ? 4 * 1024 * 1024 : 0,
+                finiteMp4Coverage: claims.scope === 'native-browser-mp4' && canUseStartupCache(entry.ownerHash),
                 finiteAlignFirstWindow: claims.nativeContainer !== 'ts',
                 // Native TS binary seeking commonly corrects backwards by a
                 // few packets. Keep a bounded preceding slice in this session.
@@ -4384,15 +4411,43 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 // short grace before opening a body that would be superseded.
                 finiteInitialContinuationGraceMs: 500,
             });
-            return { inputUrl: broker.inputUrl, close: async reason => {
-                try { await broker.close(reason); }
+            if (nativeRecent) {
+                nativeRecent.lease.assertValid();
+                broker.seedRecentInput(nativeRecent.snapshot, 32 * 1024 * 1024);
+            }
+            let nativeStopSnapshot = null;
+            const prepareNativeClose = reason => {
+                if (reason === 'viewer-stop' && nativeCacheBinding && !nativeStopSnapshot) {
+                    nativeStopSnapshot = { samples: broker.snapshotRecentSamples(), windows: broker.snapshotNativeMp4Input() };
+                }
+            };
+            return { inputUrl: broker.inputUrl,
+                prepareClose: prepareNativeClose,
+                cachedCoverage: target => broker.cachedMp4Coverage(target), close: async reason => {
+                prepareNativeClose(reason);
+                const samples = nativeStopSnapshot?.samples;
+                const windows = nativeStopSnapshot?.windows || [];
+                try {
+                    await broker.close(reason);
+                    nativeRecent?.lease.release();
+                    if (reason === 'viewer-stop' && nativeIdentity && samples && !broker.terminalError
+                        && nativeCacheEpoch === privateResumeHlsCache.epoch) {
+                        privateResumeHlsCache.captureInput({ binding: nativeCacheBinding,
+                            observed: { ...nativeIdentity, samples, fileSizeBytes: claims.fileSizeBytes,
+                                deliveryTarget: broker.retainDeliveryTarget({ ownerKey: entry.ownerHash,
+                                    routeKey: nativeRouteKey }) }, inputWindows: windows });
+                    }
+                }
                 finally {
+                    nativeStopSnapshot = null;
+                    nativeRecent?.lease.release();
                     // Internal bounded transport timings only; no URL, token,
                     // account, owner or session identifier.
                     console.info(JSON.stringify({ event: 'native_mp4_transport_closed',
                         providerFetches: broker.providerFetches, providerBytes: broker.providerBytes,
                         interruptedProviderFetches: broker.interruptedProviderFetches,
                         resumeRangeReusedBytes: broker.resumeRangeReusedBytes,
+                        recentInputSeededBytes: broker.recentInputSeededBytes,
                         windowTrace: broker.windowTrace.slice(0, 12),
                         lastWindows: broker.windowTrace.slice(-12) }));
                     entry.ac.signal.removeEventListener('abort', abortEntry); releaseRawPump(pump);
@@ -4400,7 +4455,7 @@ const nativeMp4Sessions = createNativeMp4Sessions({
             } };
         } catch (error) {
             try { await broker?.close('native_open_failed'); }
-            finally { entry.ac.signal.removeEventListener('abort', abortEntry); releaseRawPump(pump); }
+            finally { nativeRecent?.lease.release(); entry.ac.signal.removeEventListener('abort', abortEntry); releaseRawPump(pump); }
             throw error;
         }
     },
@@ -4427,6 +4482,19 @@ app.post('/native-sessions/:id/heartbeat', requireGatewayAuth, (req, res) => {
 
 // This exact route precedes the HLS /sessions/:id/:file catch-all. Caddy
 // already permits GET/HEAD /sessions/*; no generic proxy ingress is opened.
+app.get('/sessions/:id/native-coverage', async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    try {
+        const entry = nativeMp4Sessions.authorize(req.params.id, req.query.token);
+        if (!canUseStartupCache(entry.ownerHash)) return res.status(404).end();
+        const target = typeof req.query.target === 'string' && req.query.target.length <= 32
+            && req.query.target.trim() !== '' ? Number(req.query.target) : NaN;
+        const coverage = await nativeMp4Sessions.cachedCoverage(req.params.id, req.query.token, target);
+        res.json({ protocol: 1, available: Boolean(coverage), coverage });
+    } catch (error) { res.status(error.status || 503).json({ error: 'Native coverage unavailable' }); }
+});
+
 app.get('/sessions/:id/native.mp4', async (req, res) => {
     let entry;
     try {
@@ -5951,6 +6019,11 @@ function finiteMkvSeekCacheStore(context, range, payload) {
         context.finiteCacheBytes -= Number(oldest?.payload?.length || 0);
         context.finiteCacheEvictions++;
     }
+    try {
+        const indexedWindow = context.mp4CacheCoverage?.observeCompleteWindows(context.finiteCache.values());
+        if (context.captureRecentSamples && indexedWindow?.end === context.fileSizeBytes - 1
+            && indexedWindow.payload.length <= 4 * 1024 * 1024) context.nativeMp4TailWindow = indexedWindow;
+    } catch (_) { /* Unavailable index never grants coverage or additional I/O. */ }
 }
 
 function seedFiniteMkvCurrentPrefix(context, options) {
@@ -7295,6 +7368,8 @@ async function createStrictLidBroker(options = {}) {
             && ownsDispatcher && Boolean(options.freshResumeScope)
             && options.recentValidationKeepAlive === true,
         captureRecentSamples: pathPrefix === 'finite-mkv-seek' && options.captureRecentSamples === true,
+        mp4CacheCoverage: pathPrefix === 'finite-mkv-seek' && options.finiteMp4Coverage === true
+            ? createMp4CacheCoverage(fileSizeBytes) : null,
         recentHeaderSample: null,
         rangeReuse,
         assertProviderTarget: typeof options.assertProviderTarget === 'function' ? options.assertProviderTarget : null,
@@ -7615,6 +7690,12 @@ async function createStrictLidBroker(options = {}) {
             return context.captureRecentSamples ? captureInputWindows([
                 ...tail, ...(context.recentInputHeaders || []), ...current.reverse()], context.fileSizeBytes, maximum) : [];
         },
+        snapshotNativeMp4Input() {
+            if (!context.mp4CacheCoverage || !context.captureRecentSamples || context.terminalError) return [];
+            return captureInputWindows([...(context.recentInputHeaders || []),
+                ...(context.nativeMp4TailWindow ? [context.nativeMp4TailWindow] : []),
+                ...[...context.finiteCache.values()].reverse()], context.fileSizeBytes, 32 * 1024 * 1024);
+        },
         seedRecentInput(proof, maximum = RECENT_INPUT_MAX_BYTES) {
             // Called only after lease acquisition has accepted fresh samples.
             // Never seed strict LID, a different target, or an already used input.
@@ -7645,6 +7726,10 @@ async function createStrictLidBroker(options = {}) {
         get completedProviderFetches() { return context.completedProviderFetches; },
         get interruptedProviderFetches() { return context.interruptedProviderFetches; },
         get cacheBytes() { return context.finiteCacheBytes; },
+        cachedMp4Coverage(targetSeconds) {
+            return context.mp4CacheCoverage?.snapshot(context.finiteCache.values(), targetSeconds,
+                !context.closed && !context.terminalError && !controller.signal.aborted) || null;
+        },
         get cacheHits() { return context.finiteCacheHits; },
         get cacheMisses() { return context.finiteCacheMisses; },
         get cacheEvictions() { return context.finiteCacheEvictions; },
@@ -7712,6 +7797,8 @@ async function createStrictLidBroker(options = {}) {
                 await Promise.allSettled([...context.finiteLocalResponses]);
                 try { await context.finiteProviderQueue; } catch (_) {}
                 context.finiteCache.clear();
+                context.mp4CacheCoverage?.clear();
+                context.nativeMp4TailWindow = null;
                 context.recentHeaderSample = null;
                 context.recentInputHeaders = [];
                 context.finiteCacheBytes = 0;
@@ -13275,6 +13362,9 @@ app.delete('/raw-pumps', requireGatewayAuth, async (req, res) => {
     if (!sid && !globalCleanup) {
         return res.status(400).json({ error: 'sid required (or global=1 for explicit owner cleanup)' });
     }
+    // Marks ordinary stop vs owner revocation and snapshots only complete
+    // native input synchronously before the pump's abort drains its cache.
+    const nativeRevocation = nativeMp4Sessions.revoke(ownerKey, sid, globalCleanup);
     const aborted = abortRawPumps(
         (p) => p.ownerHash === ownerKey && (globalCleanup || p.sid === sid),
         null,
@@ -13283,7 +13373,7 @@ app.delete('/raw-pumps', requireGatewayAuth, async (req, res) => {
     // Revoke even a grant whose browser has not opened its first Range yet.
     // Await socket drain before the coordinator admits a replacement viewer.
     try {
-        const nativeRevoked = await nativeMp4Sessions.revoke(ownerKey, sid, globalCleanup);
+        const nativeRevoked = await nativeRevocation;
         await Promise.all([...sessions.values()].filter(session => session.retainedSessionState
             && session.ownerKey === ownerKey && (globalCleanup || session.playbackSessionId === sid))
             .map(session => stopSession(session, { reason: 'owner-revoked' })));

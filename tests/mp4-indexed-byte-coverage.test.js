@@ -2,6 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { parseMp4CoverageIndex: parse, indexedByteCoverage: coverage } = require('../services/media-gateway/src/mp4-indexed-byte-coverage');
+const { createMp4CacheCoverage } = require('../services/media-gateway/src/mp4-indexed-byte-coverage');
 const words = (...values) => { const b = Buffer.alloc(values.length * 4); values.forEach((x, i) => b.writeUInt32BE(x, i * 4)); return b; };
 const box = (name, ...parts) => { const body = Buffer.concat(parts), head = Buffer.alloc(8); head.writeUInt32BE(body.length + 8); head.write(name, 4); return Buffer.concat([head, body]); };
 function fixture({ multipleAudio = false, fragmented = false, edit = 0, size = 10, co64 = false } = {}) {
@@ -58,4 +59,29 @@ test('malicious table counts and duplicate required boxes fail closed', () => {
     assert.equal(parse(bad, 1000), null);
     const trak = box('trak', box('mdia', box('hdlr', words(0, 0, 0)), box('hdlr', words(0, 0, 0))));
     assert.equal(parse(box('moov', trak), 1000), null);
+});
+test('broker evidence uses current complete windows and expires on eviction or close', () => {
+    const moov = fixture(), size = 1000 + moov.length, tracker = createMp4CacheCoverage(size);
+    tracker.observeCompleteWindow({ start: 1000, end: size - 1 }, moov.subarray(0, -1));
+    assert.equal(tracker.snapshot([], 1.5), null);
+    tracker.observeCompleteWindow({ start: 1000, end: size - 1 }, moov);
+    const window = { start: 100, end: 239, payload: Buffer.alloc(140) };
+    assert.equal(tracker.snapshot([window], 1.5).secondsAhead, 2.5);
+    assert.equal(tracker.snapshot([], 1.5).secondsAhead, 0);
+    assert.equal(tracker.snapshot([window], 1.5, false), null);
+    assert.equal(tracker.snapshot([{ ...window, payload: Buffer.alloc(139) }], 1.5), null);
+    tracker.clear(); assert.equal(tracker.snapshot([window], 1.5), null);
+});
+
+test('trailing index split across complete cached ranges is assembled without covering holes', () => {
+    const moov = fixture(), size = 1000 + moov.length, tracker = createMp4CacheCoverage(size);
+    const first = { start: 1000, end: 1015, payload: moov.subarray(0, 16) };
+    const last = { start: 1016, end: size - 1, payload: moov.subarray(16) };
+    assert.equal(tracker.observeCompleteWindows([last]), null);
+    assert.equal(tracker.snapshot([], 0), null);
+    assert.equal(tracker.observeCompleteWindows([first, { ...last, start: 1017, payload: moov.subarray(17) }]), null);
+    const joined = tracker.observeCompleteWindows([last, first]);
+    assert.deepEqual(joined.payload, moov);
+    assert.equal(tracker.snapshot([{ start: 100, end: 239, payload: Buffer.alloc(140) }], 1.5).secondsAhead, 2.5);
+    assert.equal(tracker.snapshot([], 1.5).secondsAhead, 0);
 });
