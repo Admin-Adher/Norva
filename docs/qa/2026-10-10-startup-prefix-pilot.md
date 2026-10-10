@@ -705,6 +705,72 @@ Zéro session, pompe, encodeur, préparation et octet réservé avant arrêt.
 Deux Gateways de production sains. Preuves : `tail-broker-regression.tap`,
 `index-final-health.safe.json`, `index-closure.safe.json`.
 
+## Réserve MP4 après saut : expérience refusée
+
+Le lecteur MP4 direct reprend ordinairement dès que le navigateur autorise
+la lecture. Pour vérifier une réserve après saut, le banc seul enveloppe
+`seekToTime` : pause, saut réel à 1 093,137 s, puis reprise attendue lorsque
+le buffer à cette position couvre 24 secondes. Les sauts déjà suffisamment
+chargés gardent leur voie immédiate ; interruption et nouvel essai annulent
+l'attente. **Aucun code du lecteur de production n'est modifié.**
+
+Une simulation sur la trace précédente, avec arrivée des données supposée
+identique, situe le seuil de 24 secondes à environ 39,5 secondes après le
+saut, et laisse au moins 18,4 secondes sur les deux minutes suivantes. Douze
+secondes auraient encore épuisé la réserve. Ce calcul ne prouve pas le
+comportement du navigateur en pause ; les essais suivants montrent justement
+pourquoi il ne suffit pas.
+
+### Pause seule et préchargement explicite
+
+- Sans préchargement explicite, Jolt démarre en **11,980 s**. Après le saut,
+  la lecture HTTP du navigateur est interrompue après **1 245 184 octets**.
+  Le buffer utile reste bloqué à environ 2,5 secondes. L'essai est arrêté
+  volontairement après environ 73 secondes de préparation, sans reprise.
+- Avec l'attribut `preload="auto"`, confirmé dans le DOM, Jolt démarre en
+  **12,538 s**. La réponse atteint **8 060 928 octets** pendant la pause.
+  Cependant, le contrôle expire après 90 secondes : le navigateur annonce
+  toujours 1 092,619–1 095,616 s autour de la cible et une autre plage,
+  séparée, 1 171,170–1 192,107 s.
+
+L'index déjà reçu situe les paquets contenus dans ces 8 060 928 octets à
+**1 092,619–1 119,808 s pour la vidéo** et **1 092,544–1 119,787 s pour l'AAC**
+(horloges de décodage, avant les petits ajustements d'édition). Environ
+26 secondes sont donc reçues autour de la cible ; la plage éloignée annoncée
+par `buffered` ne décrit pas leur emplacement dans ce contrôle en pause.
+Cela établit un désaccord mesuré, pas sa cause interne dans Chromium.
+
+### Reprise manuelle et conséquence
+
+Après expiration de la barrière, une pression réelle sur Play/Pause reprend
+le film à 183,455 s depuis le clic initial. Il parcourt ensuite **171,582 s**
+sur 174,180 secondes réelles, **sans `waiting` ni grand intervalle entre images
+après le début de cette reprise**. Quatorze images perdues sur 4 721 au total.
+L'intervalle d'image de 139 secondes couvre la pause volontaire ; il ne doit
+pas être compté comme un gel de la lecture après reprise. Aucun gain de délai
+après saut n'est revendiqué : l'attente imposée a au contraire été trop longue.
+
+**La barrière fondée uniquement sur `HTMLMediaElement.buffered` est écartée.**
+La rendre générale pourrait bloquer un MP4 qui possède déjà des données.
+Il faut une preuve de couverture issue de l'index et des octets préparés,
+ou une voie de préparation dont le lecteur maîtrise le buffer, avant de
+retester une réserve automatique. `preload="auto"` seul ne valide pas cette
+protection. Aucune optimisation générale ni écoute humaine n'est revendiquée.
+
+Preuves : `reserve-counterfactual.safe.json`,
+`reserve-path-{browser,transport}-6-1.safe.json`,
+`reserve-auto-path-{browser,transport}-6-1.safe.json`,
+`reserve-auto-before-manual.safe.json`, `jolt-paused-byte-coverage.safe.json`,
+`reserve-validation-summary.safe.json`, `mp4-reserve-manual-continuation.jpg`.
+
+Les contrats CI et les constructions Phone, TV et Windows de `c502f1bfd` sont
+réussis (run `38077136675`). Les essais expirent normalement ; helper et
+services temporaires arrêtés, compteurs et réservations à zéro, deux Gateways
+de production sains : `reserve-final-health.safe.json`,
+`reserve-closure.safe.json`. Le support NodeMaven n'a pas encore répondu à
+la dernière demande de trajet distinct lors du contrôle en lecture seule.
+PR760 reste en brouillon, sans déploiement.
+
 ## État et critères d'activation
 
 **Non activé en production. Le module WatchPage réutilise le préfixe sur les
