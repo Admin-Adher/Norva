@@ -16205,6 +16205,11 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
     const startup = position === 0 && canUseStartupCache(session.ownerKey);
     const cache = startup ? privateStartupHlsCache : privateResumeHlsCache;
     if (!binding || !(position > 0 || startup) || !cache.hasCandidate(binding, position)) return false;
+    // A prefix at zero still needs the same serialized range broker for its
+    // fresh identity check and continuation. Falling back to the linear input
+    // after validation would mint another delivery URL and contradict that
+    // identity, even when the underlying file had not changed.
+    if (startup) session.privateStartupInput = true;
     const format = privateResumeFormat(session);
     if (format === 'mpegts') {
         // The cached boundary is not a keyframe in the source. Decode a TS
@@ -16285,7 +16290,8 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
 function usesFiniteMkvSeekBroker(session) {
     return Boolean(
         (isFiniteMkvVodSession(session) || session?.finiteTsSeekBroker === true || session?.finiteMp4SeekBroker === true) &&
-        (Number(session?.seekOffset || 0) > 0 || session?.finiteTsSeekBroker === true || session?.finiteMp4SeekBroker === true) &&
+        (Number(session?.seekOffset || 0) > 0 || session?.privateStartupInput === true
+            || session?.finiteTsSeekBroker === true || session?.finiteMp4SeekBroker === true) &&
         session?.finiteMkvSeekBroker?.inputUrl
     );
 }
@@ -16326,7 +16332,8 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     const finiteMp4 = session?.finiteMp4SeekBroker === true;
     const finiteTs = !finiteMkv && finiteTsProfileEligible(session)
         && (session?.finiteTsResumeAligned === true || Number(session?.seekOffset || 0) === 0);
-    if ((!finiteMkv && !finiteTs && !finiteMp4) || (!finiteTs && !finiteMp4 && Number(session?.seekOffset || 0) <= 0)) return null;
+    if ((!finiteMkv && !finiteTs && !finiteMp4) || (!finiteTs && !finiteMp4
+        && Number(session?.seekOffset || 0) <= 0 && session?.privateStartupInput !== true)) return null;
     if (session.finiteMkvSeekBroker) return session.finiteMkvSeekBroker;
     const fileSizeBytes = fileSizeBytesForSession(session);
     if (!fileSizeBytes) {

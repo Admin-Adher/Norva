@@ -4,6 +4,7 @@ const { PrivateResumeHlsCache } = require('../services/media-gateway/src/private
 const { privateResumeBinding } = require('../services/media-gateway/src/private-resume-binding');
 const { createPrivateStartupCache } = require('../services/media-gateway/src/private-startup-cache');
 const { StartupCachePreparation } = require('../services/media-gateway/src/startup-cache-preparation');
+const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const binding = privateResumeBinding({ ownerKey: 'a'.repeat(64), sourceUrl: 'https://provider.invalid/movie/x/y/1.mkv',
     sourceId: 'source', sourceRevision: '1', fileSizeBytes: 10_000_000, profile: 'audio-1' });
 const observed = { fileSizeBytes: 10_000_000, validator: { kind: 'etag', value: '"v1"' }, effectiveUrlIdentitySha256: 'b'.repeat(64) };
@@ -11,6 +12,22 @@ const playlist = (seconds = 64) => '#EXTM3U\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X
     + Array(seconds / 4).fill(4).map((n,i) => `#EXTINF:${n},\nsegment-${i}.ts`).join('\n') + '\n#EXT-X-ENDLIST\n';
 const args = extra => ({ binding, observed, actualStartOffset: 0, playlist: playlist(),
     readAsset: async () => Buffer.alloc(188, 0x47), ...extra });
+
+test('startup continuation and rejected-prefix fallback retain the zero-position range broker', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8');
+    const uses = source.slice(source.indexOf('function usesFiniteMkvSeekBroker('), source.indexOf('function applyFiniteMkvSeekProviderIdentity('));
+    const prepare = source.slice(source.indexOf('async function prepareFiniteMkvSeekBroker('), source.indexOf('function applyFiniteMkvSeekBrokerFailure('));
+    const context = vm.createContext({ isFiniteMkvVodSession: () => true, finiteTsProfileEligible: () => false });
+    vm.runInContext(uses + prepare, context);
+    const broker = { inputUrl: 'http://127.0.0.1/private-source' }, session = { seekOffset: 0, finiteMkvSeekBroker: broker };
+    assert.equal(context.usesFiniteMkvSeekBroker(session), false);
+    assert.equal(await context.prepareFiniteMkvSeekBroker(session), null);
+    session.privateStartupInput = true;
+    assert.equal(context.usesFiniteMkvSeekBroker(session), true);
+    assert.equal(await context.prepareFiniteMkvSeekBroker(session), broker);
+    assert.equal(context.usesFiniteMkvSeekBroker({ ...session, finiteMkvSeekBroker: null }), false);
+    assert.equal(context.usesFiniteMkvSeekBroker({ seekOffset: 10, finiteMkvSeekBroker: broker }), true);
+});
 
 test('startup and resume coexist under the original budget, with no false end of film', async () => {
     const cache = new PrivateResumeHlsCache(), startup = createPrivateStartupCache(cache);
