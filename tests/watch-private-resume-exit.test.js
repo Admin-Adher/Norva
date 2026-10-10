@@ -14,6 +14,27 @@ function playing(page) {
         _lastKnownPlaybackPosition: 900, resumeTime: 900 });
     return page;
 }
+
+test('queued errors from a detached or replaced resource cannot fail the incoming playback', () => {
+    for (const src of [null, 'https://norva.invalid/new.mp4']) {
+        const page=watch();
+        page.video={getAttribute:()=>src,src:src||'',currentSrc:'https://norva.invalid/old.mp4',
+            error:{code:4,message:'old resource failed'},dataset:{playbackAttemptId:'2'}};
+        page.isStalePlaybackAttempt=()=>false;
+        page.hasCurrentMedia=()=>assert.fail('old resource must be ignored before error recovery');
+        page.onError({});
+    }
+});
+
+test('an error on the currently attached resource still reaches playback recovery', async () => {
+    const page=watch(); let recovered=false;
+    page.video={getAttribute:()=> 'https://norva.invalid/current.mp4',src:'https://norva.invalid/current.mp4',
+        currentSrc:'https://norva.invalid/current.mp4',error:{code:4,message:'format unsupported'},dataset:{playbackAttemptId:'2'}};
+    page.isStalePlaybackAttempt=()=>false;page.hasCurrentMedia=()=>false;
+    page.isCloudPlaybackMode=()=>false;page.retryGatewaySeekAfterFatalPlayback=()=>false;
+    page.sendPlaybackEvent=()=>{};page.handlePlaybackFailure=async()=>{recovered=true;};
+    page.onError({}); await Promise.resolve(); assert.equal(recovered,true);
+});
 test('resume capture uses decoded absolute position, never the stale history or requested seek destination', () => {
     const page = playing(watch());
     assert.equal(page.captureCloudResumePosition(), 315.5);

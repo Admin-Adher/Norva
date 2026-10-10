@@ -4384,7 +4384,10 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 // Native TS binary seeking commonly corrects backwards by a
                 // few packets. Keep a bounded preceding slice in this session.
                 finiteSeekLookbehindBytes: claims.nativeContainer === 'ts' ? 64 * 1024 : 0,
-                finiteSequentialWindowBytes: 8 * 1024 * 1024,
+                // Smaller complete windows bound the bytes discarded when a
+                // browser seeks during an unfinished sequential transfer.
+                finiteSequentialWindowBytes: claims.scope === 'native-browser-mp4' && canUseStartupCache(entry.ownerHash)
+                    ? 2 * 1024 * 1024 : 8 * 1024 * 1024,
                 // A TS decoder may still request its longer keyframe pre-roll
                 // after reading the first body. Finish this bounded transfer
                 // before growing steady playback to the normal 8 MiB windows.
