@@ -51,9 +51,21 @@ le cache de reprise habituel. Une identité différente invalide la réutilisati
 Après validation d'un préfixe MKV à zéro, le même broker sérialisé sert le raccord
 ou le repli : la lecture ne crée pas une seconde adresse de livraison.
 Pour un profil Matroska complet à une piste audio sans sous-titres, le préfixe
-est vérifié avant l'ouverture d'une réponse de démarrage froide. Les autres
-graphes gardent l'enrichissement ordinaire ; un refus d'identité ferme le broker
-de validation avant le repli. Les MP4 natifs ont une voie distincte du cache HLS.
+est vérifié avant l'ouverture d'une réponse de démarrage froide. Le même ordre
+s'applique à un MPEG-TS fini dont le profil serveur daté atteste la taille,
+la durée, H.264 et une unique piste audio connue, sans sous-titres. Un profil TS
+partiel `gateway_inband` reste exclu. Les autres graphes gardent l'enrichissement
+ordinaire ; un refus d'identité ferme le broker de validation avant le repli.
+Les MP4 natifs ont une voie distincte du cache HLS.
+Une vérification fraîche indisponible refuse la lecture du préfixe et conserve
+seulement les données privées jusqu'à leur expiration initiale. La même création
+ne retente pas la vérification pendant son repli ; le prochain essai doit réussir
+les quatre lectures fraîches. Un changement d'identité invalide toujours le cache.
+L'indication privée de livraison du préfixe délivre un jeton à usage unique
+pour chaque nouvelle validation. Le premier démarrage ne consomme plus
+l'indication nécessaire au suivant. Chaque jeton garde l'expiration d'origine,
+et les mêmes contrôles de propriétaire, source, route, taille et User-Agent.
+L'identité et les quatre échantillons restent vérifiés à chaque création.
 TTL existant : 30 min avec identité forte, 10 min avec échantillons récents.
 Le runner évite de télécharger à nouveau un préfixe encore valable.
 

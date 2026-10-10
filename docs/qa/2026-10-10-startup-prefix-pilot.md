@@ -4,7 +4,7 @@
 
 Implémenter sur le pilote une préparation des 60 premières secondes lorsque le
 compte fournisseur est libre, avec priorité à toute lecture utilisateur.
-Extension du Gateway et du cache de reprise déployés ; aucun AVPlayer/libmedia,
+Prototype fondé sur le Gateway et le cache de reprise déjà déployés ; aucun AVPlayer/libmedia,
 aucune interface ou application native modifiée.
 
 ## Code
@@ -233,7 +233,7 @@ Preuves : `browser-6-first.safe.json`, `browser-6.safe.json`,
 (1,094 s) a été lu dans le retour de diagnostic avant écrasement du reçu par
 la seconde création ; il n'est pas attribué au reçu du second essai.
 
-L'image candidate privée finale porte la révision `b4553956f`, empreinte
+L'image candidate privée de ce premier contrôle porte la révision `b4553956f`, empreinte
 `sha256:5bebe7f6ca86e9f28bcb5df6f2f81fb89d8536687413fd075989a5f7a4e60210`,
 arbre source `b6d3a38666c226f8ba440127c09a972e298c846c1a5e22f318f117a18f22f57e`.
 Les fichiers de base Gateway, cache et Edge correspondent aux fichiers déployés
@@ -248,17 +248,233 @@ Les traces privées et les réponses agrégées sont dans
 `.codex-artifacts/startup-cache-20261010/`, hors Git. Aucun accès fournisseur
 ni identifiant de compte n'est inclus dans ce rapport.
 
+## Rejeu instrumenté : livraison des segments et chemin MPEG-TS
+
+Le canary isolé est redémarré pour ces contrôles, sans modifier les routes de
+production. Lost prépare de nouveau 60 secondes en **8,281 s**, puis démarre en
+**2,887 s** (création authentifiée **2,281 s**, validation fraîche **1 671 ms**).
+Les quatre lectures prennent **873/270/257/267 ms**. La consommation est un hit
+du cache de démarrage ; **191,677 s** sont parcourues sans événement `waiting`
+ni erreur HLS. Les 60 secondes sont déjà dans `video.buffered` vers 10,8 s après
+le clic ; le premier segment de continuation est chargé vers 34,9 s. Le préfixe
+ne disparaît pas de la playlist pendant ce démarrage : séquence zéro, puis une
+seule discontinuité au raccord. Aucun refus HTTP n'apparaît parmi les 111
+requêtes de cette trace.
+
+La réouverture confirme un second hit : **4,398 s**, création **3,172 s**,
+validation **2 546 ms** (échantillons **1 669/278/287/306 ms**). Le dernier état
+lisible du lecteur atteint **95,329 s**, sans `waiting`, avec seulement la
+correction initiale non fatale `bufferSeekOverHole`. Le contrôle CDP devient
+intermittent ; la session est donc expirée par l'API ordinaire et l'onglet fermé.
+La preuve de cette seconde lecture est explicitement limitée au dernier résumé
+visible, et non présentée comme une trace exhaustive jusqu'à sa clôture.
+
+Le banc affichait tout l'historique détaillé à chaque seconde. L'affichage est
+réduit à un résumé et les données sont conservées séparément. Les callbacks
+de frames du premier essai sont trop espacés pour certifier la cadence visuelle,
+malgré une horloge de lecture continue et 35 images perdues sur 5 750 : ce point
+est distinct d'un épuisement de la réserve. Le gel antérieur de 34 secondes reste
+un résultat négatif valide, non reproduit dans ces deux essais ; sa cause n'est
+pas déduite de leur seule réussite.
+
+Une autre copie réelle, **Minnal Murali (2021), MPEG-TS**, prépare 60 secondes en
+**22,102 s** (environ 7,55 Mio). Pourtant sa consommation démarre en **13,510 s**
+sans hit : la vérification fraîche reçoit une erreur locale 502,
+`PROVIDER_REQUEST_FAILED`, avant le premier échantillon, après **6 560 ms**.
+La voie ordinaire reprend ensuite ; **92,937 s** sont parcourues, sans événement
+d'attente ni erreur HLS, zéro image perdue parmi 2 214. Cela démontre un refus
+du cache et son coût, sans attribuer cette réponse au fournisseur ou au relais.
+
+La révision `b5231dd23` élargit l'essai avant ouverture froide à un **profil
+MPEG-TS fini issu d'un probe serveur daté**, avec une seule piste audio connue
+et aucun sous-titre. Les profils partiels `gateway_inband`, le direct, une taille
+inconnue ou un autre graphe restent exclus ; `metadataComplete` n'est jamais
+inventé. Les refus drainent toujours le broker avant la préparation ordinaire.
+La suite ciblée passe **60 tests**, un contrôle FFmpeg optionnel ignoré.
+Après rafraîchissement du profil exact par l'API de sonde ordinaire, le même
+MPEG-TS prépare de nouveau 60 secondes en **54,012 s**. Sa consommation démarre
+en **4,310 s**, création authentifiée **3,860 s**, avec un hit de 60,017 secondes.
+Les quatre échantillons prennent **786/858/777/812 ms**, validation **3 240 ms**.
+La lecture parcourt **132,803 s**, reçoit des segments au-delà du préfixe et
+conserve une réserve. Une attente de **12,6 ms** à 27,392 secondes et un
+`bufferStalledError` non fatal sont signalés, outre la correction initiale
+`bufferSeekOverHole`. Sept images sont perdues parmi 3 160. Ce n'est pas une
+certification de cadence ou de qualité à l'écoute ; le réseau et la préparation
+varient entre les deux mesures.
+
+La réouverture suivante échoue avant la première image et la préparation froide
+est refusée. Le compteur indique `fresh-read-unavailable`, puis l'invalidation
+du préfixe. Ce libellé agrégé ne distingue pas une lecture indisponible d'une
+cible rejetée avant acquisition ; il ne prouve donc pas l'absence de données.
+Le banc n'a pas enregistré de durée fiable pour cette création échouée : aucune
+valeur n'est inventée. Le contrôle constate aussi temporairement une session
+enregistrée sans pompe ni encodeur ; elle a disparu au contrôle suivant. Le claim
+ordinaire est déjà `failed`, sans lecture active.
+
+La révision `ca43b60f6` corrige deux points de ce chemin :
+
+- Un refus de l'entrée froide ferme la session et ses ressources avant la réponse,
+  au lieu de supprimer uniquement son répertoire. Cela couvre aussi une session
+  déjà enregistrée par l'essai précoce du cache.
+- Une vérification réseau indisponible conserve le préfixe **sans lease et sans
+  lecture**, dans son TTL original. La même création ne retente pas cette
+  vérification pendant son repli. Une identité différente reste invalidante ;
+  les délais, la révocation et les plafonds mémoire sont inchangés. Un prochain
+  essai doit réussir une nouvelle vérification complète.
+
+Ces deux chemins passent les tests de refus, d'ordre de drainage et de contrôle
+d'identité : **72 tests ciblés réussis**, un contrôle FFmpeg optionnel ignoré.
+La CI de `b5231dd23` a passé **6 339 tests**, 35 ignorés, et construit les trois
+paquets Phone/TV/Windows. La CI de `f0eb2acc862f9189eff336fc7b95a40fd278ff3a`
+passe ensuite **6 341 tests**, 35 ignorés, et les trois paquets. Les huit échecs
+intermédiaires étaient des mocks sans `stopSession`, corrigés avec le cas où
+le drainage échoue. Le diagnostic de `716add371` conserve le résultat du contrôle
+anticipé même si la création échoue ensuite, sans URL ni identifiant ; contrats
+CI : 6 342 tests réussis, 35 ignorés.
+
+L'image candidate `ca43b60f6` est construite, syntaxe vérifiée : empreinte
+`sha256:3ba161111cf227eabd9db88f22e50aec14b263cdb45ceef4853548054ad41494`,
+arbre source `a8b75f97c9315e1107b8ccf76b28d19b1f08444b7d6e25b13bd47e77131b34ce`,
+94 fichiers. Elle n'est pas déployée en production.
+
+Preuves privées : `instrumented-browser-5-1.safe.json`,
+`instrumented-create-5-1.safe.json`, `instrumented-transport-5-1.safe.json`,
+`instrumented-browser-5-2.safe.json` (résumé limité),
+`instrumented-create-5-2.safe.json`, `instrumented-transport-5-2.safe.json`,
+`instrumented-browser-9-before.safe.json`, `instrumented-create-9-before.safe.json`
+et `instrumented-transport-9-before.safe.json`,
+`instrumented-browser-9-early.safe.json`, `instrumented-create-9-early.safe.json`,
+`instrumented-transport-9-early.safe.json`, `ts-reopen-cleanup.safe.json`,
+`profile-refresh-9.safe.json` et `image-ca43.safe.json`.
+
+## Attente navigateur et réouvertures du même préfixe
+
+Après le correctif de drainage, Minnal prépare un préfixe en **14,142 s**.
+La session est prête en **4,157 s**, validation fraîche **3 311 ms**, mais la
+première lecture attend **44,564 s**. Le premier fragment est signalé reçu à
+**17,479 s**, puis analysé à **44,479 s** ; le compteur d'analyse mesure
+**27,206 s**. Les segments en cache sont servis en environ 0,2 s chacun.
+La lecture parcourt ensuite **142,180 s**, sans `waiting` ni erreur HLS, trois
+images perdues sur 3 385. L'ordonnancement du navigateur et du worker fait partie
+de cette attente ; ce n'est pas une preuve de 27 secondes de calcul de décodage.
+L'essai sans worker échoue avant le lecteur, en **3,391 s** (HTTP 502) : ce n'est
+pas un comparatif valide. Session, pompe et encodeur reviennent à zéro.
+
+Preuves : `instrumented-browser-9-cleanup-worker-on.safe.json`,
+`instrumented-create-9-cleanup-worker-on.safe.json`,
+`instrumented-transport-9-cleanup-worker-on.safe.json`, `failed-create-9-1.safe.json`.
+
+Un nouveau préfixe est préparé en **6,660 s**. Trois lectures séquentielles
+utilisent ensuite la même session authentifiée :
+
+| Essai | Depuis le clic | Partie lecteur après création | Progression observée |
+| --- | ---: | ---: | ---: |
+| Worker, ouverture complète | 5,480 s | 1,520 s | 90,089 s, aucun `waiting` |
+| Sans worker, même session | 0,334 s | 0,327 s | 68,051 s, aucun `waiting` |
+| Worker, même session | 0,574 s | 0,549 s | 115,154 s dans la trace |
+
+Le troisième essai signale deux attentes de **5,3 et 47,7 ms** et deux
+`bufferStalledError` non fatals. Le dernier état visible compte neuf images
+perdues. Son résumé final est écrasé après fermeture ; les compteurs remis à
+zéro ne constituent pas une mesure. Aucun essai ne reproduit les 27 secondes
+d'analyse. L'ordre, la chauffe et les données déjà prêtes diffèrent : aucune
+suppression générale du worker n'est validée.
+Preuves : `ab-browser-9-{1,2,3}.safe.json`, `ab-create-9-1.safe.json`,
+`ab-transport-9-{1,2,3}.safe.json`, `worker-ab-summary.safe.json`.
+
+### Cause du refus à la deuxième ouverture et correction
+
+Après expiration ordinaire de cette session, une vraie nouvelle création échoue
+en **3,172 s**. Le diagnostic indique **`target-changed`**, après une plage reçue.
+Aucun encodeur ni lecteur source ne subsiste. Le code rendait au validateur
+l'indication de livraison à usage unique détenue par le préfixe : le premier
+contrôle la consommait ; le suivant repartait de l'URL catalogue, susceptible
+de générer une nouvelle cible et de faire refuser le cache. La régression isolée
+reproduit cette perte au deuxième contrôle.
+
+La révision `261d2181618167ddc7b302d844e198dc6471bcd5` conserve l'indication
+privée du préfixe et émet un jeton à usage unique par validation. Chaque jeton
+garde sa date d'origine et ne peut pas produire d'autre jeton. Les contrôles
+propriétaire/source/route/taille/User-Agent, les quatre lectures fraîches,
+l'identité, les droits et l'expiration restent obligatoires. Le cache de reprise
+ordinaire conserve son comportement précédent. **83 tests ciblés réussis**, un
+ignoré ; la suite supplémentaire cache de reprise/transfert frais passe **88
+tests** (recouvrement, nombres non additionnés). Couverture : données fraîches
+absentes, mauvaise identité, révocation, expiration non renouvelable.
+
+Après une seule préparation en **4,705 s**, trois créations authentifiées
+distinctes réutilisent les mêmes 60,017 secondes (7 921 944 octets) :
+
+| Ouverture | Première lecture | Création authentifiée | Validation fraîche | Position atteinte |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 5,403 s | 4,562 s | 3,783 s | 29,910 s |
+| 2 | 4,452 s | 3,687 s | 3,247 s | 126,867 s |
+| 3 | 5,216 s | 4,625 s | 3,891 s | 37,713 s |
+
+Les trois contrôles lisent quatre plages fraîches et réutilisent la cible retenue.
+Compteur final : **une capture, trois hits, zéro invalidation**, puis zéro session,
+pompe et encodeur. La deuxième lecture reçoit des données au-delà du cache,
+avec une attente de **243,4 ms** vers 31,344 s. Les première et troisième traces
+n'en signalent pas. Le troisième essai compte zéro image perdue sur 899.
+Les deux premiers résumés sont écrasés après fermeture : leurs positions viennent
+des traces, leurs compteurs de qualité remis à zéro sont exclus. Le dernier état
+visible de la deuxième lecture, à 123,854 s, comptait quatre images perdues sur
+2 949. Le banc fige désormais sa preuve avant destruction du lecteur et arrête
+son échantillonnage à la fermeture.
+
+Contrats CI de `261d2181618167ddc7b302d844e198dc6471bcd5` : **6 344 tests réussis,
+35 ignorés**, région, syntaxe et constructions Phone/TV/Windows réussies. Image candidate privée :
+`sha256:fffb0092073ffc31930f89f787f44ac3e4b09c3bf09a9f9b4a6457b6978bc149`,
+arbre `2bd3b1cdc88bf01e5f56825639dcb5d463e3f6dc0d6530c8f88a6bdf552a705f`.
+
+Preuves : `target-change-reopen.safe.json`, `before-route-refresh-failure.safe.json`,
+`route-repeat-browser-9-{1,2,3}.safe.json`, `route-repeat-create-9-{1,2,3}.safe.json`,
+`route-repeat-summary-9.safe.json`, `route-repeat-health-9-2.safe.json`,
+`route-repeat-drain-9-final.safe.json`, `targeted-route-fork.tap`,
+`resume-regression-route.tap`, `image-261d.safe.json`.
+
+### Contrôle MKV avec le même correctif
+
+Le préchargement de Lost est d'abord suspendu pour activité catalogue récente.
+Après expiration normale du signal, sans effacement de présence ni de verrou,
+il prépare 60 secondes en **18,109 s** (4 708 836 octets). Deux ouvertures
+authentifiées distinctes utilisent ensuite ce même préfixe :
+
+| Ouverture | Première lecture | Création authentifiée | Validation fraîche | Position atteinte |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 5,017 s | 4,125 s | 3,559 s | 64,050 s |
+| 2 | 3,178 s | 2,437 s | 1,783 s | 135,254 s |
+
+Les deux contrôles valident quatre plages et le même fichier ; la continuation
+dépasse la minute conservée. Une attente de **418 ms** survient à 16,174 s dans
+le premier essai, avec un `bufferStalledError` non fatal et huit images perdues
+sur 1 923. Le second présente une attente de **74,6 ms** à 78,086 s, aucune erreur
+HLS et cinq images perdues sur 4 059. Les deux preuves finales sont figées avant
+destruction du lecteur. Ces pauses brèves restent à expliquer ; le gel antérieur
+de 34 secondes n'est pas reproduit, sans que sa cause soit établie.
+
+Les essais emploient le Gateway et l'Edge réels dans le canary privé, des claims
+ordinaires et HLS.js dans le navigateur. Ils ne constituent pas encore une
+mesure du parcours public complet dans WatchPage. La voie MP4 native reste
+distincte et n'a pas bénéficié du préfixe HLS dans les essais précédents.
+Aucune écoute humaine ni garantie sur la totalité des films n'est revendiquée.
+
+Preuves : `route-repeat-browser-5-{1,2}.safe.json`,
+`route-repeat-create-5-{1,2}.safe.json`, `route-repeat-summary-5.safe.json`,
+`route-repeat-drain-final.safe.json`, `closure.safe.json`.
+
 ## État et critères d'activation
 
-**Non activé en production. Gain de démarrage mesuré sur Lost uniquement ;
+**Non activé en production. Gain de démarrage mesuré sur Lost et sur un MPEG-TS ;
 fluidité répétée et couverture multi-format encore insuffisantes.**
 PR760 conservée en brouillon. Les essais sont arrêtés par expiration ordinaire
 de leurs claims ; sessions, transports natifs, pompes et encodeurs du canary
 reviennent à zéro. Les deux Gateways de production restent sains et inactifs.
-Avant activation : réussite de la CI, capture réelle d'un préfixe, revalidation
-et consommation depuis zéro, réception au-delà du raccord, pistes et sous-titres
-préservés, puis interruption d'un travail de fond par une lecture réelle avec
-preuve de fermeture de la connexion précédente.
+La capture réelle, les validations fraîches répétées, la continuation et le
+drainage sont démontrés sur les deux copies ci-dessus ; la préemption réelle a
+été contrôlée auparavant. Avant activation : parcours public WatchPage, pauses
+brèves restantes et limites de routage, notamment MP4 natif, à traiter. Les
+graphes multiples ou sous-titres non couverts restent inéligibles.
 
 Le pilote ne précharge pas tout le catalogue. Le budget mémoire et les TTL
 existants imposent une sélection bornée. Une source durablement trop lente
