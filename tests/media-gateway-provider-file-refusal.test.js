@@ -24,7 +24,8 @@ async function runStartup(error, { aborted = false, cleanupFails = false } = {})
     const context = vm.createContext({
         session: {}, sessionRequestAbortController: { signal: { aborted } },
         ensureBoundedMkvInputPump: async () => { counts.prepares += 1; throw error; },
-        removeSessionDir: async () => { counts.cleanups += 1; if (cleanupFails) throw new Error('fixture cleanup failure'); },
+        stopSession: async () => { counts.cleanups += 1; if (cleanupFails) throw new Error('fixture cleanup failure'); },
+        removeSessionDir: async () => { throw new Error('directory removal cannot replace session drain'); },
         outputDir: '/fixture/output', sourceUrl: 'https://fixture.invalid/movie/private-account/private-secret/123.mkv',
         sanitizeLog: () => '[sanitized]',
         console: { warn: (_message, _safeText, details) => logged.push(JSON.parse(JSON.stringify(details))) },
@@ -113,10 +114,8 @@ test('aborted preparation preserves cancellation instead of reporting file refus
     await assert.rejects(runStartup(error, { aborted: true }), actual => actual === error);
 });
 
-test('failed temporary directory cleanup does not expose the upstream response', async () => {
-    const result = await runStartup({ code: 'PROVIDER_REQUEST_FAILED', upstreamStatus: 403 }, { cleanupFails: true });
-    assert.deepEqual(result.response, { status: 502, body: {
-        error: 'This media file is currently unavailable.', code: 'PROVIDER_FILE_REFUSED',
-    } });
+test('failed session cleanup delegates to outer failure handling before a provider response', async () => {
+    await assert.rejects(runStartup({ code: 'PROVIDER_REQUEST_FAILED', upstreamStatus: 403 }, { cleanupFails: true }),
+        error => error.message === 'fixture cleanup failure');
 });
 
