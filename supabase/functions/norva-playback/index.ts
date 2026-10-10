@@ -8987,10 +8987,9 @@ async function createGatewaySession(
   const startupStartedAt = performance.now();
   const originalTargetUrlHash = await sha256Hex(targetUrl);
   let preparedTargetUrlHash = originalTargetUrlHash;
-  const identityForTarget = async (resolvedUrl: string) => await sha256Hex(JSON.stringify([
-    "norva-vod-identity-v1", playbackIdentity.sourceId, playbackIdentity.itemType,
-    playbackIdentity.itemId, playbackIdentity.variantId || null, resolvedUrl,
-  ]));
+  const identityForTarget = (resolvedUrl: string) => vodPlaybackIdentityKey(
+    playbackIdentity.sourceId, playbackIdentity.itemType, playbackIdentity.itemId,
+    playbackIdentity.variantId || null, resolvedUrl);
   const vodIdentityKey = await identityForTarget(targetUrl);
   const initialSourceContainerAuthority = await sourceContainerAuthorityFromObservation(
     sourceContainerObservation,
@@ -16033,14 +16032,24 @@ function startupCacheOwnerAllowed(ownerKey: string): boolean {
   return Deno.env.get("PRIVATE_STARTUP_CACHE_ENABLED") === "true" && owners.includes(ownerKey);
 }
 
+async function vodPlaybackIdentityKey(sourceId: unknown, itemType: unknown, itemId: unknown,
+  variantId: unknown, targetUrl: string): Promise<string> {
+  return await sha256Hex(JSON.stringify([
+    "norva-vod-identity-v1", sourceId, itemType, itemId, variantId || null, targetUrl,
+  ]));
+}
+
 async function startupCacheTarget(db: SupabaseClient, userId: string, sourceId: string,
   itemType: string, itemId: string) {
   await requirePlaybackEntitlement(userId, db);
   await assertSourceCatalogVisible(sourceId, userId, db);
   const generation = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
   let profile: JsonRecord;
+  let variantId = "";
   if (itemType === "movie") {
-    profile = (await loadExactLanguageValidationProfile(db, userId, sourceId, itemId)).profile;
+    const exact = await loadExactLanguageValidationProfile(db, userId, sourceId, itemId);
+    profile = exact.profile;
+    variantId = exact.variantId;
   } else {
     // Never substitute a series' profile for one episode. Only the exact owned
     // item can attest its stream table; an unobserved episode is deferred.
@@ -16061,7 +16070,7 @@ async function startupCacheTarget(db: SupabaseClient, userId: string, sourceId: 
   await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
   const targetUrl = stringOr(resolved.targetUrl, ""); assertHttpUrl(targetUrl);
   const scope = "providerAccountScope" in resolved ? stringOr(resolved.providerAccountScope, "") : "";
-  return { resolved, profile, targetUrl, generation,
+  return { resolved, profile, variantId, targetUrl, generation,
     revision: await loadSourceConfigRevision(sourceId, userId, db),
     accountKey: providerAccountKeyFromUrl(targetUrl),
     accountHash: scope ? await sha256Hex(scope) : await providerAccountHashFromUrl(targetUrl),
@@ -16078,6 +16087,7 @@ async function startupCachePermitCurrent(db: SupabaseClient, permit: JsonRecord)
     const current = await startupCacheTarget(db, userId, sourceId, String(permit.itemType), String(permit.itemId));
     if ((await resolveSourceIdentity(sourceId, userId, db)).key !== permit.identityKey) return false;
     if (!current.accountKey || current.accountHash !== permit.accountHash
+      || (current.variantId || null) !== (permit.variantId || null)
       || current.revision !== permit.sourceRevision || current.profileFingerprint !== permit.profileFingerprint
       || await sha256Hex(current.targetUrl) !== permit.targetHash) return false;
     await assertProviderCircuitClosed(current.accountHash, db);
@@ -16159,7 +16169,7 @@ async function runStartupCachePreparation(req: Request, db: SupabaseClient): Pro
       p_identity_key: identityKey, p_lease_owner: leaseOwner, p_ttl_seconds: 180 });
     fileClaimed = !file.error && file.data === true;
     if (!fileClaimed) return { protocol: 1, prepared: false, reason: "provider-reserved" };
-    const permit = { userId, sourceId, itemType, itemId, leaseOwner, identityKey,
+    const permit = { userId, sourceId, itemType, itemId, variantId: target.variantId || null, leaseOwner, identityKey,
       accountHash: target.accountHash, sourceRevision: target.revision,
       profileFingerprint: target.profileFingerprint, targetHash: await sha256Hex(target.targetUrl) };
     if (!await startupCachePermitCurrent(db, permit)) return { protocol: 1, prepared: false, reason: "activity-changed" };
@@ -16173,8 +16183,8 @@ async function runStartupCachePreparation(req: Request, db: SupabaseClient): Pro
       mode: "transcode", seekOffset: 0, expiresAt: new Date(Date.now() + 180_000).toISOString(),
       playbackHint: { ...hints, streamType: itemType === "movie" ? "movie" : "series" }, ...hints,
       codecProfile: target.profile,
-      playbackIdentity: { sourceId, itemType, itemId, sourceRevision: target.revision,
-        vodIdentityKey: await sha256Hex(JSON.stringify(["norva-vod-identity-v1", sourceId, itemType, itemId, null, target.targetUrl])) } };
+      playbackIdentity: { sourceId, itemType, itemId, variantId: target.variantId || null, sourceRevision: target.revision,
+        vodIdentityKey: await vodPlaybackIdentityKey(sourceId, itemType, itemId, target.variantId, target.targetUrl) } };
     // Once dispatched, exclusion is released only on positive Gateway drain.
     releaseSafe = false;
     const response = await fetch(`${route.url}/startup-cache/prepare`, {
