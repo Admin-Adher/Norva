@@ -65,3 +65,33 @@ test('invalid token and multi-range do not touch the provider; close aborts pend
  const waiting=get(f.input.url,0,511).catch(()=>null);await new Promise(r=>setTimeout(r,30));await f.input.stop();await waiting;
  assert.equal(f.input.counters.activeSourceRequests,0);assert.equal(f.stats().maximum,1);
 });
+
+test('default native ranges limit header overfetch and preserve sixteen MiB of complete windows',async t=>{
+ const payload=Buffer.alloc(17*1024*1024,83),ranges=[];
+ const server=http.createServer((q,r)=>{
+  const m=/bytes=(\d+)-(\d+)/.exec(q.headers.range),start=Number(m[1]),end=Math.min(Number(m[2]),payload.length-1);
+  ranges.push([start,end]);
+  r.writeHead(206,{'Content-Length':end-start+1,'Content-Range':`bytes ${start}-${end}/${payload.length}`});
+  r.end(payload.subarray(start,end+1));
+ });server.listen(0,'127.0.0.1');await once(server,'listening');
+ const input=await createNativeInput(`http://127.0.0.1:${server.address().port}/file`);
+ t.after(async()=>{await input.stop();server.closeAllConnections();await new Promise(r=>server.close(r));});
+ for(let i=0;i<64;i++) {
+  const result=await get(input.url,i*256*1024,i*256*1024+127);
+  assert.equal(result.status,206);assert.deepEqual(result.body,Buffer.alloc(128,83));
+ }
+ assert.equal(ranges.length,64);assert.deepEqual(ranges[0],[0,256*1024-1]);
+ assert.equal(input.counters.maximumCachedBytes,16*1024*1024);
+ await get(input.url,0,127);assert.equal(ranges.length,64,'header survives the larger entry count');
+ await get(input.url,16*1024*1024,16*1024*1024+127);
+ await get(input.url,256*1024,256*1024+127);
+ assert.equal(ranges.length,66,'least recently used window is evicted at the byte bound');
+ assert.equal(input.counters.maximumCachedBytes,16*1024*1024);
+ assert.equal(input.counters.maximumConcurrentSourceRequests,1);
+ await input.stop();assert.equal(input.counters.cachedBytes,0);assert.equal(input.counters.activeSourceRequests,0);
+});
+
+test('native input rejects cache configurations exceeding its entry or byte budgets',async()=>{
+ await assert.rejects(createNativeInput('http://127.0.0.1/file',{windowBytes:2*1024*1024,cacheWindows:9}),/CACHE_BOUND/);
+ await assert.rejects(createNativeInput('http://127.0.0.1/file',{windowBytes:256*1024,cacheWindows:65}),/CACHE_BOUND/);
+});

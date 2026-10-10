@@ -58,4 +58,22 @@ Correction : `build.portable.unpackDirName=true` dans la version 26 utilisée om
 
 35 tests contrôleur/IPC/transport/assets réussissent sur cette correction, dont l'absence du runtime et l'annulation pendant une ouverture. Le premier test d'annulation attendait encore l'ancienne séquence sans précontrôle ; sa synchronisation attend maintenant l'entrée réelle dans `openInput`. Le nouveau paquet et sa résistance à une seconde ouverture restent à vérifier avant publication. Le portable inspecté précédemment ne sera pas publié.
 
-Reçus locaux ignorés par Git : `.codex-artifacts/windows-embedded-20261010/` (`diverse-baseline.safe.json`, `california-controls.safe.json`, `peaky-controls.safe.json`, `package-inspection.safe.json`, tests et contrôles CI). Aucune donnée de connexion ne fait partie du rapport ou du paquet. L'attachement PR757 a été refusé à la limite de 100 ; aucune pièce jointe retirée.
+## Optimisation des plages natives : comparaison à position constante
+
+Le propriétaire demande d'accélérer la préparation Windows. Après son arrêt explicite des lectures, deux essais séquentiels de la même copie Last Bullet / MAX OTT utilisent la même position 965 s, le même lecteur et le même trajet. Les claims, heartbeats, expiration et drainage ordinaires sont conservés. Le banc temporaire ne remplace pas la vérification du portable distribué.
+
+La mesure distingue headers, premier octet, corps complet, fin du corps et fermeture du ClientRequest. Les plages de 2 Mio reçoivent leur premier octet en 41–128 ms, mais terminent en 5,091–5,173 s ; fin du corps et fermeture sont presque immédiates après le dernier octet. Il n'y a donc pas cinq secondes de rétention après réception par le transport Electron. Le témoin local pleinement cadré répond également en quelques millisecondes sous Node24 et sous le vrai Node22 d'Electron39. Norva attend cependant chaque plage complète avant de la fournir à LibVLC, y compris pour une petite lecture d'en-têtes.
+
+| Last Bullet, reprise 965 s | Grandes plages 2 Mio | Plages 256 Kio |
+| --- | --- | --- |
+| Premier compteur d'image depuis entrée native | 44,287 s | 4,858 s |
+| Lecture ensuite | Témoin court | 153,624 s de progression observée |
+| Octets livrés par requête complète | 2 Mio | 256 Kio |
+| Connexions source en vol au maximum | 1 | 1 |
+| Connexions après fermeture | 0 | 0 |
+
+Les 64 derniers reçus de l'essai court montrent des plages complètes de 256 Kio en environ 113–143 ms dans les premières lignes conservées ; ce n'est pas une certification de toutes les plages antérieures, ni une attribution du ralentissement au fournisseur ou au relais. Le compteur `lostPictures` reste nul, l'audio est décodé, et la progression temporelle est observée ; la qualité à l'écoute reste non acceptée. Expiration HTTP200. L'essai A/B de 256 Kio conservait encore huit entrées (2 Mio) ; le code retenu conserve désormais jusqu'à 64 entrées, avec la même borne de **16 Mio** qu'avant.
+
+Correction Windows : petites plages complètes de 256 Kio, cache de session LRU limité à 64 entrées et 16 Mio, et statistiques temporelles numériques sans donnée de connexion. Aucun octet partiel admis, aucune requête supplémentaire en parallèle, ni modification des claims, du Gateway, de l'Edge ou du relais. Les deux nouveaux tests couvrent la réduction du surchargement d'en-têtes, la conservation et l'éviction à 16 Mio, et les configurations excédant la borne. **35 tests ciblés réussissent** sur contrôleur/IPC/transport/assets. La suite CI et le portable de cette nouvelle correction restent à vérifier ; le paquet `80c0367ad` inspecté correspond seulement à la correction de lancement précédente.
+
+Reçus locaux ignorés par Git : `.codex-artifacts/windows-embedded-20261010/` (`diverse-baseline.safe.json`, `california-controls.safe.json`, `peaky-controls.safe.json`, `package-inspection.safe.json`, `phase-app.safe.json`, `small-window-app.safe.json`, `phases-node.safe.json`, `phases-electron.safe.json`, tests et contrôles CI). Aucune donnée de connexion ne fait partie du rapport ou du paquet. L'attachement PR757 a été refusé à la limite de 100 ; aucune pièce jointe retirée.

@@ -7,12 +7,16 @@ const crypto = require('node:crypto');
 // LibVLC may ask for the beginning and the index concurrently. Bounded reads
 // release the source before another lane runs; no full-response deadlock and
 // never two provider requests. Bytes live only within this exact session.
-async function createNativeInput(sourceUrl, { windowBytes = 2 * 1024 * 1024, timeoutMs = 15000, cacheWindows = 8 } = {}) {
-    if (!Number.isSafeInteger(cacheWindows) || cacheWindows < 1 || cacheWindows > 8) throw Error('NATIVE_INPUT_CACHE_BOUND');
+async function createNativeInput(sourceUrl, { windowBytes = 256 * 1024, timeoutMs = 15000,
+    cacheWindows = Math.min(64, Math.floor(16 * 1024 * 1024 / windowBytes)) } = {}) {
+    if (!Number.isSafeInteger(cacheWindows) || cacheWindows < 1 || cacheWindows > 64
+        || cacheWindows * windowBytes > 16 * 1024 * 1024) throw Error('NATIVE_INPUT_CACHE_BOUND');
     if (!Number.isSafeInteger(windowBytes) || windowBytes < 1 || windowBytes > 2 * 1024 * 1024) throw Error('NATIVE_INPUT_WINDOW_BOUND');
     const token = crypto.randomBytes(24).toString('hex');
     let stopped = false, total = null, pending = Promise.resolve(), activeRequest = null;
     let validator = null, changed = false;
+    // Small complete ranges let LibVLC parse headers/index without waiting for
+    // an unrelated 2 MiB body. The byte budget stays 16 MiB, within this session.
     const cache = new Map(); // at most 16 MiB; only complete windows in this exact session
     const agents = { 'http:':new http.Agent({keepAlive:true,maxSockets:1}), 'https:':new https.Agent({keepAlive:true,maxSockets:1}) };
     const counters = { sourceRequests:0, maximumConcurrentSourceRequests:0, activeSourceRequests:0, completedBytes:0, cacheHits:0, cachedBytes:0, maximumCachedBytes:0, ranges:[] };
@@ -26,10 +30,13 @@ async function createNativeInput(sourceUrl, { windowBytes = 2 * 1024 * 1024, tim
         const result = await new Promise((resolve,reject) => {
             const transport = url.protocol === 'https:' ? https : http;
             let outcome = null, failure = null, responseBody, status = null;
+            let headersMs=null, firstByteMs=null, payloadCompleteMs=null, bodyEndMs=null, contentLength=null;
             const began = Date.now();
             const request = transport.get(url, {agent:agents[url.protocol],headers:{Range:`bytes=${start}-${end}`,'Accept-Encoding':'identity','User-Agent':'VLC/3.0.24 LibVLC/3.0.24'}}, response => {
                 responseBody=response;
                 status=response.statusCode;
+                headersMs=Date.now()-began;
+                if (/^\d+$/.test(String(response.headers['content-length']||''))) contentLength=Number(response.headers['content-length']);
                 const fail = code => { failure ||= Error(code); response.destroy(); request.destroy(); };
                 response.once('error', () => fail('NATIVE_INPUT_NETWORK'));
                 response.once('aborted', () => fail('NATIVE_INPUT_INCOMPLETE'));
@@ -52,11 +59,14 @@ async function createNativeInput(sourceUrl, { windowBytes = 2 * 1024 * 1024, tim
                 }
                 const expected=actualEnd-start+1, chunks=[];let length=0;
                 response.on('data',chunk=>{
+                    firstByteMs ??= Date.now()-began;
                     length+=chunk.length;
                     if(length>expected || length>windowBytes){fail('NATIVE_INPUT_OVERSIZE');return;}
                     chunks.push(chunk);
+                    if(length===expected)payloadCompleteMs=Date.now()-began;
                 });
                 response.once('end',()=>{
+                    bodyEndMs=Date.now()-began;
                     if(length!==expected){failure ||= Error('NATIVE_INPUT_INCOMPLETE');return;}
                     if(!failure)outcome={start,payload:Buffer.concat(chunks),total:size,identity};
                 });
@@ -68,7 +78,8 @@ async function createNativeInput(sourceUrl, { windowBytes = 2 * 1024 * 1024, tim
                 clearTimeout(deadline);counters.activeSourceRequests--;if(activeRequest===request)activeRequest=null;
                 if(stopped)failure ||= Error('NATIVE_INPUT_CLOSED');
                 counters.completedBytes += outcome?.payload?.length || 0;
-                counters.ranges.push({start,end,status,elapsedMs:Date.now()-began,bytes:outcome?.payload?.length||0,error:failure?.message||null});
+                counters.ranges.push({start,end,status,elapsedMs:Date.now()-began,headersMs,firstByteMs,payloadCompleteMs,bodyEndMs,contentLength,
+                    bytes:outcome?.payload?.length||0,error:failure?.message||null});
                 if(counters.ranges.length>64)counters.ranges.shift();
                 if(failure || !outcome)reject(failure || Error('NATIVE_INPUT_INCOMPLETE'));else resolve(outcome);
                 done();
