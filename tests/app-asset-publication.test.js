@@ -45,3 +45,19 @@ test('an existing immutable filename with different bytes fails publication', t 
   fs.writeFileSync(path.join(root,manifest.assets[0].url),'wrong');
   assert.throws(()=>fingerprint(root),/collision/);
 });
+
+test('every production Pages publisher preserves and verifies immutable application assets', () => {
+  const workflows = path.join(__dirname, '../.github/workflows');
+  const publishers = fs.readdirSync(workflows).filter(name => name.endsWith('.yml'))
+    .map(name => ({ name, text: fs.readFileSync(path.join(workflows, name), 'utf8') }))
+    .filter(({ text }) => text.includes('pages deploy public --project-name=norva-web --branch=main'));
+  assert.ok(publishers.length >= 2);
+  for (const { name, text } of publishers) {
+    const deploy = text.indexOf('pages deploy public --project-name=norva-web --branch=main');
+    const fingerprint = text.indexOf('run: node scripts/fingerprint-app-assets.cjs');
+    const verification = text.indexOf('run: node scripts/verify-app-deployment.cjs https://norva.tv');
+    assert.ok(fingerprint >= 0 && fingerprint < deploy, `${name}: unversioned application publication`);
+    assert.ok(verification > deploy, `${name}: delivery must be verified after publication`);
+    assert.match(text, /concurrency:\s*\r?\n\s+group: norva-web-production/, `${name}: publication race`);
+  }
+});
