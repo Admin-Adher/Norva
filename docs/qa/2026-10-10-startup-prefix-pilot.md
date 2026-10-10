@@ -1042,7 +1042,7 @@ le manifeste est régénéré dans `6da55dd90`, dont les contrats réussissent a
 Les paquets Android Phone, TV et Windows du code final réussissent. Ces constructions ne
 constituent pas une validation de lecture Android en émulateur.
 
-## État et critères d'activation
+## État et critères avant l'autorisation de déploiement
 
 **Non activé en production. Les deux reprises MP4 finales sont rapides (6,838
 et 5,241 s), leurs deux sauts attendent moins d'une seconde et chacune progresse
@@ -1068,3 +1068,213 @@ existants imposent une sélection bornée. Une source durablement trop lente
 épuisera le préfixe ; cette préparation ne multiplie pas son débit réseau.
 
 Runbook : `ops/hetzner/media/startup-cache.md`.
+
+## Activation autorisée et contrôles publics — 10 octobre, soir UTC
+
+PR760 intégrée sous `5d146d4030fa05c5afc28b3a9f2345374394763b`.
+Les contrats et les constructions Android Phone, TV et Windows réussissent.
+Le propriétaire du pilote est celui des accès privés déjà validés ; les sessions
+publiques et les copies testées ont été rapprochées en base sans exposer les
+identifiants, liens de lecture ou accès fournisseur dans ce rapport.
+
+Le Gateway pilote utilise l'image immuable
+`sha256:45c5e46cf5d9d6aab0ccd011c0f89d5a8c9108c127a88b8695cc632e3518f8f4`.
+Le Gateway principal conserve son image et ses paramètres. La préparation est
+limitée à un propriétaire et à deux fichiers du catalogue : Lost (MKV) et
+Minnal Murali (MPEG-TS). Les MP4 natifs réutilisent les données reçues pendant
+la lecture ; aucune minute HLS inutile n'est préparée pour cette route.
+Les budgets, droits, claims et priorité des lectures restent contrôlés.
+Les conteneurs précédents sont conservés arrêtés pour un retour arrière.
+
+### Déploiement initial incomplet, corrigé avant les rejeux
+
+Le premier contrôle public a trouvé une omission opératoire : seul le premier
+réplica Edge avait été aligné. Le second gardait l'ancien routage et le pilote
+désactivé. Une création pouvait ainsi atteindre le Gateway pilote, puis un
+heartbeat ou une fermeture atteindre le Gateway principal. Ce contrôle ne
+validait ni la continuité des droits natifs ni la capture du cache.
+
+Avant correction : Jolt démarre deux fois en 14,373 et 14,268 s, un premier
+essai échoue à 92 s de vidéo avec une erreur de lecture et un statut HTTP 410.
+La réouverture suivante attend 30,515 s ; les fermetures ne créent aucune entrée
+de cache. Vermines utilise encore la route principale et attend 47,615 s.
+Ces valeurs sont conservées comme échecs de déploiement, pas comme validation
+du pilote final ni comme preuve de responsabilité du fournisseur.
+
+À 21:26:50 UTC, `norva-edge-functions` **et** `norva-edge-functions-2` utilisent
+le même code et les mêmes gates/routage. Les propriétaires canary préexistants
+sont conservés ; un seul propriétaire peut utiliser cette optimisation.
+Les deux réplicas sont sains. Le runbook impose désormais cette vérification.
+
+### Cache MP4 public après alignement
+
+Vermines / MAX OTT / variante AR, fichier MP4 exact :
+
+- Première ouverture après alignement à 18 s : première image en 39,936 s,
+  sans données réutilisables au départ. Ce démarrage froid reste lent.
+- Fermeture normale : **17 039 360 octets conservés**, aucun rejet de capture.
+- Réouverture à 47 s : première image télémétrée en **5,246 s** ; progression
+  observée depuis le clic en **5,587 s**. Quatre échantillons frais sont acceptés.
+- Saut arrière et avant de 10 s : état prêt à lire observé respectivement en
+  **0,353 et 0,350 s**. Ce sont des bornes d'observation, pas des mesures image
+  par image du raccord ni des sauts hors de la couverture conservée.
+- Après le dernier saut, progression de 54,543 à **207,138 s** de vidéo.
+  Des données nouvelles sont reçues ; la lecture dépasse le cache.
+- **Une interruption est observée au-delà du cache** : readyState descend à 2
+  et le temps vidéo reste inchangé pendant au moins 2,119 s dans une fenêtre
+  échantillonnée. Entre 83,562 et 96,519 s de vidéo, 19,394 s de temps réel
+  s'écoulent. Les fenêtres ultérieures 144–159 et 194–207 s progressent normalement.
+  L'absence de gel durable sur le film entier n'est pas démontrée.
+- Fermeture finale : 32 Mio conservés, deux captures, un cache hit et aucune
+  invalidation ; transports revenus à zéro. Aucune écoute humaine revendiquée.
+
+### Publication de l'application
+
+La publication initiale et son rejeu Cloudflare ont téléchargé les assets,
+mais leur contrôle final échoue : un asset renvoie parfois la page HTML,
+puis `/app` ne correspond plus au manifeste d'empreintes. L'enquête trouve
+la publication automatique du blog : elle publie le même `public/` sans
+empreintes, sous un groupe de concurrence différent.
+
+PR761 corrige les deux publishers : même groupe de publication, empreintes
+immuables et contrôle des octets également pour le blog. Quatre tests locaux
+de publication réussissent, contrats CI réussis avant intégration sous
+`c7a8fc19fb17cb817028ab64ee834cf75939ec7a`.
+Le succès d'upload seul n'est jamais présenté comme une publication vérifiée.
+
+Les anciennes URL immuables restent contaminées dans certains chemins CDN par
+la réponse HTML de la publication concurrente. PR762 conserve les octets et
+les empreintes, mais publie sous un nouvel espace de noms `app-v2`. Intégration
+sous `8b764e3c5713fdfc733ec17a8800ab10bc067d8f` ; publication Cloudflare
+`38088624096` **réussie, y compris le contrôle des octets livrés**. Cinq tests
+de publication réussissent. Les fenêtres de test suivantes sont rechargées.
+
+### Préchargement hors présence
+
+Le worker respecte l'activité du compte. Les premières tentatives rendent
+`account-presence` et n'ouvrent aucun transport de préparation. La fonction
+`provider_account_busy` utilise une fenêtre de cinq minutes ; aucune présence,
+réservation ou lease n'est supprimée pour accélérer le test. La fermeture
+normale du navigateur de test laisse cette fenêtre expirer.
+
+Après expiration naturelle, les deux préfixes sont réellement préparés,
+sans échec ni transport résiduel. Les premières ouvertures publiques exactes
+n'enregistrent aucun hit du préfixe. Lost / MAX OTT reprend à **136 secondes**,
+au-delà de la minute préparée ; son temps local à zéro n'est pas le début du
+fichier. Minnal Murali / Dino démarre depuis zéro, mais après expiration de
+l'ancien préfixe. Ces essais ne permettent pas de valider le préchargement.
+
+### Raccord de l'identité catalogue
+
+La préparation construisait l'identité VOD avec une variante nulle ; la lecture
+ordinaire depuis le menu Versions inclut l'identifiant de la variante exacte.
+Ces deux clés diffèrent même pour le même fichier. PR763 utilise la même
+fonction d'identité, reprend la variante du profil possédé et vérifie encore
+cette variante lors du renouvellement du permis. Un test couvre l'identité
+commune, la différence avec l'ancienne clé nulle et le refus d'une autre
+variante. **47 tests ciblés réussissent** après adaptation du contrat existant.
+PR763 intégrée sous `b51e88fc107bef331ef1073628170f7924f11f82`, **6 374 tests
+CI réussis, 35 ignorés**. Les deux réplicas Edge sont mis à jour à 21:54:57 UTC,
+sans redémarrage du Gateway ni changement des autres fonctions. La nouvelle
+publication Cloudflare `38089416640` réussit également.
+
+### Témoins publics avant ce dernier raccord
+
+- Lost / Strng / MKV (autre copie que celle préparée) : première image
+  télémétrée en 4,368 s, progression jusqu'à 125,109 s. Ce n'est pas une preuve
+  de préchargement ni une reprise validée.
+- Lost / MAX OTT / MKV (copie préparée exacte) : reprise à 136 s, donc hors du
+  préfixe zéro ; premières images à 16,624 puis 17,529 s. Préparation serveur
+  de 16,318 s sur la deuxième ouverture ; le lecteur attend ensuite sa réserve.
+  Aucune reprise rapide revendiquée sur ces deux ouvertures.
+- Minnal Murali / Dino / TS (copie exacte) : lecture observée en 7,586 s,
+  progression jusqu'à 175,678 s sans erreur vidéo observée. Deux déplacements
+  de dix secondes, pendant une pause volontaire, sont prêts en 0,372/0,353 s.
+  Ils ne constituent pas une mesure de raccord en lecture. La fenêtre continue
+  échantillonnée de vingt secondes progresse normalement, readyState=4.
+
+Les copies exactes sont rapprochées en base avec leur compte et leur source.
+Les essais précédant ce raccord ne valident pas sa réutilisation publique.
+
+Après le raccord, une nouvelle préparation reste différée sur Lost par la
+présence fournisseur. Minnal Murali est refusé avec
+`exact-file-evidence-unavailable` : le profil visible est désormais une
+observation `gateway_inband`, `metadataComplete=false`, avec une piste audio
+et aucun sous-titre, au lieu du profil complet de la préparation antérieure.
+La taille reste connue. Cette observation partielle n'est pas promue en preuve
+complète pour contourner le refus. La couverture du préchargement public
+n'est donc pas annoncée comme validée sur tous les formats.
+
+### Reprise MP4 supplémentaire après les corrections publiques
+
+Jolt / Strng / copie KU exacte : première ouverture à 125 s, sans fenêtre
+réutilisable, première image en **20,012 s**. Après progression jusqu'à
+147,859 s et fermeture normale, une troisième capture MP4 est enregistrée.
+Réouverture à 148 s : première image en **5,571 s**, progression observée
+en **5,568 s**. Le compteur de cache input passe de un à deux hits ; la
+validation fraîche accepte quatre échantillons, la même taille et la même
+cible. Aucun droit périmé n'est utilisé.
+
+Sauts de dix secondes **pendant la lecture** : arrière prêt et en progression
+en **0,492 s**, avant en **0,349 s**. Les mesures sont des bornes d'observation
+par appels UI/DOM, pas des mesures de chaque image. La lecture reste active.
+Après le dernier saut à 155,070 s, elle progresse jusqu'à **313,071 s**, soit
+**158 secondes de média supplémentaires**, au-delà des octets conservés.
+Dans les fenêtres échantillonnées, aucune readyState inférieure à 3 ni erreur
+vidéo n'est observée. Entre 169,774 et 313,071 s, 143,292 s de temps réel
+s'écoulent pour 143,297 s de média. Ce contrôle n'est pas une écoute humaine ni
+une certification de chaque image du film entier.
+
+### Réouverture MPEG-TS : limite reproduite en production
+
+Minnal Murali / Dino / même fichier à environ 176 s : la réouverture retrouve
+une candidate, mais la lecture fraîche de validation est indisponible.
+Le diagnostic est `fresh-read-unavailable`, zéro échantillon frais accepté,
+un miss et une invalidation supplémentaires. Cela **ne démontre pas** que le
+fichier fournisseur a changé. Aucune donnée non validée n'est publiée.
+Le démarrage effectif via le parcours normal est observé en **49,371 s**.
+La première image est télémétrée en 39,452 s ; elle précède la progression.
+Une fenêtre ultérieure de 17,845 s progresse de 20,624 à 38,468 s localement,
+readyState=4, sans erreur. La reprise rapide MPEG-TS n'est pas validée.
+
+### Conclusion de la validation publique
+
+Le pilote est déployé et reste limité au propriétaire autorisé. La réutilisation
+de données MP4 est démontrée sur deux fichiers réels : **Vermines et Jolt**.
+Les sauts courts restent rapides dans la couverture déjà chargée. Jolt dépasse
+deux minutes après les sauts avec une progression régulière dans le contrôle ;
+Vermines présente une interruption au-delà de la fenêtre conservée.
+
+Lost / MAX OTT attend encore lors d'une reprise hors du préfixe zéro. Minnal
+Murali démarre rapidement depuis zéro, mais sa reprise peut encore retomber sur
+une préparation de 49 s. Le raccord d'identité catalogue est corrigé et déployé,
+mais son préchargement zéro après nouvelle préparation publique reste à prouver.
+Le worker respecte la présence et refuse les preuves de fichier incomplètes.
+Il ne précharge que les deux cibles du pilote ; aucun catalogue général n'est
+téléchargé et aucun compte supplémentaire n'est inscrit.
+
+La validation **ne permet pas** de déclarer tous les formats rapides et fluides
+ni de généraliser. Aucune attribution certaine au fournisseur ou au relais,
+aucune écoute humaine et aucune mesure exhaustive des images perdues ne sont
+revendiquées. Les ouvertures Android natives ne sont pas rejouées cette phase ;
+leurs constructions CI ne sont pas présentées comme des tests de fluidité.
+
+À la clôture vers 22:03 UTC : les deux Gateways et les deux réplicas Edge
+répondent sainement ; zéro lecture publique active et zéro pompe brute sur
+les deux Gateways. Les admissions de fond sont rétablies, le dispatcher et le
+worker Selection continuent normalement. Aucune lease forcée. Le worker de
+préchargement reste borné au pilote, sans préparation active à cet instant.
+
+### Preuves locales de cette phase
+
+Répertoire ignoré `.codex-artifacts/startup-cache-20261010/` :
+`final-deployment.safe.json` (receipt distant),
+`final-edge2-deployment.safe.json` (receipt distant),
+`final-edge2-inventory.remote.py.safe.json`,
+`final-routing.remote.py.safe.json`, `final-cache-status.remote.py.safe.json`,
+`final-telemetry.safe.json`, `final-prefix-attempt.remote.py.safe.json` et
+`final-presence-policy.remote.py.safe.json`.
+Également : `final-identity-edge.safe.json`, `final-jolt-cache.safe.json`,
+`final-profile.remote.py.safe.json` et `final-status.remote.py.safe.json`.
+Les fichiers privés contenant la configuration complète ou des accès restent
+hors Git et ne sont pas liés dans le rapport public.
