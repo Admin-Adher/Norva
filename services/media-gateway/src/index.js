@@ -4355,7 +4355,14 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 // A TS decoder may still request its longer keyframe pre-roll
                 // after reading the first body. Finish this bounded transfer
                 // before growing steady playback to the normal 8 MiB windows.
-                finiteInitialSequentialWindowBytes: claims.nativeContainer === 'ts' ? 2 * 1024 * 1024 : 256 * 1024,
+                // A browser MP4 may need several MiB of tail index before its
+                // first frame. After the small seek-confirmation window, avoid
+                // paying a fresh provider RTT for every 256 KiB of that index.
+                // Keep the experiment inside the startup-cache owner pilot;
+                // native recovery clients retain their existing window policy.
+                finiteInitialSequentialWindowBytes: claims.nativeContainer === 'ts' ? 2 * 1024 * 1024
+                    : claims.scope === 'native-browser-mp4' && canUseStartupCache(entry.ownerHash)
+                        ? 1024 * 1024 : 256 * 1024,
                 finiteSequentialGrowthBytes: 2 * 1024 * 1024,
                 // Native extractors read the header, then tail/index, then the
                 // resume position. Complete a bounded header before the first
