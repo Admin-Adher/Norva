@@ -2357,7 +2357,7 @@
     _startPump() {
       if (this._pumpRunning || this._fatalSignaled) return;
       this._pumpRunning = true; this._stopRequested = false; this.ended = false;
-      this._pump().catch((e) => {
+      this._pumpPromise = this._pump().catch((e) => {
         if (this.destroyed) return;
         const code = e && typeof e.code === 'string' ? e.code : '';
         const isAudioTimelineFailure = code.startsWith('AUDIO_');
@@ -2389,14 +2389,17 @@
           try { this._ac.abort(); } catch (_) {}
           try { this.onFatal(e); } catch (_) {}
         }
-      }).finally(() => { this._pumpRunning = false; });
+      }).finally(() => { this._pumpRunning = false; this._pumpPromise = null; });
     }
 
     async _stopPump() {
       this._stopRequested = true;
       if (this._gate) { this._gate(); this._gate = null; }
-      let guard = 0;
-      while (this._pumpRunning && guard++ < 2000) await new Promise((r) => setTimeout(r, 5));
+      // A network read can outlast the former 10 s polling guard. Resetting the
+      // muxer/demuxer while that worker call is still pending mixes two seek
+      // generations. The existing fetch deadline/abort bounds the read; its
+      // actual completion is the barrier before reusing the decoder context.
+      if (this._pumpPromise) await this._pumpPromise;
     }
 
     async _pump() {
@@ -2408,6 +2411,7 @@
         if (this._bufferedAhead() > BUFFER_AHEAD_MAX) { await this._waitForDrain(); continue; }
         let packets;
         [res, packets] = await lib.ff_read_frame_multi(this.fmtCtx, this.pkt, { limit: 512 * 1024 });
+        if (this._stopRequested || this.destroyed) return;
         const writeList = [];
         // Process the video stream FIRST in each batch, so its keyframe gate anchors vBase before any
         // audio in the same batch is evaluated (keeps fresh-start audio while letting a mid-GOP resume

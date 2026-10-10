@@ -1,0 +1,171 @@
+{
+  "status": "draft_prototype_not_deployed",
+  "atUtc": "2026-10-10T09:36:40.968752+00:00",
+  "baseCommit": "4ee7f4f0dc113b386cfbd3c77ade180ad4ade7e0",
+  "pullRequest": "https://github.com/Admin-Adher/Norva/pull/756",
+  "problem": "The former 10 s polling guard could finish before an unresolved worker read. Seek could then reset a decoder context still owned by that read.",
+  "change": "Await the actual pump completion and discard packets returned after stop before capture or mux writes.",
+  "unitTests": {
+    "passed": 139,
+    "failed": 0,
+    "skipped": 0,
+    "new": 3,
+    "groupsOverlapEarlierReports": true
+  },
+  "before": {
+    "source": "current PR756 code",
+    "syntheticClock": true,
+    "guardTicks": 2000,
+    "nominalWaitMs": 10000,
+    "measuredTestMs": 11.895800000000001,
+    "stopReturnedWhilePumpRunning": true,
+    "pendingReadResolved": false,
+    "runningAfterReadResolved": false
+  },
+  "realLibAVControlledRead": [
+    {
+      "realLibAV": true,
+      "syntheticNetwork": true,
+      "holdMs": 12235.2807,
+      "returnedAt11s": false,
+      "stillRunningAt11s": true,
+      "stopElapsedMs": 11014.224900000001,
+      "ended": true,
+      "outputBytes": 17744103,
+      "byteIdentical": true,
+      "subtitlesIdentical": true,
+      "hash": "06e49bbac2f43f0fee6228944b88c5fc61c493cd64986d60a4bddcff5d9f07ff"
+    }
+  ],
+  "browser": [
+    {
+      "case": "bframes",
+      "firstFrameMs": 1376.2999998569503,
+      "seekTarget": 18,
+      "bufferAtSeek": [
+        [
+          0,
+          30.614013
+        ]
+      ],
+      "seekToPlayingMs": 72,
+      "gaps": [
+        {
+          "ms": 2134,
+          "gapMs": 757.5999999999985,
+          "mediaFrom": 0.656,
+          "mediaTo": 0.697,
+          "sinceSeek": 19273.5,
+          "hidden": false
+        }
+      ],
+      "errors": [],
+      "muted": true
+    },
+    {
+      "case": "ass51",
+      "firstFrameMs": 1217.300000000003,
+      "seekTarget": 18,
+      "bufferAtSeek": [
+        [
+          0,
+          7.994
+        ]
+      ],
+      "seekToPlayingMs": 5723,
+      "gaps": [
+        {
+          "ms": 1957,
+          "gapMs": 739.2999999999956,
+          "mediaFrom": 0.656,
+          "mediaTo": 0.697,
+          "sinceSeek": 15157.800000047682,
+          "hidden": false
+        }
+      ],
+      "errors": [],
+      "muted": true
+    }
+  ],
+  "audio": {
+    "atUtc": "2026-10-10T09:31:40.823Z",
+    "result": [
+      {
+        "file": "after-stop.mp4",
+        "sha256": "06e49bbac2f43f0fee6228944b88c5fc61c493cd64986d60a4bddcff5d9f07ff",
+        "audio": [
+          {
+            "codec_name": "aac",
+            "profile": "LC",
+            "sample_rate": "48000",
+            "channels": 2
+          }
+        ],
+        "exitCode": 0,
+        "errors": 0
+      },
+      {
+        "file": "witness.mp4",
+        "sha256": "06e49bbac2f43f0fee6228944b88c5fc61c493cd64986d60a4bddcff5d9f07ff",
+        "audio": [
+          {
+            "codec_name": "aac",
+            "profile": "LC",
+            "sample_rate": "48000",
+            "channels": 2
+          }
+        ],
+        "exitCode": 0,
+        "errors": 0
+      }
+    ],
+    "listeningAccepted": false
+  },
+  "cleanup": {
+    "atUtc": "2026-10-10T09:36:40.964757+00:00",
+    "files": [
+      {
+        "file": "stereo.mkv",
+        "bytes": 19640098,
+        "sha256": "65841e0e2195849c06f01530588c9d38597f436c33476347c1b9b4aebe361ace"
+      },
+      {
+        "file": "bframes.mkv",
+        "bytes": 6497739,
+        "sha256": "9879f8a3b88e4edc1f290f9a08c3f0d6e95cc77a7b49f813dd3e77abc16e3f30"
+      },
+      {
+        "file": "ass51.mkv",
+        "bytes": 6044331,
+        "sha256": "ab8be6e7ace6f9271c4832270a8c6f7fc5b97410fd10b1e1a005381b979137be"
+      },
+      {
+        "file": "cues.srt",
+        "bytes": 207,
+        "sha256": "f6c884b3220f1bcc894631592b735d0b5beb1344f109541e7557b3c799ce8d86"
+      },
+      {
+        "file": "after-stop.mp4",
+        "bytes": 17744103,
+        "sha256": "06e49bbac2f43f0fee6228944b88c5fc61c493cd64986d60a4bddcff5d9f07ff"
+      },
+      {
+        "file": "witness.mp4",
+        "bytes": 17744103,
+        "sha256": "06e49bbac2f43f0fee6228944b88c5fc61c493cd64986d60a4bddcff5d9f07ff"
+      }
+    ],
+    "remainingMedia": []
+  },
+  "productionChanged": false,
+  "providerMediaCalls": 0,
+  "progressiveRangesEnabledByDefault": false,
+  "realVodGainValidated": false,
+  "limitations": [
+    "Fixtures, not new provider playback trials.",
+    "Initial browser frame gaps of approximately 0.74-0.76 s remain in these cases.",
+    "One seek was inside the existing full buffer; only the ASS case exercises a decoder seek beyond available data.",
+    "No acceptance by listening.",
+    "A pending read may still take its existing network deadline to settle."
+  ]
+}
