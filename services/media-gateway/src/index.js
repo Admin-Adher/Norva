@@ -4403,7 +4403,10 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 // opening and the interrupted-reader release grace.
                 finiteWarmupWindowBytes: 128 * 1024,
                 finiteWarmupCueGraceMs: 0, finiteResumeRanges: resumeRanges,
-                finiteCacheBytes: 32 * 1024 * 1024,
+                // Keep recent browser keyframes while its download runs ahead.
+                // This active pilot budget does not enlarge retained input.
+                finiteCacheBytes: claims.scope === 'native-browser-mp4' && canUseStartupCache(entry.ownerHash)
+                    ? 64 * 1024 * 1024 : 32 * 1024 * 1024,
                 completedReleaseDelayMs: 0, supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
                 finiteSeekContinuationGraceMs: 50,
                 finiteAbandonedDrainMs: claims.nativeContainer === 'ts' ? 1500 : 750,
@@ -4449,6 +4452,7 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                         interruptedProviderFetches: broker.interruptedProviderFetches,
                         resumeRangeReusedBytes: broker.resumeRangeReusedBytes,
                         recentInputSeededBytes: broker.recentInputSeededBytes,
+                        cacheHits: broker.cacheHits, cacheEvictions: broker.cacheEvictions,
                         windowTrace: broker.windowTrace.slice(0, 12),
                         lastWindows: broker.windowTrace.slice(-12) }));
                     entry.ac.signal.removeEventListener('abort', abortEntry); releaseRawPump(pump);
@@ -4508,6 +4512,10 @@ app.get('/sessions/:id/native.mp4', async (req, res) => {
             if (!res.destroyed) await pipeNativeMp4(req, res, entry, resource);
         } finally { entry.readers -= 1; }
     } catch (error) {
+        console.info(JSON.stringify({ event: 'native_mp4_request_failed',
+            status: error.status || 502,
+            reason: /^[A-Z_]{1,64}$/.test(error.code || error.message || '') ? (error.code || error.message) : 'NATIVE_REQUEST_FAILED',
+            closed: Boolean(entry?.closed), closeReason: entry?.closeReason || null }));
         if (entry) await nativeMp4Sessions.close(entry, 'native_request_failed').catch(() => {});
         if (!res.headersSent) res.status(error.status || 502).end();
         else res.destroy();
@@ -6440,7 +6448,9 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 // its requested bytes and remains responsible for PTS seeking.
                 // Stop at an already cached suffix instead of downloading it
                 // again when a backwards step just misses that cache entry.
-                if (context.finiteSeekLookbehindBytes > 0) {
+                // All finite readers can start just before a cached suffix.
+                // Fetch only the gap, then serve the complete cached suffix.
+                {
                     for (const entry of context.finiteCache.values()) {
                         if (entry.start > finiteWindowRange.start && entry.start <= finiteWindowRange.end) {
                             finiteWindowRange.end = entry.start - 1;

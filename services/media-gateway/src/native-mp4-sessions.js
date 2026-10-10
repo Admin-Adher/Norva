@@ -17,6 +17,7 @@ function createNativeMp4Sessions({ allows, open, now = Date.now, leaseMs = 60_00
         if (!entry) return;
         if (!entry.closed) {
             entry.closed = true;
+            entry.closeReason = reason;
             try { entry.resource?.prepareClose?.(reason); } catch (_) { /* Optional cache capture cannot prevent revocation. */ }
             entry.ac.abort();
             entry.closing = (async () => {

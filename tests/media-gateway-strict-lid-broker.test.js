@@ -867,6 +867,25 @@ test('native finite TS far seek: serialized broker preserves decoded media witho
   }
 });
 
+test('finite MP4 seek fetches only the gap before a complete cached suffix', async (t) => {
+  const data = Buffer.from(Array.from({ length: 128 }, (_, i) => i));
+  const calls = [];
+  const provider = http.createServer((req, res) => { calls.push(req.headers.range); sendExactRange(req, res, data); });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: data.length,
+    pathPrefix: 'finite-mkv-seek', dispatcher: null, finiteWindowBytes: 32,
+    finiteCacheBytes: 128, releaseDelayMs: 0 });
+  t.after(() => broker.close());
+  for (const [start, end] of [[64,95],[60,95],[58,100]]) {
+    const response = await fetch(broker.inputUrl, { headers: { Range: `bytes=${start}-${end}` } });
+    assert.equal(response.headers.get('content-range'), `bytes ${start}-${end}/128`);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), data.subarray(start,end+1));
+  }
+  assert.deepEqual(calls, ['bytes=64-95','bytes=60-63','bytes=58-59','bytes=96-100']);
+  assert.equal(broker.interruptedProviderFetches,0);
+});
+
 test('finite TS lookbehind returns only requested bytes and reuses backwards timestamp searches', { timeout: 8000 }, async (t) => {
   const data = Buffer.from(Array.from({ length: 128 }, (_, i) => i));
   const calls = [];
