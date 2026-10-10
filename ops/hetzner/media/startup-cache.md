@@ -66,7 +66,7 @@ Dans le seul pilote propriétaire du préchargement, le transport `native-browse
 essaie des plages séquentielles initiales de 1 Mio au lieu de 256 Kio, après
 sa petite lecture de confirmation. Cela réduit les allers-retours nécessaires
 aux index MP4 situés en fin de fichier. Le premier sondage, la sérialisation,
-les contrôles d'identité et le budget mémoire restent inchangés. Les clients
+les contrôles d'identité restent inchangés. Les clients
 natifs Windows/Android et les autres comptes gardent leur politique actuelle.
 Dans ce même périmètre, une demande explicite de fin de fichier de 4 Mio au
 plus peut être regroupée après le sondage initial, pour recevoir l'index MP4
@@ -75,6 +75,19 @@ ne finissant pas à EOF gardent le découpage ordinaire. Une seule connexion
 fournisseur et la validation intégrale avant mise en cache restent obligatoires.
 Ce réglage est expérimental : les sauts MP4 réels restent irréguliers, et il ne
 crée pas de minute MP4 préchargée.
+
+Dans ce même pilote, la fenêtre active du broker MP4 passe à **64 Mio** pour
+conserver les images clés récentes lorsque la réception avance devant le lecteur.
+La base et le plafond séquentiels passent à **2 Mio**, avec première plage de
+256 Kio et première continuation de 1 Mio ; la fin d'index explicite reste bornée
+à 4 Mio. La base doit aussi être réglée : un plafond inférieur à la base est
+normalisé vers celle-ci par le broker. Cela borne les données abandonnées lors
+d'un saut, au prix de davantage d'allers-retours. Le cache conservé après
+fermeture reste à **32 Mio**, dans son budget global et TTL existants.
+Les lecteurs finis, y compris MP4, ne relisent plus un suffixe complet déjà
+présent : ils reçoivent seulement le trou puis réutilisent ce suffixe. Aucun
+trou ni fragment interrompu n'est déclaré valide. Ces réglages ne garantissent
+pas que le débit fournisseur reste suffisant pendant toute la lecture.
 
 Dans le même pilote, une fermeture ordinaire de `native-browser-mp4` conserve
 désormais jusqu'à 32 Mio de plages complètes dans le cache privé de reprise

@@ -5,7 +5,8 @@
 Implémenter sur le pilote une préparation des 60 premières secondes lorsque le
 compte fournisseur est libre, avec priorité à toute lecture utilisateur.
 Prototype fondé sur le Gateway et le cache de reprise déjà déployés ; aucun AVPlayer/libmedia,
-aucune interface ou application native modifiée.
+aucun nouveau lecteur externe ni application native modifiée. La dernière suite
+corrige aussi le nettoyage de la ressource vidéo dans WatchPage.
 
 ## Code
 
@@ -926,16 +927,132 @@ Les contrôles supplémentaires passent : 29 tests d'index/réutilisation/accès
 puis 156 tests du broker, cinq ignorés. Aucun changement de WatchPage ni de
 client Android n'est introduit par ce raccordement backend.
 
+## Suite MP4 : sauts, fermeture et reprise réelle
+
+Les commits `4ee31773c`, `9153f88e9`, `6da55dd90` et `e48a8e29b` prolongent
+le raccordement au cache réel, sans déploiement en production.
+
+### Corrections et périmètre
+
+- Le lecteur fini MP4 reçoit seulement le trou avant une plage complète déjà
+  en cache, puis réutilise son suffixe. Cette règle, auparavant conditionnée au
+  recul TS, évite sa relecture. Le contrôle d'intégration vérifie les octets
+  exacts et les seules plages fournisseur manquantes, sans interruption.
+- Le broker actif du seul pilote `native-browser-mp4` conserve **64 Mio** au
+  lieu de 32 Mio. La capture entre sessions reste à **32 Mio**, dans le budget
+  global et le TTL privés existants. Les clients natifs gardent leurs limites.
+- La base et le plafond séquentiels MP4 du pilote sont **2 Mio**, pour borner
+  les transferts inachevés abandonnés lors d'un saut. La première plage reste
+  256 Kio, la première continuation 1 Mio, l'index terminal explicite 4 Mio.
+  Le premier réglage du seul plafond à 2 Mio était normalisé vers la base de
+  8 Mio ; `e48a8e29b` corrige aussi la base. Les premiers fichiers de preuve
+  nommés `mp4-2m-final-*` correspondent donc encore à **8 Mio**, sans prétendre
+  mesurer le réglage final de 2 Mio.
+- WatchPage retire l'attribut `src` à la fermeture. Assigner une chaîne vide
+  pouvait sélectionner l'URL du document. Les erreurs d'une ressource encore
+  détachée ou remplacée sont ignorées ; une erreur sur la ressource courante
+  conserve son parcours de récupération. Tests des deux cas et du nettoyage.
+
+### Fiabilité du banc
+
+La protection expérimentale de réserve après saut a été retirée : les commandes
+exécutent le WatchPage réel. Deux événements `waiting` imbriqués pouvaient aussi
+laisser une ancienne attente ouverte dans le compteur ; `playing` termine
+maintenant toutes les attentes ouvertes. Les anciens chiffres artificiellement
+croissants ne sont pas des durées de gel validées. Les grandes pauses de
+Vermines ci-dessous sont, elles, corroborées par les intervalles d'images.
+
+Une fermeture puis réouverture immédiate du banc pouvait demander `/start`
+avant la fin de son expiration `/stop`. Le helper renvoyait alors l'ancienne
+capacité, refusée avec HTTP 410. La fermeture est désormais attendue avant la
+création suivante, comme le fait la destruction des sessions dans WatchPage.
+Il ne s'agissait pas d'une copie soudain devenue incompatible. Le contrôle
+corrigé rouvre Jolt en **5,823 s**, sans erreur, avec sauts de **0,349 / 0,090 s**
+et **128,36 s** de progression après le dernier saut. Cet essai utilise encore
+les fenêtres de 8 Mio ; aucune réparation de ce défaut propre au banc n'est
+attribuée à la production.
+
+### Contrôles intermédiaires
+
+Avec suffixes réutilisés et fenêtre active de 64 Mio, Jolt rouvre en **6,155 s**,
+puis attend **0,464 / 0,212 s** sur les deux sauts. Il parcourt **124,90 s** après
+le dernier saut sans nouvelle attente, avec cinq images perdues sur 5 298.
+Le broker réinjecte **23 184 474 octets**, compte 466 accès au cache et reçoit
+ensuite **105 754 085 nouveaux octets**. Cela prouve la continuation au-delà
+du cache, et pas seulement la première image. Une reprise ultérieure rouvre en
+5,823 s et confirme ce parcours comme indiqué ci-dessus.
+
+Vermines, avec les mêmes fenêtres séquentielles de 8 Mio, reprend en **5,414 s**
+et passe les premiers sauts en **0,063 / 0,055 s**, mais s'interrompt ensuite
+**30,374 / 10,480 / 16,834 / 22,719 s**. Ce résultat défavorable reste conservé.
+Un autre essai Jolt à 8 Mio comporte un saut de **9,269 s**. Ces essais ne
+permettent pas de généraliser les premiers sauts rapides à toutes les positions.
+
+### Contrôles du réglage final
+
+Claims ordinaires Edge/Gateway isolés, fichiers MP4 H.264/AAC du catalogue,
+cache réel de fermeture puis quatre échantillons frais à la réouverture.
+Les positions et conditions diffèrent des essais historiques : aucun ratio
+causal de gain entre ces séries n'est revendiqué.
+
+| Copie MP4 | Départ froid | Réouverture | Saut arrière / avant | Progression après dernier saut |
+| --- | --- | --- | --- | --- |
+| Jolt, H.264/AAC | 11,150 s | **6,838 s** | **0,221 / 0,103 s** | **146,45 s**, aucune nouvelle attente ni grande coupure d'image mesurée |
+| Vermines, H.264/AAC | 23,134 s | **5,241 s** | **0,179 / 0,790 s** | **146,09 s**, aucune nouvelle attente ni grande coupure d'image mesurée |
+
+Jolt réinjecte **18 990 170 octets**, avec 354 accès au cache, puis reçoit
+**82 597 076 nouveaux octets**. Vermines réinjecte **19 136 512 octets**, avec
+472 accès au cache, puis reçoit **57 037 463 nouveaux octets**. Les fenêtres
+séquentielles de **2 097 152 octets** sont constatées dans les journaux de
+transport, pas seulement dans la configuration. Trois et deux transferts sont
+interrompus respectivement, notamment lors des sauts/fermetures ; aucune réponse
+incomplète n'est publiée comme plage valide. Les validations fraîches et la
+capacité révoquée restent obligatoires.
+
+Les deux dernières reprises ne signalent aucune erreur vidéo. Le départ froid
+de Jolt comporte une attente de 0,564 s ; celui de Vermines 2,259 s. Au début
+de la reprise de Vermines, un intervalle d'image de **1,024 s** est mesuré,
+sans événement `waiting`, avec 0,405 s de traitement ; son origine exacte
+n'est pas attribuée. Il précède les sauts. La trace contient aussi un callback
+d'instrumentation de 75 ms, sans preuve qu'il explique l'intervalle entier.
+Vermines compte **55 images perdues sur 4 700** ; Jolt **13 sur 5 103**, dont
+une augmentation pendant la capture/inspection de clôture. Les commandes,
+attentes, intervalles d'image et nouvelles données ont tous été observés :
+**aucune fluidité parfaite ni garantie pour toutes les positions n'est revendiquée**.
+L'écoute humaine n'a pas été réalisée.
+
+Preuves expurgées : `mp4-base2m-final-{browser,transport,create,live}-{6,8}-{1,2}.safe.json`,
+`mp4-base2m-final-native-close.safe.json`,
+`mp4-base2m-vermines-native-close.safe.json`, `mp4-seek-final-summary.safe.json`,
+`mp4-seek-recovery-summary.safe.json`, `mp4-final-jolt-continuation.png`,
+`mp4-detached-final8m-*-6-{1,2}.safe.json`, `mp4-2m-final-*-6-3.safe.json`,
+`mp4-seek64-*-{6,8}-*.safe.json`, `mp4-base2m-broker-tests.tap`,
+`mp4-gap-native-tests.tap` et `mp4-queued-error-tests.tap`.
+Les derniers fichiers de clôture prouvent expiration ordinaire, zéro session,
+pompe et encodeur avant arrêt des deux canaries, et deux Gateways de production
+sains, inactifs et inchangés. Aucune activité fournisseur n'est effacée pour
+forcer un essai.
+
+Les contrats CI `e48a8e29b` réussissent : **6 371 tests, 35 ignorés**, SQL,
+locale générée, région et syntaxe réussis (run `38084700914`). Suite locale :
+**157 tests du broker réussis, cinq ignorés**, 29 tests d'index/réutilisation/
+accès et 16 tests de cycle de vie du lecteur réussis. Le commit intermédiaire
+`9153f88e9` avait échoué au contrôle du manifeste généré, avant régression ;
+le manifeste est régénéré dans `6da55dd90`, dont les contrats réussissent aussi.
+Les paquets Android Phone, TV et Windows du code final réussissent. Ces constructions ne
+constituent pas une validation de lecture Android en émulateur.
+
 ## État et critères d'activation
 
-**Non activé en production. La réutilisation du vrai cache après fermeture est
-démontrée sur deux MP4, un MKV et un MPEG-TS. Des reprises inférieures à dix
-secondes sont mesurées, avec continuation au-delà du cache. Vermines conserve
-de brèves attentes ; l'ancien gel de Lost reste inexpliqué. La première minute
-MP4 préparée en fond et les sauts, y compris certaines positions annoncées
-comme chargées par le navigateur, restent ouverts. Un dernier essai Jolt
-réouvre en 28,527 s avec des interruptions : la fiabilité globale n'est pas
-validée.**
+**Non activé en production. Les deux reprises MP4 finales sont rapides (6,838
+et 5,241 s), leurs deux sauts attendent moins d'une seconde et chacune progresse
+plus de 146 secondes après le dernier saut, au-delà du cache réel. Les longues
+attentes des précédents essais ne reviennent pas dans ces deux contrôles.
+La fluidité parfaite n'est pas validée : Vermines conserve un ralentissement
+initial d'image et des images perdues. Les positions diffèrent des témoins ;
+la minute MP4 préparée en fond, le démarrage froid de Vermines (23,134 s) et
+la validation catalogue/login publique restent ouverts. Aucun remplacement du
+lecteur ni déploiement en production n'est effectué.**
 PR760 conservée en brouillon. Les essais sont arrêtés par expiration ordinaire
 de leurs claims ; sessions, transports natifs, pompes et encodeurs du canary
 reviennent à zéro. Les deux Gateways de production restent sains et inactifs.
