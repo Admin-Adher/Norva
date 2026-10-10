@@ -1,0 +1,1142 @@
+{
+  "atUtc": "2026-10-10T12:51:29Z",
+  "productionChanged": false,
+  "fixturePlaybackMatrixAborted": true,
+  "realCopies": 6,
+  "attempts": 15,
+  "muted": true,
+  "sdk": {
+    "package": "@libmedia/avplayer",
+    "version": "1.3.1",
+    "commit": "152f629d3021fd8013efa464fcb7b55f9fbe7753",
+    "umdSha256": "4efacaa1e4720310cbc301124898ee82d9ff9dbbff5c7ba82b1393db346f2be2"
+  },
+  "attemptsSummary": [
+    {
+      "attempt": 1,
+      "copy": "Vice-versa 2 — MP4",
+      "index": 1,
+      "software": false,
+      "delivery": "full-range-or-initial-adapter",
+      "workerEnabled": false,
+      "renderSelection": "canvas",
+      "firstVideoMs": null,
+      "loadMs": 9978,
+      "sessionReadyMs": 921,
+      "firstAudioMs": null,
+      "seekObservedMs": null,
+      "profile": {
+        "container": "mov,mp4,m4a,3gp,3g2,mj2",
+        "video": "h264",
+        "audio": "aac"
+      },
+      "tracks": [
+        {
+          "id": 0,
+          "type": "Video",
+          "language": "und",
+          "title": null
+        },
+        {
+          "id": 1,
+          "type": "Audio",
+          "language": "und",
+          "title": null
+        }
+      ],
+      "errors": [
+        {
+          "code": "decoder-error"
+        }
+      ],
+      "httpFirst": [],
+      "phases": [],
+      "expiration": {
+        "closed": true,
+        "heartbeatErrors": []
+      },
+      "cleanupError": null,
+      "lastSampleMs": 9988,
+      "transport": null
+    },
+    {
+      "attempt": 2,
+      "copy": "Le Robot Sauvage — MP4",
+      "index": 2,
+      "software": false,
+      "delivery": "full-range-or-initial-adapter",
+      "workerEnabled": false,
+      "renderSelection": "canvas",
+      "firstVideoMs": 62776,
+      "loadMs": 62405,
+      "sessionReadyMs": 980,
+      "firstAudioMs": 62773,
+      "seekObservedMs": null,
+      "profile": {
+        "container": "mov,mp4,m4a,3gp,3g2,mj2",
+        "video": "h264",
+        "audio": "aac"
+      },
+      "tracks": [
+        {
+          "id": 0,
+          "type": "Video",
+          "language": "und",
+          "title": null
+        },
+        {
+          "id": 1,
+          "type": "Audio",
+          "language": "und",
+          "title": null
+        }
+      ],
+      "errors": [
+        {
+          "code": "decoder-error"
+        }
+      ],
+      "httpFirst": [
+        {
+          "method": "HEAD",
+          "range": null,
+          "status": 573,
+          "contentRange": null,
+          "length": "54",
+          "headersMs": 671
+        },
+        {
+          "method": "Get",
+          "range": "bytes=0-1",
+          "status": 206,
+          "contentRange": "bytes 0-1/1118403839",
+          "length": "2",
+          "headersMs": 1297
+        },
+        {
+          "method": "GET",
+          "range": "bytes=0-",
+          "status": 206,
+          "contentRange": "bytes 0-1118403838/1118403839",
+          "length": "1118403839",
+          "headersMs": 2276
+        }
+      ],
+      "phases": [
+        {
+          "phase": "beforeSeek",
+          "wallMs": 17003,
+          "mediaSeconds": 15.042,
+          "pausesAtLeast2sMs": [],
+          "nativeFrames": null,
+          "nativeDropped": null
+        }
+      ],
+      "expiration": {
+        "closed": true,
+        "heartbeatErrors": []
+      },
+      "cleanupError": null,
+      "lastSampleMs": 80006,
+      "transport": null
+    },
+    {
+      "attempt": 3,
+      "copy": "Vice-versa 2 — MP4",
+      "index": 1,
+      "software": false,
+      "delivery": "full-range-or-initial-adapter",
+      "workerEnabled": false,
+      "renderSelection": "canvas",
+      "firstVideoMs": null,
+      "loadMs": null,
+      "sessionReadyMs": 773,
+      "firstAudioMs": null,
+      "seekObservedMs": null,
+      "profile": {
+        "container": "mov,mp4,m4a,3gp,3g2,mj2",
+        "video": "h264",
+        "audio": "aac"
+      },
+      "tracks": [],
+      "errors": [
+        {
+          "stage": "closing",
+          "message": "TypeError"
+        }
+      ],
+      "httpFirst": [
+        {
+          "method": "GET",
+          "range": "bytes=0-1",
+          "status": 206,
+          "contentRange": "bytes 0-1/1188384369",
+          "length": "2",
+          "headersMs": 1332
+        },
+        {
+          "method": "GET",
+          "range": "bytes=0-524287",
+          "status": 206,
+          "contentRange": "bytes 0-524287/1188384369",
+          "length": "524288",
+          "headersMs": 2213
+        },
+        {
+          "method": "GET",
+          "range": "bytes=524288-1048575",
+          "status": 206,
+          "contentRange": "bytes 524288-1048575/1188384369",
+          "length": "524288",
+          "headersMs": 1227
+        }
+      ],
+      "phases": [],
+      "expiration": {
+        "closed": true,
+        "heartbeatErrors": []
+      },
+      "cleanupError": "Cannot read properties of undefined (reading 'stop')",
+      "lastSampleMs": 86370,
+      "transport": null
+    },
+    {
+      "attempt": 4,
+      "copy": "Le Robot Sauvage — MP4",
+      "index": 2,
+      "software": false,
+      "delivery": "full-range-or-initial-adapter",
+      "workerEnabled": false,
+      "renderSelection": "canvas",
+      "firstVideoMs": null,
+      "loadMs": null,
+      "sessionReadyMs": 932,
+      "firstAudioMs": null,
+      "seekObservedMs": null,
+      "profile": {
+        "container": "mov,mp4,m4a,3gp,3g2,mj2",
+        "video": "h264",
+        "audio": "aac"
+      },
+      "tracks": [],
+      "errors": [
+        {
+          "stage": "closing",
+          "message": "TypeError"
+        }
+      ],
+      "httpFirst": [
+        {
+          "method": "GET",
+          "range": "bytes=0-1",
+          "status": 206,
+          "contentRange": "bytes 0-1/1118403839",
+          "length": "2",
+          "headersMs": 1419
+        },
+        {
+          "method": "GET",
+          "range": "bytes=0-524287",
+          "status": 206,
+          "contentRange": "bytes 0-524287/1118403839",
+          "length": "524288",
+          "headersMs": 2470
+        },
+        {
+          "method": "GET",
+          "range": "bytes=524288-1048575",
+          "status": 206,
+          "contentRange": "bytes 524288-1048575/1118403839",
+          "length": "524288",
+          "headersMs": 1230
+        }
+      ],
+      "phases": [],
+      "expiration": {
+        "closed": true,
+        "heartbeatErrors": []
+      },
+      "cleanupError": "Cannot read properties of undefined (reading 'stop')",
+      "lastSampleMs": 40142,
+      "transport": null
+    },
+    {
+      "attempt": 5,
+      "copy": "Conclave — MKV",
+      "index": 4,
+      "software": false,
+      "delivery": "full-range-or-initial-adapter",
+      "workerEnabled": false,
+      "renderSelection": "canvas",
+      "firstVideoMs": 57629,
+      "loadMs": 57435,
+      "sessionReadyMs": 901,
+      "firstAudioMs": 58391,
+      "seekObservedMs": 55482,
+      "profile": {
+        "container": "matroska,webm",
+        "video": "h264",
+        "audio": "aac"
+      },
+      "tracks": [
+        {
+          "id": 0,
+          "type": "Video",
+          "language": "und",
+          "title": null
+        },
+        {
+          "id": 1,
+          "type": "Audio",
+          "language": "fre",
+          "title": "VFQ"
+        },
+        {
+          "id": 2,
+          "type": "Subtitle",
+          "language": "fre",
+          "title": "VFQ Forced"
+        },
+        {
+          "id": 3,
+          "type": "Subtitle",
+          "language": "fre",
+          "title": "VFQ SDH"
+        }
+      ],
+      "errors": [],
+      "httpFirst": [
+        {
+          "method": "GET",
+          "range": "bytes=0-1",
+          "status": 206,
+          "contentRange": "bytes 0-1/3093967019",
+          "length": "2",
+          "headersMs": 1610
+        },
+        {
+          "method": "GET",
+          "range": "bytes=0-524287",
+          "status": 206,
+          "contentRange": "bytes 0-524287/3093967019",
+          "length": "524288",
+          "headersMs": 684
+        },
+        {
+          "method": "GET",
+          "range": "bytes=3093893333-3093967018",
+          "status": 206,
+          "contentRange": "bytes 3093893333-3093967018/3093967019",
+          "length": "73686",
+          "headersMs": 1241
+        }
+      ],
+      "phases": [
+        {
+          "phase": "beforeSeek",
+          "wallMs": 16791,
+          "mediaSeconds": 5.005,
+          "pausesAtLeast2sMs": [
+            10991
+          ],
+          "nativeFrames": null,
+          "nativeDropped": null
+        },
+        {
+          "phase": "afterSeek",
+          "wallMs": 21002,
+          "mediaSeconds": 0.959,
+          "pausesAtLeast2sMs": [
+            18626
+          ],
+          "nativeFrames": null,
+          "nativeDropped": null
+        }
+      ],
+      "expiration": {
+        "closed": true,
+        "heartbeatErrors": []
+      },
+      "cleanupError": null,
+      "lastSampleMs": 151316,
+      "transport": null
+    },
+    {
+      "attempt": 6,
+      "copy": "Vice-versa 2 — MP4",
+      "index": 1,
+      "software": false,
+      "delivery": "full-range-or-initial-adapter",
+      "workerEnabled": false,
+      "renderSelection": "canvas",
+      "firstVideoMs": 52733,
+      "loadMs": 52644,
+      "sessionReadyMs": 730,
+      "firstAudioMs": 53354,
+      "seekObservedMs": null,
+      "profile": {
+        "container": "mov,mp4,m4a,3gp,3g2,mj2",
+        "video": "h264",
+        "audio": "aac"
+      },
+      "tracks": [
+        {
+          "id": 0,
+          "type": "Video",
+          "language": "und",
+          "title": null
+        },
+        {
+          "id": 1,
+          "type": "Audio",
+          "language": "und",
+          "title": null
+        }
+      ],
+      "errors": [],
+      "httpFirst": [
+        {
+          "method": "GET",
+          "range": "bytes=0-1",
+          "status": 206,
+          "contentRange": "bytes 0-1/1188384369",
+          "length": "2",
+          "headersMs": 1343
+        },
+        {
+          "method": "GET",
+          "range": "bytes=0-524287",
+          "status": 206,
+          "contentRange": "bytes 0-524287/1188384369",
+          "length": "524288",
+          "headersMs": 1251
+        },
+        {
+          "method": "GET",
+          "range": "bytes=524288-1048575",
+          "status": 206,
+          "contentRange": "bytes 524288-1048575/1188384369",
+          "length": "524288",
+          "headersMs": 1903
+        }
+      ],
+      "phases": [
+        {
+          "phase": "beforeSeek",
+          "wallMs": 92837,
+          "mediaSeconds": 23.25,
+          "pausesAtLeast2sMs": [
+            2004,
+            5995,
+            7734,
+            7317,
+            9483,
+            12298,
+            5655,
+            5985
+          ],
+          "nativeFrames": null,
+          "nativeDropped": null
+        }
+      ],
+      "expiration": {
+        "closed": true,
+        "heartbeatErrors": []
+      },
+      "cleanupError": null,
+      "lastSampleMs": 145735,
+      "transport": null
+    },
+    {
+      "attempt": 7,
+      "copy": "Silo S1E1 — MP4",
+      "index": 5,
+      "software": false,
+      "delivery": "full-range-or-initial-adapter",
+      "workerEnabled": false,
+      "renderSelection": "canvas",
+      "firstVideoMs": null,
+      "loadMs": null,
+      "sessionReadyMs": null,
+      "firstAudioMs": null,
+      "seekObservedMs": null,
+      "profile": null,
+      "tracks": [],
+      "errors": [
+        {
+          "stage": "admitting",
+          "message": "Error"
+        }
+      ],
+      "httpFirst": [],
+      "phases": [],
+      "expiration": {
+        "closed": true,
+        "heartbeatErrors": []
+      },
+      "cleanupError": null,
+      "lastSampleMs": null,
+      "transport": null
+    },
+    {
+      "attempt": 8,
+      "copy": "Silo S1E1 — MP4",
+      "index": 5,
+      "software": false,
+      "delivery": "full-range-or-initial-adapter",
+      "workerEnabled": false,
+      "renderSelection": "canvas",
+      "firstVideoMs": 15589,
+      "loadMs": 15275,
+      "sessionReadyMs": 3244,
+      "firstAudioMs": 15475,
+      "seekObservedMs": 3990,
+      "profile": {},
+      "tracks": [
+        {
+          "id": 0,
+          "type": "Video",
+          "language": "und",
+          "title": null
+        },
+        {
+          "id": 1,
+          "type": "Audio",
+          "language": "und",
+          "title": null
+        }
+      ],
+      "errors": [],
+      "httpFirst": [
+        {
+          "method": "GET",
+          "range": "bytes=0-1",
+          "status": 206,
+          "contentRange": "bytes 0-1/1185836474",
+          "length": "2",
+          "headersMs": 1610
+        },
+        {
+          "method": "GET",
+          "range": "bytes=0-2097151",
+          "status": 206,
+          "contentRange": "bytes 0-2097151/1185836474",
+          "length": "2097152",
+          "headersMs": 1262
+        },
+        {
+          "method": "GET",
+          "range": "bytes=2097152-4194303",
+          "status": 206,
+          "contentRange": "bytes 2097152-4194303/1185836474",
+          "length": "2097152",
+          "headersMs": 1561
+        }
+      ],
+      "phases": [
+        {
+          "phase": "beforeSeek",
+          "wallMs": 23682,
+          "mediaSeconds": 21.188,
+          "pausesAtLeast2sMs": [],
+          "nativeFrames": null,
+          "nativeDropped": null
+        },
+        {
+          "phase": "afterSeek",
+          "wallMs": 57534,
+          "mediaSeconds": 38.955,
+          "pausesAtLeast2sMs": [],
+          "nativeFrames": null,
+          "nativeDropped": null
+        }
+      ],
+      "expiration": {
+        "closed": true,
+        "heartbeatErrors": []
+      },
+      "cleanupError": null,
+      "lastSampleMs": 101198,
+      "transport": null
+    },
+    {
+      "attempt": 9,
+      "copy": "Severance S1E1 — MKV",
+      "index": 6,
+      "software": false,
+      "delivery": "full-range-or-initial-adapter",
+      "workerEnabled": true,
+      "renderSelection": "canvas",
+      "firstVideoMs": null,
+      "loadMs": null,
+      "sessionReadyMs": 757,
+      "firstAudioMs": null,
+      "seekObservedMs": null,
+      "profile": {},
+      "tracks": [],
+      "errors": [
+        {
+          "stage": "loading",
+          "message": "Error"
+        }
+      ],
+      "httpFirst": [
+        {
+          "method": "GET",
+          "range": "bytes=0-1",
+          "status": 403,
+          "contentRange": null,
+          "length": null,
+          "headersMs": 2366
+        }
+      ],
+      "phases": [],
+      "expiration": {
+        "closed": true,
+        "heartbeatErrors": []
+      },
+      "cleanupError": null,
+      "lastSampleMs": 42273,
+      "transport": null
+    },
+    {
+      "attempt": 10,
+      "copy": "Le Robot Sauvage — MP4",
+      "index": 2,
+      "software": false,
+      "delivery": "progressive-2MiB",
+      "workerEnabled": true,
+      "renderSelection": "MSE-when-supported",
+      "firstVideoMs": null,
+      "loadMs": 29665,
+      "sessionReadyMs": 1296,
+      "firstAudioMs": null,
+      "seekObservedMs": 10471,
+      "profile": {
+        "container": "mov,mp4,m4a,3gp,3g2,mj2",
+        "video": "h264",
+        "audio": "aac"
+      },
+      "tracks": [
+        {
+          "id": 0,
+          "type": "Video",
+          "language": "und",
+          "title": null
+        },
+        {
+          "id": 1,
+          "type": "Audio",
+          "language": "und",
+          "title": null
+        }
+      ],
+      "errors": [],
+      "httpFirst": [
+        {
+          "method": "GET",
+          "range": "bytes=0-1",
+          "status": 206,
+          "contentRange": "bytes 0-1/1118403839",
+          "length": "2",
+          "headersMs": 1536
+        },
+        {
+          "method": "GET",
+          "range": "bytes=0-2097151",
+          "status": 206,
+          "contentRange": "bytes 0-2097151/1118403839",
+          "length": "2097152",
+          "headersMs": 1402
+        },
+        {
+          "method": "GET",
+          "range": "bytes=2097152-4194303",
+          "status": 206,
+          "contentRange": "bytes 2097152-4194303/1118403839",
+          "length": "2097152",
+          "headersMs": 1385
+        }
+      ],
+      "phases": [
+        {
+          "phase": "beforeSeek",
+          "wallMs": 70000,
+          "mediaSeconds": 64.839,
+          "pausesAtLeast2sMs": [
+            3000
+          ],
+          "nativeFrames": null,
+          "nativeDropped": null
+        },
+        {
+          "phase": "afterSeek",
+          "wallMs": 41001,
+          "mediaSeconds": 38.39,
+          "pausesAtLeast2sMs": [
+            2500
+          ],
+          "nativeFrames": null,
+          "nativeDropped": null
+        }
+      ],
+      "expiration": {
+        "closed": true,
+        "heartbeatErrors": []
+      },
+      "cleanupError": null,
+      "lastSampleMs": 151326,
+      "transport": null
+    },
+    {
+      "attempt": 11,
+      "copy": "Silo S1E1 — MP4",
+      "index": 5,
+      "software": false,
+      "delivery": "progressive-2MiB",
+      "workerEnabled": true,
+      "renderSelection": "MSE-when-supported",
+      "firstVideoMs": 51780,
+      "loadMs": 51162,
+      "sessionReadyMs": 760,
+      "firstAudioMs": null,
+      "seekObservedMs": 5037,
+      "profile": {},
+      "tracks": [
+        {
+          "id": 0,
+          "type": "Video",
+          "language": "und",
+          "title": null
+        },
+        {
+          "id": 1,
+          "type": "Audio",
+          "language": "und",
+          "title": null
+        }
+      ],
+      "errors": [],
+      "httpFirst": [
+        {
+          "method": "GET",
+          "range": "bytes=0-1",
+          "status": 206,
+          "contentRange": "bytes 0-1/1185836474",
+          "length": "2",
+          "headersMs": 1333
+        },
+        {
+          "method": "GET",
+          "range": "bytes=0-2097151",
+          "status": 206,
+          "contentRange": "bytes 0-2097151/1185836474",
+          "length": "2097152",
+          "headersMs": 1476
+        },
+        {
+          "method": "GET",
+          "range": "bytes=2097152-4194303",
+          "status": 206,
+          "contentRange": "bytes 2097152-4194303/1185836474",
+          "length": "2097152",
+          "headersMs": 1847
+        }
+      ],
+      "phases": [
+        {
+          "phase": "beforeSeek",
+          "wallMs": 40000,
+          "mediaSeconds": 40.0,
+          "pausesAtLeast2sMs": [],
+          "nativeFrames": 971,
+          "nativeDropped": 1
+        },
+        {
+          "phase": "afterSeek",
+          "wallMs": 108015,
+          "mediaSeconds": 40.711,
+          "pausesAtLeast2sMs": [
+            9000,
+            5500,
+            7505,
+            11497,
+            19999,
+            9491
+          ],
+          "nativeFrames": 1998,
+          "nativeDropped": 2
+        }
+      ],
+      "expiration": {
+        "closed": true,
+        "heartbeatErrors": []
+      },
+      "cleanupError": null,
+      "lastSampleMs": 205295,
+      "transport": null
+    },
+    {
+      "attempt": 12,
+      "copy": "Silo S1E1 — MP4",
+      "index": 5,
+      "software": false,
+      "delivery": "progressive-8MiB",
+      "workerEnabled": true,
+      "renderSelection": "MSE-when-supported",
+      "firstVideoMs": 16226,
+      "loadMs": 15775,
+      "sessionReadyMs": 710,
+      "firstAudioMs": null,
+      "seekObservedMs": null,
+      "profile": {},
+      "tracks": [
+        {
+          "id": 0,
+          "type": "Video",
+          "language": "und",
+          "title": null
+        },
+        {
+          "id": 1,
+          "type": "Audio",
+          "language": "und",
+          "title": null
+        }
+      ],
+      "errors": [
+        {
+          "code": "decoder-error"
+        }
+      ],
+      "httpFirst": [
+        {
+          "method": "GET",
+          "range": "bytes=0-1",
+          "status": 206,
+          "contentRange": "bytes 0-1/1185836474",
+          "length": "2",
+          "headersMs": 1344
+        },
+        {
+          "method": "GET",
+          "range": "bytes=0-8388607",
+          "status": 206,
+          "contentRange": "bytes 0-8388607/1185836474",
+          "length": "8388608",
+          "headersMs": 2530
+        }
+      ],
+      "phases": [
+        {
+          "phase": "beforeSeek",
+          "wallMs": 61602,
+          "mediaSeconds": 6.688,
+          "pausesAtLeast2sMs": [
+            29995,
+            15486,
+            6108
+          ],
+          "nativeFrames": 172,
+          "nativeDropped": 26
+        }
+      ],
+      "expiration": {
+        "closed": true,
+        "heartbeatErrors": []
+      },
+      "cleanupError": null,
+      "lastSampleMs": 77828,
+      "transport": null
+    },
+    {
+      "attempt": 13,
+      "copy": "Conclave — MKV",
+      "index": 4,
+      "software": false,
+      "delivery": "progressive-2MiB-coalesced64KiB",
+      "workerEnabled": true,
+      "renderSelection": "MSE-when-supported",
+      "firstVideoMs": 7719,
+      "loadMs": 6917,
+      "sessionReadyMs": 682,
+      "firstAudioMs": null,
+      "seekObservedMs": null,
+      "profile": {
+        "container": "matroska,webm",
+        "video": "h264",
+        "audio": "aac"
+      },
+      "tracks": [
+        {
+          "id": 0,
+          "type": "Video",
+          "language": "und",
+          "title": null
+        },
+        {
+          "id": 1,
+          "type": "Audio",
+          "language": "fre",
+          "title": "VFQ"
+        },
+        {
+          "id": 2,
+          "type": "Subtitle",
+          "language": "fre",
+          "title": "VFQ Forced"
+        },
+        {
+          "id": 3,
+          "type": "Subtitle",
+          "language": "fre",
+          "title": "VFQ SDH"
+        }
+      ],
+      "errors": [],
+      "httpFirst": [
+        {
+          "method": "GET",
+          "range": "bytes=0-1",
+          "status": 206,
+          "contentRange": "bytes 0-1/3093967019",
+          "length": "2",
+          "headersMs": 2062
+        },
+        {
+          "method": "GET",
+          "range": "bytes=0-2097151",
+          "status": 206,
+          "contentRange": "bytes 0-2097151/3093967019",
+          "length": "2097152",
+          "headersMs": 668
+        },
+        {
+          "method": "GET",
+          "range": "bytes=3093893333-3093967018",
+          "status": 206,
+          "contentRange": "bytes 3093893333-3093967018/3093967019",
+          "length": "73686",
+          "headersMs": 1264
+        }
+      ],
+      "phases": [
+        {
+          "phase": "beforeSeek",
+          "wallMs": 78993,
+          "mediaSeconds": 15.988,
+          "pausesAtLeast2sMs": [
+            13999,
+            10496,
+            4996,
+            31490
+          ],
+          "nativeFrames": 401,
+          "nativeDropped": 32
+        }
+      ],
+      "expiration": {
+        "closed": true,
+        "heartbeatErrors": []
+      },
+      "cleanupError": null,
+      "lastSampleMs": 187713,
+      "transport": {
+        "reads": 201,
+        "deliveredBytes": 13049814,
+        "wireBytes": 13467238,
+        "headerWaitMs": 17245.50000023842,
+        "bodyWaitMs": 106744.89999580383,
+        "readWaitMs": 122063.99999856949,
+        "ranges": 10,
+        "cacheBytes": 0
+      }
+    },
+    {
+      "attempt": 14,
+      "copy": "Normal — MKV HEVC",
+      "index": 3,
+      "software": false,
+      "delivery": "full-range-or-initial-adapter",
+      "workerEnabled": false,
+      "renderSelection": "canvas",
+      "firstVideoMs": null,
+      "loadMs": null,
+      "sessionReadyMs": null,
+      "firstAudioMs": null,
+      "seekObservedMs": null,
+      "profile": null,
+      "tracks": [],
+      "errors": [
+        {
+          "stage": "admitting",
+          "message": "Error"
+        }
+      ],
+      "httpFirst": [],
+      "phases": [],
+      "expiration": {
+        "closed": true,
+        "heartbeatErrors": []
+      },
+      "cleanupError": null,
+      "lastSampleMs": null,
+      "transport": null
+    },
+    {
+      "attempt": 15,
+      "copy": "Normal — MKV HEVC",
+      "index": 3,
+      "software": false,
+      "delivery": "progressive-2MiB-coalesced64KiB",
+      "workerEnabled": true,
+      "renderSelection": "MSE-when-supported",
+      "firstVideoMs": 11207,
+      "loadMs": 10473,
+      "sessionReadyMs": 834,
+      "firstAudioMs": 10642,
+      "seekObservedMs": null,
+      "profile": {
+        "container": "matroska,webm",
+        "video": "hevc",
+        "audio": "eac3"
+      },
+      "tracks": [
+        {
+          "id": 0,
+          "type": "Video",
+          "language": "und",
+          "title": null
+        },
+        {
+          "id": 1,
+          "type": "Audio",
+          "language": "fre",
+          "title": "French (Canadien)"
+        },
+        {
+          "id": 2,
+          "type": "Audio",
+          "language": "eng",
+          "title": null
+        },
+        {
+          "id": 3,
+          "type": "Subtitle",
+          "language": "fre",
+          "title": "French (Canadien) (Forced)"
+        },
+        {
+          "id": 4,
+          "type": "Subtitle",
+          "language": "fre",
+          "title": "French (Canadien)"
+        },
+        {
+          "id": 5,
+          "type": "Subtitle",
+          "language": "eng",
+          "title": "SDH"
+        }
+      ],
+      "errors": [
+        {
+          "code": "decoder-error"
+        }
+      ],
+      "httpFirst": [
+        {
+          "method": "GET",
+          "range": "bytes=0-1",
+          "status": 206,
+          "contentRange": "bytes 0-1/13662582623",
+          "length": "2",
+          "headersMs": 2272
+        },
+        {
+          "method": "GET",
+          "range": "bytes=0-2097151",
+          "status": 206,
+          "contentRange": "bytes 0-2097151/13662582623",
+          "length": "2097152",
+          "headersMs": 851
+        },
+        {
+          "method": "GET",
+          "range": "bytes=13662475229-13662582622",
+          "status": 206,
+          "contentRange": "bytes 13662475229-13662582622/13662582623",
+          "length": "107394",
+          "headersMs": 4291
+        }
+      ],
+      "phases": [
+        {
+          "phase": "beforeSeek",
+          "wallMs": 127999,
+          "mediaSeconds": 2.007,
+          "pausesAtLeast2sMs": [
+            8501,
+            4501,
+            2509,
+            4000,
+            3500,
+            4500,
+            6501,
+            6000,
+            7002,
+            26592,
+            4434,
+            10001,
+            8500,
+            4478
+          ],
+          "nativeFrames": null,
+          "nativeDropped": null
+        }
+      ],
+      "expiration": {
+        "closed": true,
+        "heartbeatErrors": []
+      },
+      "cleanupError": null,
+      "lastSampleMs": 139361,
+      "transport": {
+        "reads": 66,
+        "deliveredBytes": 4105090,
+        "wireBytes": 4216273,
+        "headerWaitMs": 9658.300000190735,
+        "bodyWaitMs": 78729.39999961853,
+        "readWaitMs": 86611.00000023842,
+        "ranges": 6,
+        "cacheBytes": 0
+      }
+    }
+  ],
+  "closure": {
+    "testSessions": {
+      "live": 0,
+      "sessions": 13
+    },
+    "controllerStopped": true,
+    "services": [
+      {
+        "service": "norva-media-gateway",
+        "running": true,
+        "health": "healthy"
+      },
+      {
+        "service": "norva-edge-functions",
+        "running": true,
+        "health": "healthy"
+      },
+      {
+        "service": "norva-edge-functions-2",
+        "running": true,
+        "health": "healthy"
+      }
+    ]
+  },
+  "localServerStopped": true,
+  "sshTunnelStopped": true
+}

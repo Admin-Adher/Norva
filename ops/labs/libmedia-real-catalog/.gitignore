@@ -1,0 +1,6 @@
+npm/
+dist/
+*.tgz
+browser.safe.json
+summary.safe.json
+*.private.*
