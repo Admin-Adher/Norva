@@ -12231,6 +12231,15 @@ app.post('/startup-cache/prepare', requireGatewayAuth, async (req, res) => {
         || Number(sessionBody.codecProfile.fileSizeBytes) <= 0) {
         return res.status(409).json({ protocol: 1, prepared: false, providerDrained: true, reason: 'not-admitted' });
     }
+    const subtitlePlan = buildExactSubtitleHlsPlan(sessionBody.codecProfile, {
+        maxRenditions: MAX_EXACT_SUBTITLE_HLS_RENDITIONS,
+        maxCacheableRenditions: MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS,
+        requestedStreamIndex: sessionBody.subtitleStreamIndex,
+    });
+    if (subtitlePlan.cacheEligible !== true) {
+        return res.status(409).json({ protocol: 1, prepared: false, providerDrained: true,
+            reason: 'subtitle-topology-not-cacheable' });
+    }
     const result = await startupCachePreparation.prepare({ body: { ...sessionBody, seekOffset: 0,
         completeHlsCachePolicy: 'bypass' }, ownerKey: sessionBody.ownerKey,
         accountKey: proxyKeyFromUrl(sessionBody.sourceUrl), permit: body.permit });

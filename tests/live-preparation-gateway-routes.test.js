@@ -9,6 +9,9 @@ function routes(){const handlers={};let admissions=0;
 const context=vm.createContext({require,AbortController,Date,Set,Map,setTimeout,clearTimeout,Promise,console,
   app:{post:(route,auth,fn)=>handlers[route]=fn,get:(route,auth,fn)=>handlers[route]=fn},requireGatewayAuth:()=>{},
   startupCachePreparation:{jobs:new Set(),bindSessionCreate:fn=>fn,preempt:async()=>({providerDrained:true})},
+  asRecord:x=>x||{},canUseStartupCache:()=>true,hasReliableVodCodecProfile:()=>true,
+  buildExactSubtitleHlsPlan:require('../services/media-gateway/src/sharedHlsTracks').buildExactSubtitleHlsPlan,
+  MAX_EXACT_SUBTITLE_HLS_RENDITIONS:8,MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS:8,
   playbackPreparationGeneration:'new-process',playbackPreparationCancellation:createPlaybackPreparationCancellation({drainTimeoutMs:20}),
   playbackPreparationRawWork:new Map(),playbackPreparationUnconfirmedStops:new Map(),sessions:new Map(),
   sessionStartupStats:{attempts:0},isHttpUrl:()=>true,normalizeSourceContainerAuthority:()=>null,
@@ -51,6 +54,18 @@ test('viewer response abandoned during background drainage never acquires admiss
   };
   await h.handlers['/sessions'](req,res);
   assert.equal(h.admissions(),0);
+});
+test('startup route defers incomplete or uncacheable subtitle graphs before acquiring media',async()=>{
+  const h=routes();
+  for(const subtitles of [undefined,[{index:2,codec:'hdmv_pgs_subtitle',extractable:false}],
+    Array.from({length:9},(_,i)=>({index:i+2,codec:'subrip',extractable:true}))]) {
+    const res=response();res.setHeader=()=>{};
+    await h.handlers['/startup-cache/prepare']({body:{protocol:1,session:{ownerKey:owner,
+      sourceUrl:'http://fixture.invalid/movie/1.mkv',seekOffset:0,
+      codecProfile:{fileSizeBytes:1000,subtitles}}}},res);
+    assert.equal(res.statusCode,409);assert.equal(res.body.reason,'subtitle-topology-not-cacheable');
+    assert.equal(res.body.providerDrained,true);
+  }
 });
 test('real cancellation route waits for raw body disposal, keeps exact owner scope and generation',async()=>{
 const h=routes();let release,aborted=false;
