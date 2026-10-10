@@ -132,7 +132,7 @@ const { privateResumeBinding, createPrivateResumeOwnerGate, createRecentResumeOw
 const { createFreshResumeHandoff, consumeFreshResumeHandoff } = require('./fresh-resume-handoff');
 const { RetainedInputBarrier } = require('./retained-input-barrier');
 const { RetainedSessionTransfer } = require('./retained-session-transfer');
-const { retainRecentDeliveryTarget, consumeRecentDeliveryTarget } = require('./recent-delivery-target');
+const { retainRecentDeliveryTarget, consumeRecentDeliveryTarget, forkRecentDeliveryTarget } = require('./recent-delivery-target');
 const { privateResumeProfile, canonicalResumeProfile } = require('./private-resume-profile');
 const { SOURCE_CLOCK, retainedSubtitleClock, retainedSubtitleClockArgs } = require('./retained-subtitle-clock');
 const { committedSubtitleOutputArgs, readCommittedSubtitle } = require('./committed-subtitle-delivery');
@@ -4353,7 +4353,8 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                     binding: nativeCacheBinding, scope: nativeFreshScope, signal: entry.ac.signal,
                     createBroker: (signal, onProviderIdentity, scope, plan) => createStrictLidBroker({
                         sourceUrl: claims.url, fileSizeBytes: claims.fileSizeBytes, userAgent: claims.ua,
-                        recentDeliveryTarget: plan.deliveryTarget, recentDeliveryOwner: entry.ownerHash,
+                        recentDeliveryTarget: forkRecentDeliveryTarget(plan.deliveryTarget, { ownerKey: entry.ownerHash }),
+                        recentDeliveryOwner: entry.ownerHash,
                         recentDeliveryRoute: nativeRouteKey,
                         dispatcherFactory, abortSignal: signal, onProviderIdentity,
                         freshResumeScope: scope, recentValidationKeepAlive: true,
