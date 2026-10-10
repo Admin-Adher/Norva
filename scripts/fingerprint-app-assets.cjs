@@ -4,6 +4,10 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+// The old publication lane could replace hashed assets with the SPA fallback.
+// Start a fresh immutable namespace so existing CDN entries containing that
+// HTML cannot masquerade as application JavaScript after the lane is fixed.
+const publicationNamespace = 'app-v2';
 const tags = /<(?:script|link)\b[^>]*>/gi;
 function references(html) {
   return [...html.matchAll(tags)].flatMap(([tag]) => {
@@ -25,7 +29,7 @@ function fingerprint(publicDir) {
     const bytes = fs.readFileSync(absolute);
     const sha256 = digest(bytes);
     const extension = path.posix.extname(source);
-    const url = source.slice(0, -extension.length) + '.' + sha256.slice(0, 16) + extension;
+    const url = source.slice(0, -extension.length) + '.' + publicationNamespace + '.' + sha256.slice(0, 16) + extension;
     const target = path.resolve(publicDir, '.' + url);
     if (fs.existsSync(target) && digest(fs.readFileSync(target)) !== sha256) throw Error('Immutable asset collision');
     fs.writeFileSync(target, bytes);

@@ -20,6 +20,7 @@ test('content filenames and integrity refer to exact bytes, preserve CSS paths a
   const root = fixture(t), manifest = fingerprint(root);
   assert.equal(manifest.assets.length, 2);
   for (const asset of manifest.assets) {
+    assert.match(asset.url, /\.app-v2\.[a-f0-9]{16}\.(js|css)$/);
     assert.match(asset.url, /\.[a-f0-9]{16}\.(js|css)$/);
     assert.equal(path.posix.dirname(asset.url), path.posix.dirname(asset.source));
     assert.deepEqual(fs.readFileSync(path.join(root, asset.url)), fs.readFileSync(path.join(root, asset.source)));
@@ -30,6 +31,20 @@ test('content filenames and integrity refer to exact bytes, preserve CSS paths a
   const next = fingerprint(root);
   assert.notEqual(next.assets[0].url, manifest.assets[0].url);
   assert.equal(fs.readFileSync(path.join(root, manifest.assets[0].url),'utf8'),'window.home="new";');
+});
+
+test('legacy immutable URLs are migrated without changing source bytes or asset directories', t => {
+  const root = fixture(t);
+  const oldUrl = '/js/pages/HomePage.legacy0123456789.js';
+  const source = '/js/pages/HomePage.js';
+  fs.writeFileSync(path.join(root, 'app.html'), `<script src="${oldUrl}"></script>`);
+  fs.writeFileSync(path.join(root, 'app-assets.json'), JSON.stringify({ assets: [{ source, url: oldUrl }] }));
+  const bytes = fs.readFileSync(path.join(root, source));
+  const manifest = fingerprint(root);
+  assert.equal(manifest.assets[0].source, source);
+  assert.notEqual(manifest.assets[0].url, oldUrl);
+  assert.deepEqual(fs.readFileSync(path.join(root, manifest.assets[0].url)), bytes);
+  assert.deepEqual(fingerprint(root), manifest);
 });
 test('delivery verification detects old bytes behind a correctly labelled URL', async t => {
   const root = fixture(t), manifest = fingerprint(root);
