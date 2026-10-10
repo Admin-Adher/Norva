@@ -1,21 +1,22 @@
 {
-  "status": "awaiting_final_portable_test",
-  "code": "26ca61dec14129621e36fbef8335b417aadfcb71",
+  "status": "awaiting_optimized_portable_test",
+  "code": "a8c39550d0ebed850c67dc01cdfc2f17fd30d492",
   "pr": 757,
   "version": "2.1.5-native.2",
   "design": "Web WatchPage hierarchy, SVG controls, Inter, integrated native child window",
   "ci": {
-    "run": 38002037177,
-    "passed": 6286,
+    "run": 38040089877,
+    "passed": 6289,
     "skipped": 34,
     "failed": 0,
     "checksPassed": 5,
-    "targetedTestsPassed": 39
+    "targetedTestsPassed": 35,
+    "windowsPackage": "success"
   },
   "package": {
-    "code": "26ca61dec14129621e36fbef8335b417aadfcb71",
-    "artifactId": 11649238426,
-    "archiveSha256": "a20825f52a5e61e61d140fa2a04c76d25e924aabf15670e187a3f3529a7c8aed",
+    "code": "a8c39550d0ebed850c67dc01cdfc2f17fd30d492",
+    "artifactId": 11664884914,
+    "archiveSha256": "1537f370f8b9b6fce377a69f7e5c83c63a4fb3ea2ea0e8e2a21e676992b548b9",
     "version": "2.1.5-native.2",
     "canonicalSourceMatches": [
       "electron-main.js",
@@ -47,8 +48,8 @@
     "qaArtifactsExcluded": true,
     "debugReceiptExcluded": true,
     "x64Only": true,
-    "exeBytes": 239572276,
-    "exeSha256": "a40e8a0e058a7e1967bdd8d715081dd828b3b10dcf5f2f04adda6bb2b66dca04",
+    "exeBytes": 239558491,
+    "exeSha256": "bbcb0d10eaed6c6f668777893239d9d633c100de89f4477d33091b90b05a95e3",
     "finalPortableUiVerified": false
   },
   "realTests": [
@@ -123,5 +124,186 @@
     "No full-film fluency or audible acceptance claimed",
     "Portable UI launch rejected by automatic review; human confirmation pending"
   ],
-  "productionGatewayChanged": false
+  "productionGatewayChanged": false,
+  "priorPackages": [
+    {
+      "code": "26ca61dec14129621e36fbef8335b417aadfcb71",
+      "artifactId": 11649238426,
+      "archiveSha256": "a20825f52a5e61e61d140fa2a04c76d25e924aabf15670e187a3f3529a7c8aed",
+      "version": "2.1.5-native.2",
+      "canonicalSourceMatches": [
+        "electron-main.js",
+        "preload.js",
+        "desktop/native-player-ipc.js",
+        "desktop/native-player-controller.js",
+        "desktop/native-input.js",
+        "public/js/utils/desktopNative.js"
+      ],
+      "requiredFiles": [
+        "Norva.NativePlayer.exe",
+        "Norva.NativePlayer.dll",
+        "libvlc/win-x64/libvlc.dll",
+        "libvlc/win-x64/libvlccore.dll",
+        "norva-player-icons.json",
+        "norva-labels.json",
+        "norva-theme.css",
+        "fonts/Inter-Regular.ttf",
+        "fonts/LICENSE.txt",
+        "THIRD-PARTY-NOTICES.md",
+        "source-manifest.json",
+        "licenses/vlc/COPYING",
+        "licenses/vlc/COPYING.LIB",
+        "licenses/libvlcsharp/LICENSE",
+        "licenses/microsoft.windowsdesktop.app.runtime.win-x64/LICENSE"
+      ],
+      "fontMatches": true,
+      "modernWindowsManifest": true,
+      "qaArtifactsExcluded": true,
+      "debugReceiptExcluded": true,
+      "x64Only": true,
+      "exeBytes": 239572276,
+      "exeSha256": "a40e8a0e058a7e1967bdd8d715081dd828b3b10dcf5f2f04adda6bb2b66dca04",
+      "finalPortableUiVerified": false
+    },
+    {
+      "code": "80c0367ad95bad891fdbcef5710c3327f1d47331",
+      "artifactId": 11664727869,
+      "archiveSha256": "47ec2a1f53e88217854577824df218e79aa05326185c5b128089841dda36c85d",
+      "version": "2.1.5-native.2",
+      "canonicalSourceMatches": [
+        "electron-main.js",
+        "preload.js",
+        "desktop/native-player-ipc.js",
+        "desktop/native-player-controller.js",
+        "desktop/native-input.js",
+        "public/js/utils/desktopNative.js"
+      ],
+      "requiredFiles": [
+        "Norva.NativePlayer.exe",
+        "Norva.NativePlayer.dll",
+        "libvlc/win-x64/libvlc.dll",
+        "libvlc/win-x64/libvlccore.dll",
+        "norva-player-icons.json",
+        "norva-labels.json",
+        "norva-theme.css",
+        "fonts/Inter-Regular.ttf",
+        "fonts/LICENSE.txt",
+        "THIRD-PARTY-NOTICES.md",
+        "source-manifest.json",
+        "licenses/vlc/COPYING",
+        "licenses/vlc/COPYING.LIB",
+        "licenses/libvlcsharp/LICENSE",
+        "licenses/microsoft.windowsdesktop.app.runtime.win-x64/LICENSE"
+      ],
+      "fontMatches": true,
+      "modernWindowsManifest": true,
+      "qaArtifactsExcluded": true,
+      "debugReceiptExcluded": true,
+      "x64Only": true,
+      "exeBytes": 239568901,
+      "exeSha256": "d97aee2f74ee391cd58ef72e45fb427b69c4f58ccfd4817e686fd364405662f8",
+      "finalPortableUiVerified": false
+    }
+  ],
+  "startupOptimization": {
+    "metric": "sampled picture counter, not exact visible first frame",
+    "baseline": {
+      "catalogueRequestedResumeSeconds": 965,
+      "firstPictureFromOpenMs": 44287,
+      "firstPictureAtMs": 1791622624558,
+      "lastPositionSeconds": 979.345,
+      "firstPositionSeconds": 965.777,
+      "netPositionChangeSeconds": 13.567999999999984,
+      "decodedAudio": 1002,
+      "lostPictures": 0,
+      "maximumConcurrentSourceRequests": 1,
+      "activeSourceRequestsAfterClose": 0,
+      "maximumCachedBytes": 16777216,
+      "cacheHits": 7,
+      "expireStatuses": [
+        200,
+        200
+      ],
+      "firstPictureFromClickMs": 45116
+    },
+    "small": {
+      "catalogueRequestedResumeSeconds": 979,
+      "firstPictureFromOpenMs": 4858,
+      "firstPictureAtMs": 1791622732482,
+      "lastPositionSeconds": 1118.865,
+      "firstPositionSeconds": 965.241,
+      "netPositionChangeSeconds": 153.62400000000002,
+      "decodedAudio": 9722,
+      "lostPictures": 0,
+      "maximumConcurrentSourceRequests": 1,
+      "activeSourceRequestsAfterClose": 0,
+      "maximumCachedBytes": 2097152,
+      "cacheHits": 8,
+      "expireStatuses": [
+        200,
+        200
+      ],
+      "firstPictureFromClickMs": 5767,
+      "qaEffectiveResumeSeconds": 965,
+      "qaOverrideExplicit": true
+    },
+    "california": {
+      "catalogueRequestedResumeSeconds": 163,
+      "firstPictureFromOpenMs": 7397,
+      "firstPictureAtMs": 1791622952462,
+      "lastPositionSeconds": 1234.72,
+      "firstPositionSeconds": 163.484,
+      "netPositionChangeSeconds": 1071.236,
+      "decodedAudio": 10336,
+      "lostPictures": 0,
+      "maximumConcurrentSourceRequests": 1,
+      "activeSourceRequestsAfterClose": 0,
+      "maximumCachedBytes": 16777216,
+      "cacheHits": 9,
+      "expireStatuses": [
+        200,
+        200
+      ],
+      "firstPictureFromClickMs": 8301
+    },
+    "peaky": {
+      "catalogueRequestedResumeSeconds": 1049,
+      "firstPictureFromOpenMs": 6000,
+      "firstPictureAtMs": 1791623236076,
+      "lastPositionSeconds": 123.521,
+      "firstPositionSeconds": 1050.081,
+      "netPositionChangeSeconds": -926.56,
+      "decodedAudio": 9802,
+      "lostPictures": 0,
+      "maximumConcurrentSourceRequests": 1,
+      "activeSourceRequestsAfterClose": 0,
+      "maximumCachedBytes": 16777216,
+      "cacheHits": 16,
+      "expireStatuses": [
+        200
+      ],
+      "firstPictureFromClickMs": 6905,
+      "zeroFirstProgressFromPlayMs": 980,
+      "zeroObservedPositionSeconds": 123.521
+    },
+    "audibleAccepted": false
+  },
+  "finalPortableHandoff": {
+    "observedAsarSha256": "0ad63c3e372e28f12ea6168ff5bc05da39a7b70c154f5c0237e21c78c3351aeb",
+    "finalExeSha256": "bbcb0d10eaed6c6f668777893239d9d633c100de89f4477d33091b90b05a95e3",
+    "observedFirstManualLaunch": "previous_package",
+    "automatedLaunchRefused": true,
+    "previousWindowClosed": true,
+    "exactFinalExe": "Norva-Windows-2.1.5-native.2-x64.exe",
+    "finalExeUiVerified": false,
+    "status": "awaiting_manual_final_exe_launch"
+  },
+  "draftRelease": {
+    "prerelease": true,
+    "draft": true,
+    "published": false,
+    "assetsUploadedAndDigestsVerified": true,
+    "id": 408840971,
+    "tag": "v2.1.5-native.2"
+  }
 }
