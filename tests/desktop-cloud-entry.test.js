@@ -124,3 +124,28 @@ test('a closing window does not receive a delayed login redirect', async () => {
     await Promise.resolve();
     assert.deepEqual(h.loaded, []);
 });
+
+test('desktop startup binds the transport to the exact address used by its availability probe', async () => {
+    const source = fs.readFileSync(require.resolve('../electron-main.js'), 'utf8');
+    let ready, listenHost;
+    const env = {}, opened = [];
+    const app = { setName() {}, getPath: () => '/fixture', requestSingleInstanceLock: () => true,
+        on() {}, whenReady: () => ({ then(callback) { ready = callback; return { catch() {} }; } }) };
+    const net = { createServer() { return { unref() {}, on() {},
+        listen(_port, host, callback) { listenHost = host; callback(); }, close(callback) { callback(); } }; } };
+    class Window { constructor() { this.webContents = { on() {}, setWindowOpenHandler() {} }; }
+        on() {} loadURL(url) { opened.push(url); } }
+    const imports = { electron: { app, BrowserWindow: Window, BaseWindow: Window, shell: {} },
+        fs: { existsSync: () => false }, net, http: { get(_url, callback) {
+            callback({ resume() {} }); return { on() {}, setTimeout() {} };
+        } }, './desktop/navigation': require('../desktop/navigation') };
+    const context = { require(name) {
+        if (name === './server/index') { assert.equal(env.NORVA_SERVER_HOST, listenHost); return {}; }
+        return imports[name] || require(name);
+    }, __dirname: __dirname, process: { env, platform: 'win32' }, console, setTimeout, URL };
+    vm.runInNewContext(source, context);
+    await ready();
+    assert.equal(listenHost, '127.0.0.1');
+    assert.equal(env.NORVA_SERVER_HOST, '127.0.0.1');
+    assert.deepEqual(opened, [home]);
+});

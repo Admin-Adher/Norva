@@ -16,10 +16,16 @@ Une seconde erreur existe à l'entrée cloud : la barrière de session de `app.h
 - Les paramètres de récupération, de gestion du compte, d'OTP et les fragments OAuth restent intacts. Le host ne lit ni ne copie les identifiants de session. Un iframe ne redirige pas la fenêtre principale.
 - Navigation externe et IPC conservent la limite de l'origine exacte. Aucun changement du lecteur, du transport média, des pistes, du cache ou des comptes fournisseur.
 
-La correction ne modifie aucun fichier WebView partagé, aucun APK ni le site publié. Les vérifications Android de rendu ne sont pas requises pour ces changements limités au processus principal Electron.
+La correction ne modifie aucun fichier WebView partagé, aucun APK ni le site publié. Les vérifications Android de rendu ne sont pas requises pour ces changements de démarrage Windows.
+
+## Incident du banc : port déjà occupé
+
+Pendant la vérification isolée, une erreur réelle `EADDRINUSE :::3002` apparaît. Adrien fournit aussi sa capture. `findFreePort()` vérifiait l'adresse IPv4 `127.0.0.1`, alors que le serveur ouvrait ensuite une écoute générique IPv6/dual-stack. Les deux vérifications ne portaient pas sur la même adresse ; le port pouvait donc être disponible au contrôle et occupé au démarrage.
+
+Le processus Windows impose maintenant `NORVA_SERVER_HOST=127.0.0.1` avant de charger le serveur ; `server/index.js` utilise cette adresse lorsqu'elle est explicitement configurée. Le serveur autonome conserve son écoute par défaut. Le test exécute le démarrage Electron avec des dépendances bornées et vérifie la concordance probe/serveur ; le test de la route réelle du serveur contrôle aussi l'adresse passée à Express. Aucun port d'un autre processus n'est libéré de force. Le premier démarrage avec un simple argument Chromium de profil n'est pas accepté comme preuve de profil vierge : le wrapper de contrôle fixe explicitement `userData` et `sessionData` avant le lancement.
 
 ## Vérification
 
-**47 tests ciblés réussis**, zéro échec : démarrage cloud à profil vierge, reproduction de la barrière hébergée réelle avant la landing, retour à Home sans boucle, session hydratée expirée avec refresh conservée, callbacks, navigation externe, fermeture pendant une redirection et contrôles natifs de transport/IPC/drainage.
+**48 tests ciblés réussis**, zéro échec : démarrage cloud à profil vierge, reproduction de la barrière hébergée réelle avant la landing, retour à Home sans boucle, session hydratée expirée avec refresh conservée, callbacks, navigation externe, fermeture pendant une redirection, adresse serveur et contrôles natifs de transport/IPC/drainage.
 
 Le contrôle runtime à profil isolé, la construction CI et l'inspection du portable sont en cours. Aucun login utilisateur n'est automatisé. La version native.3 n'est pas encore publiée à ce relevé.

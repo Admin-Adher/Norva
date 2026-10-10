@@ -173,6 +173,9 @@ async function startDesktopApp() {
 
     process.env.NODE_ENV = 'production';
     process.env.PORT = String(port);
+    // Match the IPv4 loopback address tested by findFreePort. A dual-stack/IPv6
+    // listener can otherwise collide with a port that was free on 127.0.0.1.
+    process.env.NORVA_SERVER_HOST = '127.0.0.1';
     process.env.NODECAST_DATA_DIR = path.join(userData, 'data');
     process.env.NODECAST_CACHE_DIR = path.join(userData, 'cache');
     process.env.NODECAST_TRANSCODE_CACHE_DIR = path.join(userData, 'transcode-cache');
