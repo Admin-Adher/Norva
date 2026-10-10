@@ -4369,7 +4369,9 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 onProviderIdentity: current => { nativeIdentity = current; },
                 // Historical name: the finite broker is container-independent.
                 pathPrefix: 'finite-mkv-seek',
-                finiteWindowBytes: claims.nativeContainer === 'ts' ? 128 * 1024 : 8 * 1024 * 1024,
+                finiteWindowBytes: claims.nativeContainer === 'ts' ? 128 * 1024
+                    : claims.scope === 'native-browser-mp4' && canUseStartupCache(entry.ownerHash)
+                        ? 2 * 1024 * 1024 : 8 * 1024 * 1024,
                 // A browser alternates distant audio/video packet ranges too.
                 // Complete/cache its first bounded chunk before an abandoned
                 // speculative 8 MiB read would incur the provider release delay.
