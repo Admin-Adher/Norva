@@ -167,21 +167,75 @@ avant la validation du préfixe, puis la fermait et attendait sa libération. Le
 prototype essaie maintenant le préfixe **avant cette ouverture**, pour un profil
 Matroska complet, une seule piste audio et aucun sous-titre. En cas de refus ou
 d'expiration, le broker est drainé avant la préparation ordinaire. Les graphes
-plus complexes conservent leur enrichissement habituel. Gain réel encore à mesurer.
+plus complexes conservent leur enrichissement habituel.
+
+Sur la même copie Lost, depuis zéro, la révision `b4553956f` donne ensuite
+**3,325 s** jusqu'à `playing`, contre **9,291 s** avant cette correction :
+session en **2,734 s**, Gateway en **2 091 ms**, dont **2 089 ms** de validation
+fraîche. Les quatre échantillons prennent **894/431/436/324 ms**. Les diagnostics
+confirment `privateStartupBeforePreopen=true`, `privateStartupWindowHit=true`
+et 60 secondes locales. **231,109 s** de vidéo sont parcourues, aucun événement
+d'attente ; intervalle maximal de callback de frame de **151,7 ms**. Une correction
+non fatale HLS `bufferSeekOverHole` est signalée au début. Ce contrôle valide un
+gain sur cette copie et ce chemin, pas sur l'ensemble du catalogue.
+
+Une seconde ouverture du même préfixe démarre en **3,561 s**, puis se bloque vers
+**2,496 s** de vidéo. L'événement d'attente dure **17,860 s**, mais la trace de
+progression et les callbacks révèlent une interruption plus longue, d'environ
+**34 s**. La lecture reprend et atteint **169,280 s**, sans nouvelle attente
+après la première minute. Deux avertissements HLS `bufferStalledError`, non
+fatals, restent consignés. La fluidité répétée n'est donc pas validée.
+
+Pendant ce second contrôle, les six premiers segments immuables sont relus par
+la route du Gateway existante, sans nouvelle connexion fournisseur : environ
+**1 ms** par segment, décodage FFmpeg sans erreur. Les paquets audio ont un
+écart PTS maximal de **21,334 ms**, ceux de vidéo **34 ms**. Cela écarte un trou
+de plusieurs secondes dans ces paquets, mais ne prouve pas le comportement
+du transport navigateur lors du gel. Sa cause reste ouverte.
+
+Preuves privées : `browser-5-before-early.safe.json`,
+`browser-create-5-before-early.safe.json`, `browser-5-after-early.safe.json`,
+`browser-create-5-after-early.safe.json`, `browser-5-after-early-repeat.safe.json`,
+`browser-create-5-after-early-repeat.safe.json`, `first-cached-assets.safe.json`
+et `first-cached-clocks.safe.json`.
 
 Les suites ciblées du transport/cache/Edge/runner passent **206 tests**, cinq
 ignorés. Après la correction de l'ouverture préalable, les contrôles du préfixe,
 des refus fournisseur et de la pompe MKV passent **175 tests**, un ignoré. Ces
 suites se recouvrent ; leurs nombres ne sont pas additionnés.
+La suite élargie locale donne **859 réussis, dix ignorés et un échec** :
+`media-gateway-video-encoder.test.js` ne trouve pas `js-yaml` dans cet environnement.
+La CI Linux de `b4553956f` réussit **6 338 tests, 35 ignorés**, sans échec ; région,
+syntaxe et constructions Phone, TV et Windows réussissent également.
 
 Les MP4 H.264/AAC compatibles ont un parcours natif distinct du cache HLS. Le
 banc temporaire employait une base publique HTTP, incompatible avec la politique
 HTTPS de cette route : corrigé dans la configuration du banc uniquement, sans
 affaiblir la politique ou modifier une route de production. Leur contrôle suit
 la voie native ; une préparation HLS forcée ne prouverait pas leur comportement.
+Jolt crée effectivement sa session native en **1,094 s**, mais la première image
+arrive en **25,323 s**. Aucun préfixe HLS n'est utilisé. Cette mesure concerne
+les données et métadonnées attendues par le navigateur, pas un démarrage depuis
+une minute vidéo HLS en cache.
+Le premier essai parcourt **147,386 s**, sans événement d'attente ni erreur
+vidéo, mais avec un intervalle maximal de callback de **2 018,5 ms**. Le second
+démarre en **29,274 s**, session native en **0,625 s**, puis parcourt **58,414 s**
+sans événement d'attente ni erreur (callback maximal **72,7 ms**). Ces durées
+n'autorisent pas à certifier les films entiers ni la qualité sonore.
 
-L'image candidate privée porte la révision `3162cc1`, empreinte
-`sha256:657b9bd60059cbe48114e9dff9099fd4123da44badc09b9f7fc55a56df904958`.
+Le cache privé d'octets natif reste à **zéro fichier, zéro octet réutilisé** :
+ses quatre observations d'identité sont refusées pour `missingValidator`.
+Les réponses ne fournissent donc pas le validateur fort requis par ce cache.
+Le cache HLS récent avec échantillons est un mécanisme distinct, non consommé
+par cette route MP4 ; sa réussite sur Lost ne couvre pas Jolt.
+Preuves : `browser-6-first.safe.json`, `browser-6.safe.json`,
+`browser-create-6.safe.json`, `health.safe.json`. Le premier temps de création
+(1,094 s) a été lu dans le retour de diagnostic avant écrasement du reçu par
+la seconde création ; il n'est pas attribué au reçu du second essai.
+
+L'image candidate privée finale porte la révision `b4553956f`, empreinte
+`sha256:5bebe7f6ca86e9f28bcb5df6f2f81fb89d8536687413fd075989a5f7a4e60210`,
+arbre source `b6d3a38666c226f8ba440127c09a972e298c846c1a5e22f318f117a18f22f57e`.
 Les fichiers de base Gateway, cache et Edge correspondent aux fichiers déployés
 avant les deltas de cette PR. L'image n'est pas déployée en production.
 
@@ -196,7 +250,11 @@ ni identifiant de compte n'est inclus dans ce rapport.
 
 ## État et critères d'activation
 
-**Non activé en production. Aucun gain de démarrage réel annoncé.**
+**Non activé en production. Gain de démarrage mesuré sur Lost uniquement ;
+fluidité répétée et couverture multi-format encore insuffisantes.**
+PR760 conservée en brouillon. Les essais sont arrêtés par expiration ordinaire
+de leurs claims ; sessions, transports natifs, pompes et encodeurs du canary
+reviennent à zéro. Les deux Gateways de production restent sains et inactifs.
 Avant activation : réussite de la CI, capture réelle d'un préfixe, revalidation
 et consommation depuis zéro, réception au-delà du raccord, pistes et sous-titres
 préservés, puis interruption d'un travail de fond par une lecture réelle avec
