@@ -207,15 +207,24 @@ class PrivateResumeHlsCache {
         } finally { this.reservedBytes -= reservation; }
     }
     async capture({ binding, observed, position, actualStartOffset, playlist, playlistClock = null,
-        playlistName = 'playlist.m3u8', readAsset, subtitleRenditions = [], inputWindows = [], sourcePesClock = false } = {}) {
-        if (!binding || !Number.isFinite(position) || position <= 0 || !Number.isFinite(actualStartOffset)
-            || actualStartOffset < 0 || typeof readAsset !== 'function') return this.rejectCapture('invalid-capture-input');
+        playlistName = 'playlist.m3u8', readAsset, subtitleRenditions = [], inputWindows = [], sourcePesClock = false,
+        capturePurpose = 'resume', isCurrent = () => true } = {}) {
+        const startup = capturePurpose === 'startup';
+        if (!['resume', 'startup'].includes(capturePurpose)
+            || !binding || !Number.isFinite(position) || (startup ? position !== 0 : position <= 0) || !Number.isFinite(actualStartOffset)
+            || actualStartOffset < 0 || typeof readAsset !== 'function' || typeof isCurrent !== 'function'
+            || !isCurrent()) return this.rejectCapture('invalid-capture-input');
         const identity = strongResumeIdentity(observed, binding.fileSizeBytes);
         const recentProof = !identity && this.recentRevalidation && observed?.fileSizeBytes === binding.fileSizeBytes
             ? sampleProof(observed.samples, observed.fileSizeBytes, observed.effectiveUrlIdentitySha256) : null;
         if (!identity && !recentProof) return this.rejectCapture('unverified-identity');
         const parsed = parseResumeMediaPlaylist(playlist);
         if (!parsed) return this.rejectCapture('ineligible-playlist');
+        // A prepared prefix is never a complete film, even after SIGTERM wrote
+        // ENDLIST. Require the actual zero origin and sixty finalized seconds.
+        if (startup && (actualStartOffset !== 0 || parsed.sequence !== 0 || parsed.duration < 60))
+            return this.rejectCapture('startup-prefix-incomplete');
+        if (startup) parsed.ended = false;
         // A sliding playlist has discarded earlier durations. Only the exact
         // producer's durable publication history can recover that origin;
         // never multiply a sequence number by a nominal segment duration.
@@ -227,11 +236,11 @@ class PrivateResumeHlsCache {
         const localPosition = position - actualStartOffset;
         const index = parsed.segments.findIndex(s => s.start <= localPosition && s.end > localPosition);
         if (index < 0) return this.rejectCapture('position-outside-buffer');
-        const selected = parsed.segments.slice(Math.max(0, index - 1)).filter(s => s.start < localPosition + this.windowSeconds);
+        const selected = parsed.segments.slice(Math.max(0, index - 1)).filter(s => s.start < localPosition + (startup ? 60 : this.windowSeconds));
         const start = selected[0].start + actualStartOffset;
         const end = selected.at(-1).end + actualStartOffset;
         const ended = parsed.ended && selected.at(-1) === parsed.segments.at(-1);
-        if (!ended && end - position < this.minimumAheadSeconds) return this.rejectCapture('insufficient-ahead');
+        if (!ended && end - position < (startup ? 60 : this.minimumAheadSeconds)) return this.rejectCapture('insufficient-ahead');
         this.prune(); const key = keyFor(binding), prior = this.entries.get(key);
         if (prior?.leases) return this.rejectCapture('active-lease');
         // Reserve the entire per-file budget before asynchronous reads. Pending
@@ -240,6 +249,8 @@ class PrivateResumeHlsCache {
             inputWindows.slice(0,512).reduce((sum,w) => sum + (Buffer.isBuffer(w?.payload) ? w.payload.length : 0), 0)) : 0;
         const reservation = 2 * (this.perFileBytes + inputBudget); // read buffer + immutable copy
         while (this.entries.size - (prior ? 1 : 0) >= this.maxEntries || this.bytes + this.reservedBytes + reservation > this.maxBytes) {
+            // Background prefixes must not evict a viewer's recent resume.
+            if (startup) return this.rejectCapture('startup-reservation-budget');
             const victim = [...this.entries].find(([, entry]) => !entry.leases && entry !== prior);
             if (!victim) return this.rejectCapture('reservation-budget');
             this.drop(...victim); this.stats.evictions++;
@@ -265,7 +276,7 @@ class PrivateResumeHlsCache {
             for (const [name, payload] of subtitles.assets) assets.set(name, payload);
             bytes += subtitles.bytes;
             bytes += retainedInput.reduce((sum,w) => sum+w.payload.length, 0);
-            if (this.entries.get(key) !== prior || this.entries.size - (prior ? 1 : 0) >= this.maxEntries) return this.rejectCapture('concurrent-capture');
+            if (!isCurrent() || this.entries.get(key) !== prior || this.entries.size - (prior ? 1 : 0) >= this.maxEntries) return this.rejectCapture('concurrent-capture');
             if (prior) this.drop(key, prior);
             this.entries.set(key, { binding, identity, recentProof, targetParts: observed.targetParts, deliveryTarget: observed.deliveryTarget, start, end, ended, segments, assets, bytes, bandwidth,
                 inputWindows: retainedInput,

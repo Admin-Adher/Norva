@@ -2848,6 +2848,37 @@ const privateResumeHlsCache = new PrivateResumeHlsCache({
     maxBytes: Number(process.env.PRIVATE_RESUME_HLS_CACHE_MAX_BYTES || 128 * 1024 * 1024),
     perFileBytes: Number(process.env.PRIVATE_RESUME_HLS_CACHE_PER_FILE_BYTES || 32 * 1024 * 1024),
 });
+const { createPrivateStartupCache } = require('./private-startup-cache');
+const { StartupCachePreparation } = require('./startup-cache-preparation');
+const canUseStartupCache = createRecentResumeOwnerGate({
+    enabled: PRIVATE_RESUME_CACHE_ENABLED && process.env.PRIVATE_STARTUP_CACHE_ENABLED === 'true',
+    ownerHashes: process.env.PRIVATE_STARTUP_CACHE_OWNER_HASHES,
+});
+const privateStartupHlsCache = createPrivateStartupCache(privateResumeHlsCache);
+const startupCachePreparation = new StartupCachePreparation({
+    allowsOwner: canUseStartupCache,
+    remainingSeconds: body => privateStartupHlsCache.remainingSeconds(body),
+    canStart: body => !viewerPlaybackActiveLocally() && !accountSlotBusyLocally(body.sourceUrl)
+        && !(accountExtractions.get(proxyKeyFromUrl(body.sourceUrl))?.size),
+    authorize: async job => {
+        if (!edgeCallbackBase || !GATEWAY_TOKEN || !job.permit) return false;
+        try {
+            const response = await fetch(`${edgeCallbackBase}/startup-cache/control`, {
+                method: 'POST', headers: { Authorization: `Bearer ${GATEWAY_TOKEN}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify(job.permit), signal: AbortSignal.timeout(5_000),
+            });
+            const result = await response.json();
+            return response.ok && result.protocol === 1 && result.authorized === true;
+        } catch (_) { return false; }
+    },
+    sessionForId: id => sessions.get(id),
+    covered: async session => {
+        const name = exactSubtitleHlsEnabled(session) ? session.videoPlaylistPath : session.playlistPath;
+        const parsed = parseResumeMediaPlaylist(await fsp.readFile(name, 'utf8').catch(() => ''));
+        return Boolean(parsed && parsed.sequence === 0 && parsed.duration >= 60 && session.actualStartOffset === 0);
+    },
+    stop: (session, job) => stopSession(session, { reason: job.complete && !job.signal.aborted ? 'startup-prefix-prepared' : 'startup-prefix-cancelled' }),
+});
 const sharedPlaybackRanges = new SharedPlaybackRanges({ enabled: process.env.SHARED_PLAYBACK_RANGES_ENABLED === 'true' });
 const finiteTsSeekIndex = new FiniteTsSeekIndex({
     root: path.join(OUTPUT_DIR, '.ts-navigation-v1'), bin: FFPROBE_PATH,
@@ -3126,6 +3157,8 @@ app.get('/health', (req, res) => {
             recentOwnerScope: process.env.PRIVATE_RESUME_RECENT_SAMPLES_ALL_AUTHENTICATED_OWNERS === 'true'
                 ? 'all-authenticated-owners' : 'owner-allowlist',
             ownerScoped: Boolean(process.env.PRIVATE_RESUME_CACHE_OWNER_HASHES?.trim()), ...privateResumeHlsCache.publicStatus() },
+        privateStartupHlsCache: { enabled: process.env.PRIVATE_STARTUP_CACHE_ENABLED === 'true',
+            ownerScope: 'owner-allowlist', ...privateStartupHlsCache.status(), preparation: startupCachePreparation.status() },
         sharedPlaybackRanges: sharedPlaybackRanges.publicStatus(),
         finiteTsSeekIndex: finiteTsSeekIndex.status(),
         finiteMkvLinearSeekBridge: {
@@ -3484,7 +3517,9 @@ app.post('/sessions/preempt-background-provider-affinities', requireGatewayAuth,
         || affinityHashes.some((value) => !/^[a-f0-9]{64}$/.test(value))) {
         return res.status(400).json({ error: 'affinityHashes must contain 1-64 SHA-256 values' });
     }
+    const startupDrain = await startupCachePreparation.preempt(job => affinityHashes.includes(providerAffinityHashForGatewayKey(job.accountKey)));
     const outcome = await stopProviderAffinities(affinityHashes, { backgroundOnly: true });
+    outcome.providerDrained = outcome.providerDrained && startupDrain.providerDrained;
     return res.status(outcome.providerDrained ? 200 : 409).json({
         ok: outcome.providerDrained, protocol: 1, scope: 'auxiliary-only',
         backgroundDrained: outcome.providerDrained,
@@ -3501,7 +3536,9 @@ app.post('/sessions/stop-provider-affinities', requireGatewayAuth, async (req, r
         || affinityHashes.some((value) => !/^[a-f0-9]{64}$/.test(value))) {
         return res.status(400).json({ error: 'affinityHashes must contain 1-64 SHA-256 values' });
     }
+    const startupDrain = await startupCachePreparation.preempt(job => affinityHashes.includes(providerAffinityHashForGatewayKey(job.accountKey)));
     const outcome = await stopProviderAffinities(affinityHashes);
+    outcome.providerDrained = outcome.providerDrained && startupDrain.providerDrained;
     if (!outcome.providerDrained) {
         return res.status(409).json({ error: 'Provider transport remains active', providerDrained: false });
     }
@@ -12178,7 +12215,24 @@ app.post('/playback-preparations/cancel', requireGatewayAuth, async (req, res) =
     }
 });
 
-app.post('/sessions', requireGatewayAuth, async (req, res) => {
+app.post('/startup-cache/prepare', requireGatewayAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const body = asRecord(req.body), sessionBody = asRecord(body.session);
+    if (body.protocol !== 1 || !canUseStartupCache(sessionBody.ownerKey)
+        || !isHttpUrl(sessionBody.sourceUrl) || Number(sessionBody.seekOffset) !== 0
+        || sessionBody.mediaCacheProducer || sessionBody.preparationProtocol
+        || !hasReliableVodCodecProfile(sessionBody.codecProfile)
+        || !Number.isSafeInteger(Number(sessionBody.codecProfile?.fileSizeBytes))
+        || Number(sessionBody.codecProfile.fileSizeBytes) <= 0) {
+        return res.status(409).json({ protocol: 1, prepared: false, providerDrained: true, reason: 'not-admitted' });
+    }
+    const result = await startupCachePreparation.prepare({ body: { ...sessionBody, seekOffset: 0,
+        completeHlsCachePolicy: 'bypass' }, ownerKey: sessionBody.ownerKey,
+        accountKey: proxyKeyFromUrl(sessionBody.sourceUrl), permit: body.permit });
+    res.status(result.providerDrained ? 200 : 503).json(result);
+});
+
+app.post('/sessions', requireGatewayAuth, startupCachePreparation.bindSessionCreate(async (req, res) => {
     const sessionCreateStartedAt = Date.now();
     sessionStartupStats.attempts += 1;
     let viewerStartupReservation = null;
@@ -12256,6 +12310,15 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         const normalizedOwnerKey = normalizeSessionKey(ownerKey);
         const playbackProxyKey = proxyKeyFromUrl(sourceUrl);
         const playbackProviderSlotKey = providerSlotKeyFromUrl(sourceUrl, normalizedOwnerKey);
+        const startupJob = req.startupCacheJob || null;
+        if (startupJob) {
+            await startupJob.assertAuthorized();
+            if (!startupCachePreparation.canStart(req.body)) throw Error('STARTUP_PREPARATION_ACCOUNT_BUSY');
+        } else {
+            const drained = await startupCachePreparation.preempt(job => job.ownerKey === normalizedOwnerKey
+                || job.accountKey === playbackProxyKey);
+            if (!drained.providerDrained) return res.status(503).json({ code: 'STARTUP_PREPARATION_DRAIN_UNCONFIRMED' });
+        }
         // Observe abandonment before admission or lock allocation. A queued
         // browser navigation must release immediately rather than wait behind a
         // previous startup and keep shared QoS elevated.
@@ -12385,7 +12448,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             observeProviderProxySelection(playbackProxyKey, providerNodeRouteForSession({ sourceUrl,
                 canaryProviderRoute: adaptiveRouteDecision?.controlStatus === 'canary-shadow-applied'
                     ? adaptiveRouteDecision : null }));
-            scheduleProviderRouteBenchmark(
+            if (!startupJob) scheduleProviderRouteBenchmark(
                 sourceUrl,
                 playbackProxyKey,
                 userAgent,
@@ -12396,7 +12459,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         let stoppedConflictingSessions = 0;
         let globalBackgroundPreemptions = { extractions: 0, whispers: 0, cpu: 0 };
         let slotReleaseWaitMs = 0;
-        if (!completeHlsCacheLookup.hit) {
+        if (!completeHlsCacheLookup.hit && !startupJob) {
             // Only a startup that will open provider/FFmpeg work reserves viewer
             // QoS and preempts the previous provider holder. Local cache playback
             // is deliberately invisible to those resource ledgers.
@@ -12602,6 +12665,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             clientAudioPassthrough: clientAudioPassthrough === false || normalizedPlaybackHint.clientAudioPassthrough === false || normalizedPlaybackHint.client_audio_passthrough === false ? false : true,
             completeHlsCachePolicy: normalizedCompleteHlsCachePolicy,
             forceExactMatroskaH264Reencode,
+            startupCacheJob: startupJob,
             mkvH264FastStart: null,
             startupPolicy: null,
             videoMode: null,
@@ -12702,6 +12766,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             }
         };
 
+        if (startupJob) startupJob.session = session;
         if (completeHlsCacheLookup.hit) {
             createdSession = session;
             pendingMkvCompleteHlsCacheLease = null;
@@ -13095,7 +13160,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         releasePreparationStartup?.(async () => !preparationCleanupFailed
             && [...preparationChildren].every(child => child.exitCode != null || Boolean(child.signalCode)));
     }
-});
+}));
 
 function gatewayCreatedSessionPayload(req, session) {
     return {
@@ -15952,6 +16017,7 @@ async function trySeedRecentRetainedInput(session, signal) {
 }
 
 async function capturePrivateResumeWindow(session, playlistClock = null) {
+    if (session.startupCacheJob) return false;
     const position = session.privateResumeStopPosition;
     if (!Number.isFinite(position) || position <= 0) return false;
     if (session.retainedInputInterrupted) return privateResumeHlsCache.rejectCapture('retained-input-interrupted');
@@ -15978,6 +16044,24 @@ async function capturePrivateResumeWindow(session, playlistClock = null) {
         playlist: playlist.replace(/^#EXT-X-ENDLIST\s*$/gm, ''),
         sourcePesClock: retainedSubtitleClock(session),
         readAsset: (name, remainingBytes) => readPrivateResumeAsset(session, name, remainingBytes) });
+}
+
+async function capturePrivateStartupWindow(session) {
+    const job = session.startupCacheJob;
+    if (!job?.complete || job.signal.aborted || session.lastError || session.inputFailure
+        || session.retainedInputInterrupted || !canUseStartupCache(session.ownerKey)) return false;
+    const binding = privateResumeHlsBindingForSession(session);
+    if (!binding || session.actualStartOffset !== 0) return false;
+    const playlist = await fsp.readFile(exactSubtitleHlsEnabled(session)
+        ? session.videoPlaylistPath : session.playlistPath, 'utf8').catch(() => '');
+    session.startupCacheStored = await privateStartupHlsCache.capture({ binding,
+        observed: privateResumeObservedIdentity(session), actualStartOffset: session.actualStartOffset,
+        playlist, inputWindows: session.privateResumeInputWindows,
+        subtitleRenditions: exactSubtitleRenditionsForSession(session), sourcePesClock: retainedSubtitleClock(session),
+        isCurrent: () => job.complete && !job.signal.aborted,
+        readAsset: (name, remainingBytes) => readPrivateResumeAsset(session, name, remainingBytes) });
+    if (session.startupCacheStored) privateStartupHlsCache.remember(job.body, binding);
+    return session.startupCacheStored;
 }
 
 async function readPrivateResumeAsset(session, name, remainingBytes) {
@@ -16102,9 +16186,12 @@ async function revalidateRecentResumeSession(session, plan, requestSignal) {
 }
 
 async function tryStartPrivateResumeWindow(session, requestSignal) {
+    if (session.startupCacheJob) return false;
     const binding = privateResumeHlsBindingForSession(session);
     const position = Number(session.seekOffset);
-    if (!binding || !(position > 0) || !privateResumeHlsCache.hasCandidate(binding, position)) return false;
+    const startup = position === 0 && canUseStartupCache(session.ownerKey);
+    const cache = startup ? privateStartupHlsCache : privateResumeHlsCache;
+    if (!binding || !(position > 0 || startup) || !cache.hasCandidate(binding, position)) return false;
     const format = privateResumeFormat(session);
     if (format === 'mpegts') {
         // The cached boundary is not a keyframe in the source. Decode a TS
@@ -16112,7 +16199,7 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
         session.finiteTsResumeAligned = true;
     }
     const startedAt = Date.now();
-    const plan = privateResumeHlsCache.revalidationPlan(binding, position);
+    const plan = cache.revalidationPlan(binding, position);
     let observed;
     if (plan) {
         if (!canUseRecentResumeSamples(session.ownerKey)) return false;
@@ -16134,7 +16221,7 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
         if (response.status !== 206 || fresh.byteLength !== Math.min(size, 65536)) return false;
         observed = privateResumeObservedIdentity(session);
     }
-    const lease = privateResumeHlsCache.acquire(binding, position, observed);
+    const lease = cache.acquire(binding, position, observed);
     session.startupTimings.privateResumeValidationMs = Date.now() - startedAt;
     if (!lease) return false;
     if (lease.validationMode === 'sampled-recent-v1') {
@@ -16172,6 +16259,7 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
     if (session.lastError) throw new Error('RESUME_CONTINUATION_FAILED');
     session.status = 'ready';
     session.startupTimings.privateResumeWindowHit = true;
+    session.startupTimings.privateStartupWindowHit = startup;
     session.startupTimings.privateResumeAheadSeconds = lease.aheadSeconds;
     // This is a bounded local-buffer proof, not a fictional encoder speed.
     session.startupPolicy = { protocol: 3, eligible: true, pipeline: 'video-transcode',
@@ -22990,6 +23078,12 @@ async function stopSession(session, options = {}) {
     retainedSessionTransfer.forget(session);
 
     const stopReason = String(options?.reason || 'stopped');
+    if (stopReason === 'startup-prefix-prepared' && session.startupCacheJob?.complete) {
+        // Existing linear collectors finalize evidence only for an intentional
+        // stop. The epsilon is internal evidence bookkeeping, not a viewer's
+        // history or a seek position; startup capture always uses exactly zero.
+        session.privateResumeStopPosition = Number.EPSILON;
+    }
     if (session.backgroundCacheContinuation === true && !session.backgroundCacheContinuationOutcome) {
         settleMkvCompleteHlsBackgroundContinuation(
             session,
@@ -23055,6 +23149,7 @@ async function stopSession(session, options = {}) {
         // The private cache still requires fresh identity, exact tracks and
         // enough usable coverage; an incomplete source is never published.
         await capturePrivateResumeWindow(session, resumePlaylistClock).catch(() => false);
+        await capturePrivateStartupWindow(session).catch(() => false);
         session.privateResumeSamples = null;
         session.privateResumeInputWindows = null;
         session.privateResumeDeliveryTarget = null;
@@ -23075,7 +23170,7 @@ function touchViewerSessionClientAccess(session, nowMs = Date.now()) {
 }
 
 function viewerSessionIdleExpired(session, nowMs = Date.now()) {
-    if (!session || session.backgroundCacheContinuation === true) return false;
+    if (!session || session.startupCacheJob || session.backgroundCacheContinuation === true) return false;
     const createdAtMs = session.createdAt instanceof Date
         ? session.createdAt.getTime()
         : Date.parse(String(session.createdAt || ''));
@@ -24964,7 +25059,7 @@ const ACCOUNT_ACTIVITY_REPORT_MS = clampInt(process.env.ACCOUNT_ACTIVITY_REPORT_
 function activeProviderAccountActivityGroups() {
     const candidates = [];
     for (const s of sessions.values()) {
-        if (s && s.sourceUrl && isSessionBlockingProviderSlot(s)) {
+        if (s && s.sourceUrl && !s.startupCacheJob && isSessionBlockingProviderSlot(s)) {
             candidates.push({
                 key: proxyKeyFromUrl(s.sourceUrl),
                 kind: ACCOUNT_ACTIVITY_KIND_GATEWAY,
@@ -25010,7 +25105,7 @@ function activeProviderAccountActivityGroups() {
 function activeProviderRouteAccountFingerprints() {
     const values = new Set();
     for (const session of sessions.values()) {
-        if (!session?.sourceUrl || !isSessionBlockingProviderSlot(session)) continue;
+        if (!session?.sourceUrl || session.startupCacheJob || !isSessionBlockingProviderSlot(session)) continue;
         const affinityKey = proxyKeyFromUrl(session.sourceUrl);
         const fingerprints = providerAdaptiveRouteControl.fingerprintsForSource(
             session.sourceUrl,

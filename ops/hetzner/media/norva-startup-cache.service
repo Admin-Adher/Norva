@@ -1,0 +1,22 @@
+[Unit]
+Description=Norva bounded private startup cache pilot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=adrien
+WorkingDirectory=/opt/norva-startup-cache
+EnvironmentFile=/etc/norva/startup-cache.env
+ExecStart=/usr/bin/node /opt/norva-startup-cache/startup-cache-worker.mjs
+Restart=on-failure
+RestartSec=180
+TimeoutStopSec=155
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

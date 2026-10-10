@@ -8,6 +8,7 @@ function response(){const r=new EventEmitter();r.statusCode=200;r.status=n=>{r.s
 function routes(){const handlers={};let admissions=0;
 const context=vm.createContext({require,AbortController,Date,Set,Map,setTimeout,clearTimeout,Promise,console,
   app:{post:(route,auth,fn)=>handlers[route]=fn,get:(route,auth,fn)=>handlers[route]=fn},requireGatewayAuth:()=>{},
+  startupCachePreparation:{bindSessionCreate:fn=>fn,preempt:async()=>({providerDrained:true})},
   playbackPreparationGeneration:'new-process',playbackPreparationCancellation:createPlaybackPreparationCancellation({drainTimeoutMs:20}),
   playbackPreparationRawWork:new Map(),playbackPreparationUnconfirmedStops:new Map(),sessions:new Map(),
   sessionStartupStats:{attempts:0},isHttpUrl:()=>true,normalizeSourceContainerAuthority:()=>null,
