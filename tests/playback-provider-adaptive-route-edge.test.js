@@ -30,7 +30,7 @@ test('route resolver accepts only one-way identities and route coordinates', () 
   assert.match(edge, /\^\[0-9a-f\]\{64\}\$/);
   assert.match(edge, /Object\.keys\(candidateRecord\)\.sort\(\)\.join\(","\) !== "nodeTransport,slot"/);
   assert.doesNotMatch(
-    edge.slice(edge.indexOf('async function runProviderRouteResolve'), edge.indexOf('// POST /pregen-gate')),
+    edge.slice(edge.indexOf('async function runProviderRouteResolve'), edge.indexOf('const PROVIDER_ROUTE_FINGERPRINT_PATTERN')),
     /body\.(sourceUrl|serverUrl|username|password|userId|sourceId)/,
   );
 });

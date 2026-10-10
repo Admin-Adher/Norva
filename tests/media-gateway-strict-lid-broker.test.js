@@ -40,6 +40,36 @@ test('MP4 copied header filter preserves decoded frames and timestamps', { skip:
 });
 const { StrictLidRangeReuse, createStrictRangeCollector } = require('../services/media-gateway/src/strict-lid-range-reuse');
 
+for (const scoped of [false, true]) test(`recent playback sample transport ${scoped ? 'reuses one socket and closes before return' : 'cannot change unscoped strict probes'}`, async t => {
+  const { validateRecentResume } = require('../services/media-gateway/src/recent-resume-validation');
+  const { Agent } = require('undici');
+  const N=65536,size=8*N,sockets=new Set(),headers=[];let active=0,maxActive=0,open=0,drained=false;
+  const server=http.createServer((req,res)=>{
+    sockets.add(req.socket.remotePort);headers.push(req.headers.connection);active++;maxActive=Math.max(active,maxActive);
+    const [start,end]=req.headers.range.slice(6).split('-').map(Number);
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${size}`,'Content-Length':end-start+1});
+    res.once('finish',()=>active--);res.end(Buffer.alloc(end-start+1,7));
+  });
+  server.on('connection',socket=>{open++;socket.once('close',()=>open--);});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+  const h=brokerHarness();
+  const result=await validateRecentResume({
+    plan:{kind:'sampled-recent-v1',ranges:[0,N,2*N,3*N].map(start=>({start,length:N}))},
+    createBroker:signal=>h.createStrictLidBroker({
+      sourceUrl:`http://127.0.0.1:${server.address().port}/file`,fileSizeBytes:size,
+      dispatcherFactory:()=>new Agent({connections:1,pipelining:1}),
+      recentValidationKeepAlive:true,...(scoped?{freshResumeScope:{id:'private-playback'}}:{}),
+      abortSignal:signal,completedReleaseDelayMs:0,
+    }),
+    onFreshValidatedHeader:()=>{drained=true;assert.equal(active,0);},
+  });
+  assert.equal(result.length,4);assert.equal(headers.length,4);assert.equal(maxActive,1);
+  assert.equal(sockets.size,scoped?1:4);assert.equal(headers.every(x=>x==='close'),!scoped);
+  assert.equal(drained,true);assert.equal(h.strictLidBrokers.size,0);
+  await new Promise(resolve=>setTimeout(resolve,20));assert.equal(open,0);
+});
+
 test('recent target rejection drains one real range and preserves the changed-target fence', async()=>{
   const {validateRecentResume}=require('../services/media-gateway/src/recent-resume-validation');
   const N=65536,size=8*N; let ranges=0,active=0,maxActive=0,identity=null,rejected=0;
@@ -135,6 +165,7 @@ function brokerHarness(diagnosticLogs = null) {
       ...require('../services/media-gateway/src/recent-delivery-target'),
       createStrictRangeCollector,
       createMp4SizeEvidence: require('../services/media-gateway/src/mp4-size-evidence').createMp4SizeEvidence,
+      createMp4CacheCoverage: require('../services/media-gateway/src/mp4-indexed-byte-coverage').createMp4CacheCoverage,
       fetch,
       http,
       isHttpUrl(value) {
@@ -159,6 +190,29 @@ function brokerHarness(diagnosticLogs = null) {
     },
   );
 }
+
+test('MP4 coverage reads the real bounded broker cache without provider I/O and follows eviction', async t => {
+  const N=65536, data=Buffer.alloc(3*N), words=(...xs)=>{const b=Buffer.alloc(xs.length*4);xs.forEach((x,i)=>b.writeUInt32BE(x,i*4));return b;};
+  const box=(name,...parts)=>{const body=Buffer.concat(parts),head=Buffer.alloc(8);head.writeUInt32BE(body.length+8);head.write(name,4);return Buffer.concat([head,body]);};
+  const track=(kind,offset)=>{const handler=Buffer.alloc(12);handler.write(kind,8);return box('trak',box('mdia',
+    box('mdhd',words(0,0,0,1000,4000)),box('hdlr',handler),box('minf',box('stbl',
+      box('stts',words(0,1,4,1000)),box('stsz',words(0,10,4)),box('stco',words(0,1,offset)),
+      box('stsc',words(0,1,1,4,1)),...(kind==='vide'?[box('stss',words(0,2,1,3))]:[])))));};
+  const moov=box('moov',track('vide',100),track('soun',200));moov.copy(data,data.length-moov.length);
+  let requests=0;
+  const server=http.createServer((req,res)=>{requests++;const [start,end]=req.headers.range.slice(6).split('-').map(Number);
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1,ETag:'"cache-proof"'});res.end(data.subarray(start,end+1));});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl:`http://127.0.0.1:${server.address().port}/file`,fileSizeBytes:data.length,
+    pathPrefix:'finite-mkv-seek',finiteWindowBytes:N,finiteFirstWindowBytes:0,finiteWarmupWindowBytes:0,finiteCacheBytes:N,finiteMp4Coverage:true});
+  t.after(async()=>{await broker.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+  const read=async(start,end)=>{const res=await fetch(broker.inputUrl,{headers:{Range:`bytes=${start}-${end}`}});assert.equal(res.status,206);assert.equal((await res.arrayBuffer()).byteLength,end-start+1);};
+  assert.equal(broker.cachedMp4Coverage(1.5),null);
+  await read(2*N,3*N-1); assert.equal(broker.cachedMp4Coverage(1.5).secondsAhead,0);
+  await read(0,N-1);const before=requests;assert.equal(broker.cachedMp4Coverage(1.5).secondsAhead,2.5);
+  assert.equal(requests,before);await read(N,2*N-1);assert.equal(broker.cachedMp4Coverage(1.5).secondsAhead,0);
+  await broker.close();assert.equal(broker.cachedMp4Coverage(1.5),null);
+});
 
 for (const changed of [false, true]) test(`a distant MP4 cue ${changed ? 'rejects a changed file after yield' : 'passes a slow continuation without truncating either local response'}`, { timeout: 5000 }, async t => {
   const N = 65536, data = Buffer.alloc(8 * N);
@@ -811,6 +865,25 @@ test('native finite TS far seek: serialized broker preserves decoded media witho
     if (provider) await closeServer(provider);
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('finite MP4 seek fetches only the gap before a complete cached suffix', async (t) => {
+  const data = Buffer.from(Array.from({ length: 128 }, (_, i) => i));
+  const calls = [];
+  const provider = http.createServer((req, res) => { calls.push(req.headers.range); sendExactRange(req, res, data); });
+  const sourceUrl = await listen(provider);
+  t.after(() => closeServer(provider));
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: data.length,
+    pathPrefix: 'finite-mkv-seek', dispatcher: null, finiteWindowBytes: 32,
+    finiteCacheBytes: 128, releaseDelayMs: 0 });
+  t.after(() => broker.close());
+  for (const [start, end] of [[64,95],[60,95],[58,100]]) {
+    const response = await fetch(broker.inputUrl, { headers: { Range: `bytes=${start}-${end}` } });
+    assert.equal(response.headers.get('content-range'), `bytes ${start}-${end}/128`);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), data.subarray(start,end+1));
+  }
+  assert.deepEqual(calls, ['bytes=64-95','bytes=60-63','bytes=58-59','bytes=96-100']);
+  assert.equal(broker.interruptedProviderFetches,0);
 });
 
 test('finite TS lookbehind returns only requested bytes and reuses backwards timestamp searches', { timeout: 8000 }, async (t) => {
@@ -4023,6 +4096,39 @@ test('stable MKV delivery reduces remote round trips and resets small at each ne
       assert.equal(peak, 1); assert.equal(broker.interruptedProviderFetches, 0);
     } finally { await broker.close(); await closeServer(provider); }
   }
+});
+
+for (const kind of ['tail', 'disabled', 'oversized', 'not-eof', 'whole-file'])
+test(`MP4 bounded tail coalescing: ${kind}`, async t => {
+  const N=65536, data=Buffer.from(Array.from({length:8*N},(_,i)=>i%251)), ranges=[];
+  let active=0,peak=0;
+  const provider=http.createServer((req,res)=>{
+    ranges.push(req.headers.range);active++;peak=Math.max(peak,active);
+    res.once('finish',()=>{active--});sendExactRange(req,res,data);
+  });
+  const sourceUrl=await listen(provider);
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,
+    pathPrefix:'finite-mkv-seek',finiteWindowBytes:4*N,finiteFirstWindowBytes:N,
+    finiteAlignFirstWindow:true,finiteSequentialWindowBytes:4*N,
+    finiteTailWindowBytes:kind==='disabled'?0:3*N,finiteCacheBytes:8*N,
+    releaseDelayMs:0,completedReleaseDelayMs:0});
+  t.after(async()=>{await broker.close();await closeServer(provider)});
+  const start=kind==='whole-file'?0:kind==='oversized'?4*N:5*N+17;
+  const end=kind==='not-eof'?7*N-1:data.length-1;
+  const response=await fetch(broker.inputUrl,{headers:{Range:`bytes=${start}-${end}`}});
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()),data.subarray(start,end+1));
+  if(kind==='tail') {
+    assert.deepEqual(ranges,[`bytes=${start}-${end}`]);
+    const before=ranges.length;
+    const cached=await fetch(broker.inputUrl,{headers:{Range:`bytes=${start}-${end}`}});
+    assert.deepEqual(Buffer.from(await cached.arrayBuffer()),data.subarray(start,end+1));
+    assert.equal(ranges.length,before,'only the complete validated suffix may be reused');
+  } else {
+    const first=ranges[0].slice(6).split('-').map(Number);
+    assert.ok(first[1]-first[0]+1<=N,'unqualified requests keep the small initial read');
+    assert.ok(ranges.length>1);
+  }
+  assert.equal(peak,1);assert.equal(broker.terminalError,null);
 });
 
 test('small MP4 first range grows for sustained sequential delivery',async t=>{

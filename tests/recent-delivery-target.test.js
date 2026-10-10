@@ -1,6 +1,6 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict'), crypto = require('node:crypto');
-const { retainRecentDeliveryTarget: retain, consumeRecentDeliveryTarget: consume } = require('../services/media-gateway/src/recent-delivery-target');
+const { retainRecentDeliveryTarget: retain, consumeRecentDeliveryTarget: consume, forkRecentDeliveryTarget: fork } = require('../services/media-gateway/src/recent-delivery-target');
 const { RECENT_TTL_MS } = require('../services/media-gateway/src/recent-resume-samples');
 const targetUrl = 'https://delivery.invalid/private-token';
 const facts = { ownerKey:'a'.repeat(64), sourceUrl:'https://provider.invalid/movie', userAgent:'Norva/Test',
@@ -24,4 +24,23 @@ test('invalid or forged target facts cannot become a routing hint',()=>{
     for(const alter of [{targetHash:'c'.repeat(64)},{targetUrl:'file:///private'},{targetUrl:'https://user:secret@invalid/a'},
         {routeKey:null},{fileSizeBytes:undefined},{ownerKey:undefined},{sourceUrl:'not-url'}])
         assert.equal(retain({...facts,...alter}),null);
+});
+
+test('prefix routing forks preserve expiry, isolation and one-use consumption', () => {
+    const root = retain(facts);
+    assert.equal(fork(root, { ...facts, ownerKey: 'c'.repeat(64) }), null);
+    for (const now of [99, 100 + RECENT_TTL_MS, NaN]) assert.equal(fork(root, { ...facts, now }), null);
+    assert.equal(fork({}, facts), null);
+    for (const key of ['ownerKey', 'sourceUrl', 'userAgent', 'fileSizeBytes', 'routeKey']) {
+        const hint = fork(root, facts);
+        assert.ok(hint); assert.equal(JSON.stringify(hint), '{}');
+        assert.equal(fork(hint, facts), null);
+        assert.equal(consume(hint, { ...facts, [key]: key === 'fileSizeBytes' ? facts[key] + 1 : 'changed' }), null);
+        assert.equal(consume(hint, facts), null);
+    }
+    const last = fork(root, { ...facts, now: 100 + RECENT_TTL_MS - 1 });
+    assert.equal(consume(last, { ...facts, now: 100 + RECENT_TTL_MS }), null);
+    assert.ok(consume(fork(root, facts), facts));
+    assert.ok(consume(root, facts));
+    assert.equal(fork(root, facts), null);
 });

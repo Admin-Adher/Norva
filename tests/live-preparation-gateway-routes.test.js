@@ -8,6 +8,10 @@ function response(){const r=new EventEmitter();r.statusCode=200;r.status=n=>{r.s
 function routes(){const handlers={};let admissions=0;
 const context=vm.createContext({require,AbortController,Date,Set,Map,setTimeout,clearTimeout,Promise,console,
   app:{post:(route,auth,fn)=>handlers[route]=fn,get:(route,auth,fn)=>handlers[route]=fn},requireGatewayAuth:()=>{},
+  startupCachePreparation:{jobs:new Set(),bindSessionCreate:fn=>fn,preempt:async()=>({providerDrained:true})},
+  asRecord:x=>x||{},canUseStartupCache:()=>true,hasReliableVodCodecProfile:()=>true,
+  buildExactSubtitleHlsPlan:require('../services/media-gateway/src/sharedHlsTracks').buildExactSubtitleHlsPlan,
+  MAX_EXACT_SUBTITLE_HLS_RENDITIONS:8,MAX_CACHEABLE_EXACT_SUBTITLE_HLS_RENDITIONS:8,
   playbackPreparationGeneration:'new-process',playbackPreparationCancellation:createPlaybackPreparationCancellation({drainTimeoutMs:20}),
   playbackPreparationRawWork:new Map(),playbackPreparationUnconfirmedStops:new Map(),sessions:new Map(),
   sessionStartupStats:{attempts:0},isHttpUrl:()=>true,normalizeSourceContainerAuthority:()=>null,
@@ -23,6 +27,45 @@ const h=routes();for(const generation of ['old-process','new-process']){
   const req=new EventEmitter();req.body={sourceUrl:'http://fixture.invalid/live/1.ts',ownerKey:owner,playbackSessionId:id,preparationProtocol:1,preparationGatewayGeneration:generation,preparationExpiresAt:new Date(Date.now()+180000).toISOString()};
   const res=response();await h.handlers['/sessions'](req,res);assert.ok([400,409].includes(res.statusCode));assert.equal(h.admissions(),0);
 }
+});
+test('completed HTTP body during background drainage is not a cancelled viewer response',async()=>{
+  const h=routes(),req=new EventEmitter(),res=response();
+  req.body={sourceUrl:'http://fixture.invalid/movie/1.mkv',ownerKey:owner};
+  let admitted=0;
+  h.context.startupCachePreparation.jobs.add({});
+  h.context.startupCachePreparation.preempt=async()=>{
+    await Promise.resolve();req.destroyed=true;
+    return {providerDrained:true};
+  };
+  h.context.viewerStartupQueue.acquire=async()=>{
+    admitted++;throw Object.assign(new Error('queue busy'),{code:'VIEWER_STARTUP_BUSY'});
+  };
+  res.setHeader=()=>{};
+  await h.handlers['/sessions'](req,res);
+  assert.equal(admitted,1);assert.equal(res.statusCode,503);
+  assert.equal(res.body.code,'GATEWAY_STARTUP_BUSY');
+});
+test('viewer response abandoned during background drainage never acquires admission',async()=>{
+  const h=routes(),req=new EventEmitter(),res=response();
+  req.body={sourceUrl:'http://fixture.invalid/movie/1.mkv',ownerKey:owner};
+  h.context.startupCachePreparation.jobs.add({});
+  h.context.startupCachePreparation.preempt=async()=>{
+    res.emit('close');return {providerDrained:true};
+  };
+  await h.handlers['/sessions'](req,res);
+  assert.equal(h.admissions(),0);
+});
+test('startup route defers incomplete or uncacheable subtitle graphs before acquiring media',async()=>{
+  const h=routes();
+  for(const subtitles of [undefined,[{index:2,codec:'hdmv_pgs_subtitle',extractable:false}],
+    Array.from({length:9},(_,i)=>({index:i+2,codec:'subrip',extractable:true}))]) {
+    const res=response();res.setHeader=()=>{};
+    await h.handlers['/startup-cache/prepare']({body:{protocol:1,session:{ownerKey:owner,
+      sourceUrl:'http://fixture.invalid/movie/1.mkv',seekOffset:0,
+      codecProfile:{fileSizeBytes:1000,subtitles}}}},res);
+    assert.equal(res.statusCode,409);assert.equal(res.body.reason,'subtitle-topology-not-cacheable');
+    assert.equal(res.body.providerDrained,true);
+  }
 });
 test('real cancellation route waits for raw body disposal, keeps exact owner scope and generation',async()=>{
 const h=routes();let release,aborted=false;

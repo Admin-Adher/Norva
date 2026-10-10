@@ -642,6 +642,12 @@ async function handleRequest(req: Request): Promise<Response> {
     if (req.method === "POST" && segments[0] === "media-cache" && segments[1] === "producer-control") {
       return json(req, await runMediaCacheProducerControl(req, supabase));
     }
+    if (req.method === "POST" && segments[0] === "startup-cache" && segments[1] === "prepare" && !segments[2]) {
+      return json(req, await runStartupCachePreparation(req, supabase));
+    }
+    if (req.method === "POST" && segments[0] === "startup-cache" && segments[1] === "control" && !segments[2]) {
+      return json(req, await runStartupCacheControl(req, supabase));
+    }
     if (req.method === "POST" && segments[0] === "media-cache" && segments[1] === "maintenance") {
       return json(req, await runMediaCacheMaintenance(req, supabase));
     }
@@ -8029,6 +8035,7 @@ async function resolvePlaybackTarget(
   userId: string,
   db: SupabaseClient,
   requestHint: JsonRecord = {},
+  offlineOwnedXtreamOnly = false,
 ) {
   // Phase 2 dedup: when the read flag is on, resolve playback_hint/metadata from
   // the provider-global catalog_media_items (keyed by server_host) instead of the
@@ -8044,6 +8051,7 @@ async function resolvePlaybackTarget(
     metadata?: unknown;
   } | null = null;
   const genericM3uEpisode = isM3uEpisodeId(itemId);
+  if (offlineOwnedXtreamOnly && genericM3uEpisode) throw new HttpError(409, "Startup target requires an owned Xtream file");
   if (genericM3uEpisode) {
     if (itemType !== "series" && itemType !== "episode") throw new HttpError(404, "Media item not found");
     const episode = await resolveOwnedM3uEpisode({ db, sourceId, userId, itemId,
@@ -8058,7 +8066,7 @@ async function resolvePlaybackTarget(
     itemId,
     db,
   );
-  if (!genericM3uEpisode && mediaReadFromCatalog()) {
+  if (!genericM3uEpisode && !offlineOwnedXtreamOnly && mediaReadFromCatalog()) {
     const host = await resolveSourceHost(sourceId, userId, db);
     if (host) {
       const { data } = await db
@@ -8083,6 +8091,13 @@ async function resolvePlaybackTarget(
     if (error) throwDb(error, "Unable to resolve playback item");
     ownedItem = data;
     if (!item) item = data;
+  }
+  if (offlineOwnedXtreamOnly) {
+    const exactHint = recordOrEmpty(ownedItem?.playback_hint);
+    if (!ownedItem || exactHint.sourceType !== "xtream"
+      || exactHint.streamType !== (itemType === "movie" ? "movie" : "series")
+      || stringOr(exactHint.streamId, "") !== itemId)
+      throw new HttpError(409, "Startup target requires an owned Xtream file");
   }
   if (!item) {
     if (itemType === "series" || itemType === "movie") {
@@ -16010,6 +16025,172 @@ function requireConfiguredMediaGatewayCallback(
     : [];
   if (!matchedRoutes.length) throw new HttpError(401, "Unauthorized");
   return new Set(matchedRoutes.map((route) => stringOrNull(route.gatewayId)));
+}
+
+function startupCacheOwnerAllowed(ownerKey: string): boolean {
+  const owners = (Deno.env.get("PRIVATE_STARTUP_CACHE_OWNER_HASHES") ?? "").split(/[,\s]+/)
+    .filter(value => /^[a-f0-9]{64}$/.test(value));
+  return Deno.env.get("PRIVATE_STARTUP_CACHE_ENABLED") === "true" && owners.includes(ownerKey);
+}
+
+async function startupCacheTarget(db: SupabaseClient, userId: string, sourceId: string,
+  itemType: string, itemId: string) {
+  await requirePlaybackEntitlement(userId, db);
+  await assertSourceCatalogVisible(sourceId, userId, db);
+  const generation = await readActiveCatalogGenerationSnapshot(db, sourceId, userId);
+  let profile: JsonRecord;
+  if (itemType === "movie") {
+    profile = (await loadExactLanguageValidationProfile(db, userId, sourceId, itemId)).profile;
+  } else {
+    // Never substitute a series' profile for one episode. Only the exact owned
+    // item can attest its stream table; an unobserved episode is deferred.
+    const { data, error } = await db.from("cloud_catalog_visible_media_items")
+      .select("playback_hint,metadata,parent_external_id").eq("user_id", userId).eq("source_id", sourceId)
+      .eq("item_type", itemType).eq("external_id", itemId).limit(2);
+    if (error || !Array.isArray(data) || data.length !== 1) throw new HttpError(409, "Exact episode is unavailable");
+    if (!stringOr((data[0] as JsonRecord).parent_external_id, ""))
+      throw new HttpError(409, "Startup preparation requires an exact episode, not a series");
+    const hint = recordOrEmpty((data[0] as JsonRecord).playback_hint);
+    const metadata = recordOrEmpty((data[0] as JsonRecord).metadata);
+    const raw = firstUsefulCodecProfile(hint.codecProfile, hint.codec_profile, metadata.codecProfile, metadata.codec_profile);
+    profile = exactLanguageValidationProfileFromGateway(raw, "", "episode").profile;
+  }
+  // Strictly offline resolution: no discovery delivery or series-info fallback
+  // can contact a provider before the distributed account admission.
+  const resolved = await resolvePlaybackTarget(sourceId, itemType, itemId, userId, db, {}, true);
+  await assertActiveCatalogGenerationCurrent(db, sourceId, userId, generation);
+  const targetUrl = stringOr(resolved.targetUrl, ""); assertHttpUrl(targetUrl);
+  const scope = "providerAccountScope" in resolved ? stringOr(resolved.providerAccountScope, "") : "";
+  return { resolved, profile, targetUrl, generation,
+    revision: await loadSourceConfigRevision(sourceId, userId, db),
+    accountKey: providerAccountKeyFromUrl(targetUrl),
+    accountHash: scope ? await sha256Hex(scope) : await providerAccountHashFromUrl(targetUrl),
+    profileFingerprint: await sha256Hex(JSON.stringify(profile)) };
+}
+
+async function startupCachePermitCurrent(db: SupabaseClient, permit: JsonRecord): Promise<boolean> {
+  try {
+    const userId = stringOr(permit.userId, ""), sourceId = stringOr(permit.sourceId, "");
+    if (!PLAYBACK_SESSION_UUID_PATTERN.test(userId) || !PLAYBACK_SESSION_UUID_PATTERN.test(sourceId)
+      || !startupCacheOwnerAllowed(await sha256Hex(userId))
+      || !["movie", "episode", "series"].includes(stringOr(permit.itemType, ""))
+      || !stringOr(permit.itemId, "") || !/^startup-cache:[0-9a-f-]{36}$/.test(stringOr(permit.leaseOwner, ""))) return false;
+    const current = await startupCacheTarget(db, userId, sourceId, String(permit.itemType), String(permit.itemId));
+    if ((await resolveSourceIdentity(sourceId, userId, db)).key !== permit.identityKey) return false;
+    if (!current.accountKey || current.accountHash !== permit.accountHash
+      || current.revision !== permit.sourceRevision || current.profileFingerprint !== permit.profileFingerprint
+      || await sha256Hex(current.targetUrl) !== permit.targetHash) return false;
+    await assertProviderCircuitClosed(current.accountHash, db);
+    const { data: busy, error: busyError } = await db.rpc("provider_account_busy", { p_key: current.accountKey });
+    if (busyError || busy !== false || await userHasLiveSession(db, userId)
+      || await accountPregenActive(db, userId, sourceId)) return false;
+    const { data: lease, error } = await db.from("provider_account_language_validation_leases")
+      .select("expires_at").eq("provider_account_hash", current.accountHash)
+      .eq("lease_owner", permit.leaseOwner).maybeSingle();
+    if (error || !lease || Date.parse(String(lease.expires_at)) <= Date.now()) return false;
+    const { data: fileLease, error: fileLeaseError } = await db.from("provider_file_probe_leases")
+      .select("expires_at").eq("identity_key", permit.identityKey)
+      .eq("lease_owner", permit.leaseOwner).maybeSingle();
+    if (fileLeaseError || !fileLease || Date.parse(String(fileLease.expires_at)) <= Date.now()) return false;
+    const account = await db.rpc("claim_provider_account_language_validation", {
+      p_provider_account_hash: current.accountHash, p_lease_owner: permit.leaseOwner, p_ttl_seconds: 180 });
+    if (account.error || account.data !== true) return false;
+    const file = await db.rpc("claim_provider_file_probe", {
+      p_identity_key: permit.identityKey, p_lease_owner: permit.leaseOwner, p_ttl_seconds: 180 });
+    return !file.error && file.data === true;
+  } catch (_) { return false; }
+}
+
+async function runStartupCacheControl(req: Request, db: SupabaseClient): Promise<JsonRecord> {
+  requireConfiguredMediaGatewayCallback(req, await getRuntimeConfig(db));
+  const permit = recordOrEmpty(await req.json().catch(() => ({})));
+  return { protocol: 1, authorized: await startupCachePermitCurrent(db, permit) };
+}
+
+async function runStartupCachePreparation(req: Request, db: SupabaseClient): Promise<JsonRecord> {
+  const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
+  const supplied = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  if (!expected || supplied !== expected) throw new HttpError(401, "Unauthorized");
+  const body = recordOrEmpty(await req.json().catch(() => ({})));
+  const userId = stringOr(body.userId, ""), sourceId = stringOr(body.sourceId, "");
+  const itemType = stringOr(body.itemType, ""), itemId = stringOr(body.itemId, "");
+  if (Object.keys(body).some(key => !["userId", "sourceId", "itemType", "itemId"].includes(key))
+    || !PLAYBACK_SESSION_UUID_PATTERN.test(userId) || !PLAYBACK_SESSION_UUID_PATTERN.test(sourceId)
+    || !["movie", "episode", "series"].includes(itemType) || !itemId || itemId.length > 200) throw new HttpError(400, "Invalid startup preparation");
+  const ownerKey = await sha256Hex(userId);
+  if (!startupCacheOwnerAllowed(ownerKey)) return { protocol: 1, prepared: false, reason: "pilot-disabled" };
+  let target: Awaited<ReturnType<typeof startupCacheTarget>>;
+  try { target = await startupCacheTarget(db, userId, sourceId, itemType, itemId); }
+  catch (error) {
+    if (error instanceof HttpError && [404, 409].includes(error.status))
+      return { protocol: 1, prepared: false, reason: "exact-file-evidence-unavailable" };
+    throw error;
+  }
+  // This pilot produces HLS assets. Browser-native MP4 sessions never consult
+  // that store, so preparing their first minute would occupy the provider slot
+  // without accelerating automatic playback. Use the owned resolver's same
+  // container/codec authority before taking either lease or opening media.
+  const observation = "containerObservation" in target.resolved
+    ? recordOrEmpty(target.resolved.containerObservation) : {};
+  const nativeContainer = resolvedVodContainerAuthority(target.resolved.playbackHint, observation, itemType === "movie");
+  if (!("selectionVodDelivery" in target.resolved && target.resolved.selectionVodDelivery)
+    && canonicalVodContainer(observation.container) !== "mp4"
+    && useNativeMp4Gateway({ sourceId, itemType, container: nativeContainer,
+      enabled: Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_ENABLED") !== "false" })
+    && browserNativeMp4Proof(target.resolved.playbackHint)) {
+    return { protocol: 1, prepared: false, reason: "native-mp4-prefix-unavailable" };
+  }
+  if (!target.accountKey) return { protocol: 1, prepared: false, reason: "account-unidentified" };
+  await assertProviderCircuitClosed(target.accountHash, db);
+  const identityKey = (await resolveSourceIdentity(sourceId, userId, db)).key;
+  const leaseOwner = `startup-cache:${crypto.randomUUID()}`;
+  let accountClaimed = false, fileClaimed = false, releaseSafe = true;
+  try {
+    const { data: busy, error } = await db.rpc("provider_account_busy", { p_key: target.accountKey });
+    if (error || typeof busy !== "boolean") return { protocol: 1, prepared: false, reason: "activity-unavailable" };
+    if (busy) return { protocol: 1, prepared: false, reason: "account-presence" };
+    if (await userHasLiveSession(db, userId)) return { protocol: 1, prepared: false, reason: "viewer-active" };
+    if (await accountPregenActive(db, userId, sourceId)) return { protocol: 1, prepared: false, reason: "background-job-active" };
+    const account = await db.rpc("claim_provider_account_language_validation", {
+      p_provider_account_hash: target.accountHash, p_lease_owner: leaseOwner, p_ttl_seconds: 180 });
+    accountClaimed = !account.error && account.data === true;
+    if (!accountClaimed) return { protocol: 1, prepared: false, reason: "account-reserved" };
+    const file = await db.rpc("claim_provider_file_probe", {
+      p_identity_key: identityKey, p_lease_owner: leaseOwner, p_ttl_seconds: 180 });
+    fileClaimed = !file.error && file.data === true;
+    if (!fileClaimed) return { protocol: 1, prepared: false, reason: "provider-reserved" };
+    const permit = { userId, sourceId, itemType, itemId, leaseOwner, identityKey,
+      accountHash: target.accountHash, sourceRevision: target.revision,
+      profileFingerprint: target.profileFingerprint, targetHash: await sha256Hex(target.targetUrl) };
+    if (!await startupCachePermitCurrent(db, permit)) return { protocol: 1, prepared: false, reason: "activity-changed" };
+    const runtime = await getRuntimeConfig(db), route = await mediaGatewayRouteForHlsPlaybackUser(runtime, userId);
+    if (!route) throw new HttpError(503, "Gateway unavailable");
+    const audio = target.profile.audioTracks as JsonRecord[];
+    const selected = audio.find(track => track.default === true) ?? audio[0];
+    const hints = gatewayPlaybackHints({ ...recordOrEmpty(target.resolved.playbackHint),
+      codecProfile: target.profile, seekOffset: 0, audioStreamIndex: selected.index, clientAudioPassthrough: false });
+    const session = { ownerKey, sourceUrl: target.targetUrl, playbackSessionId: crypto.randomUUID(),
+      mode: "transcode", seekOffset: 0, expiresAt: new Date(Date.now() + 180_000).toISOString(),
+      playbackHint: { ...hints, streamType: itemType === "movie" ? "movie" : "series" }, ...hints,
+      codecProfile: target.profile,
+      playbackIdentity: { sourceId, itemType, itemId, sourceRevision: target.revision,
+        vodIdentityKey: await sha256Hex(JSON.stringify(["norva-vod-identity-v1", sourceId, itemType, itemId, null, target.targetUrl])) } };
+    // Once dispatched, exclusion is released only on positive Gateway drain.
+    releaseSafe = false;
+    const response = await fetch(`${route.url}/startup-cache/prepare`, {
+      method: "POST", headers: { Authorization: `Bearer ${route.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ protocol: 1, session, permit }), signal: AbortSignal.timeout(135_000) });
+    const result = recordOrEmpty(await response.json());
+    releaseSafe = result.protocol === 1 && result.providerDrained === true;
+    if (!releaseSafe) throw new HttpError(503, "Startup preparation cleanup is unconfirmed");
+    return { protocol: 1, prepared: result.prepared === true, seconds: result.prepared === true ? 60 : 0,
+      refreshAfterSeconds: boundedInt(result.refreshAfterSeconds, 60, 30, 300),
+      reason: stringOr(result.reason, "not-prepared") };
+  } finally {
+    if (releaseSafe && fileClaimed) await releaseProviderFileProbe(db, identityKey, leaseOwner);
+    if (releaseSafe && accountClaimed) await db.rpc("release_provider_account_language_validation", {
+      p_provider_account_hash: target.accountHash, p_lease_owner: leaseOwner });
+  }
 }
 
 async function runMediaCacheProducerControl(

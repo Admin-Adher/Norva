@@ -6949,7 +6949,9 @@ class WatchPage {
         this.clearExternalSubtitleTracks();
         if (this.video) {
             this.video.pause();
-            this.video.src = '';
+            // An empty src resolves to the document URL and can start another
+            // request during teardown. Detach the old resource completely.
+            this.video.removeAttribute?.('src');
             this.video.load();
         }
         // Teardown sessions after destroying HLS so stale playlists are not
@@ -8112,6 +8114,12 @@ class WatchPage {
     onError(e) {
         const videoAttemptId = Number.parseInt(this.video?.dataset?.playbackAttemptId || '', 10);
         if (Number.isFinite(videoAttemptId) && this.isStalePlaybackAttempt(videoAttemptId)) return;
+        // Resource selection is asynchronous: a queued error can still name
+        // the detached resource after the next attempt has been tagged.
+        if (typeof this.video?.getAttribute === 'function') {
+            if (!this.video.getAttribute('src')) return;
+            if (this.video.currentSrc && this.video.src && this.video.currentSrc !== this.video.src) return;
+        }
 
         // The browser can surface the same remux failure either through MediaError
         // or the engine's explicit continuity guard. Both paths share one bounded

@@ -17,6 +17,8 @@ function createNativeMp4Sessions({ allows, open, now = Date.now, leaseMs = 60_00
         if (!entry) return;
         if (!entry.closed) {
             entry.closed = true;
+            entry.closeReason = reason;
+            try { entry.resource?.prepareClose?.(reason); } catch (_) { /* Optional cache capture cannot prevent revocation. */ }
             entry.ac.abort();
             entry.closing = (async () => {
                 const resource = await entry.opening?.catch(() => null);
@@ -89,14 +91,25 @@ function createNativeMp4Sessions({ allows, open, now = Date.now, leaseMs = 60_00
             });
             const resource = await entry.opening;
             active(entry.sid);
+            entry.resource = resource;
             return resource;
+        },
+        async cachedCoverage(sid, token, targetSeconds) {
+            const entry = this.authorize(sid, token);
+            if (entry.claims.scope !== 'native-browser-mp4' || !Number.isFinite(targetSeconds)
+                || targetSeconds < 0 || targetSeconds > 86400) throw failure(400, 'NATIVE_MP4_COVERAGE_INVALID');
+            // A status read must never open another provider connection.
+            if (!entry.opening) return null;
+            const resource = await entry.opening;
+            active(sid);
+            return resource.cachedCoverage?.(targetSeconds) || null;
         },
         close,
         async revoke(ownerHash, sid, global = false) {
             const selected = [...entries.values()].filter(entry => entry.ownerHash === ownerHash
                 && (global || entry.sid === sid));
             const count = selected.filter(entry => !entry.closed).length;
-            await Promise.all(selected.map(entry => close(entry)));
+            await Promise.all(selected.map(entry => close(entry, global ? 'owner-revoked' : 'viewer-stop')));
             return count;
         },
         sweep,

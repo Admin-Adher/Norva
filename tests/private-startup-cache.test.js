@@ -1,0 +1,329 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+const { PrivateResumeHlsCache } = require('../services/media-gateway/src/private-resume-hls-cache');
+const { privateResumeBinding } = require('../services/media-gateway/src/private-resume-binding');
+const { createPrivateStartupCache } = require('../services/media-gateway/src/private-startup-cache');
+const { StartupCachePreparation } = require('../services/media-gateway/src/startup-cache-preparation');
+const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+const binding = privateResumeBinding({ ownerKey: 'a'.repeat(64), sourceUrl: 'https://provider.invalid/movie/x/y/1.mkv',
+    sourceId: 'source', sourceRevision: '1', fileSizeBytes: 10_000_000, profile: 'audio-1' });
+const observed = { fileSizeBytes: 10_000_000, validator: { kind: 'etag', value: '"v1"' }, effectiveUrlIdentitySha256: 'b'.repeat(64) };
+const playlist = (seconds = 64) => '#EXTM3U\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-MEDIA-SEQUENCE:0\n'
+    + Array(seconds / 4).fill(4).map((n,i) => `#EXTINF:${n},\nsegment-${i}.ts`).join('\n') + '\n#EXT-X-ENDLIST\n';
+const args = extra => ({ binding, observed, actualStartOffset: 0, playlist: playlist(),
+    readAsset: async () => Buffer.alloc(188, 0x47), ...extra });
+
+test('matching zero prefix is validated before cold source opening; misses drain before fallback', async () => {
+    const source=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
+    const start=source.indexOf('async function tryStartPrivateStartupBeforePreopen('),end=source.indexOf('\nasync function capturePrivateStartupWindow',start);
+    for(const scenario of ['hit','miss','no-candidate','expired','nonzero','subtitle','multi-audio','incomplete','background','disabled']) {
+        const calls=[],session={id:'test',ownerKey:'owner',seekOffset:scenario==='nonzero'?20:0,startupTimings:{},
+            startupCacheJob:scenario==='background'?{}:null,codecProfile:{audioTracks:[{index:1}],subtitles:[]}};
+        if(scenario==='subtitle')session.codecProfile.subtitles=[{index:2}];
+        if(scenario==='multi-audio')session.codecProfile.audioTracks.push({index:3});
+        const run=vm.runInNewContext('('+source.slice(start,end)+')', {Number,Array,sessionStartupStats:{},
+            asRecord:x=>x||{},canUseStartupCache:()=>scenario!=='disabled',isFiniteMkvVodSession:()=>true,
+            hasCompleteMkvPlaybackProfile:()=>scenario!=='incomplete',privateResumeHlsBindingForSession:()=>binding,
+            privateStartupHlsCache:{hasCandidate:()=>scenario!=='no-candidate'},sessions:{set:()=>calls.push('register')},
+            tryStartPrivateResumeWindow:async()=>{calls.push('fresh-check');session.privateStartupInput=true;return scenario==='hit';},
+            closeFiniteMkvSeekBroker:async()=>calls.push('drain'),});
+        assert.equal(await run(session),scenario==='hit');
+        if(scenario==='hit') assert.deepEqual(calls,['register','fresh-check']);
+        else if(['miss','expired'].includes(scenario)) {
+            assert.deepEqual(calls,['register','fresh-check','drain']);
+            assert.equal(session.privateStartupInput,false);assert.equal(session.freshResumeHandoff,null);
+        } else assert.deepEqual(calls,[]);
+    }
+});
+
+test('early TS prefix needs a finite server probe and the unchanged single-track graph', async () => {
+    const { finiteTsProfileEligible } = require('../services/media-gateway/src/finite-ts-startup');
+    const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8');
+    const start = source.indexOf('async function tryStartPrivateStartupBeforePreopen(');
+    const end = source.indexOf('\nasync function capturePrivateStartupWindow', start);
+    for (const scenario of ['hit', 'miss', 'inband', 'live', 'unknown-size', 'undated', 'subtitle', 'multi-audio', 'unknown-audio']) {
+        const calls = [], session = { id: 'test-ts', ownerKey: 'owner', seekOffset: 0, startupTimings: {},
+            codecProfileSource: 'request', playbackIdentity: { itemType: scenario === 'live' ? 'live' : 'movie' },
+            codecProfile: { container: 'mpegts', probeSource: scenario === 'inband' ? 'gateway_inband' : 'gateway_probe',
+                probedAt: new Date().toISOString(), metadataComplete: false, durationSeconds: 100,
+                fileSizeBytes: 10000000, videoCodec: 'h264', audioTracks: [{ index: 1, codec: 'aac' }], subtitles: [] } };
+        if (scenario === 'unknown-size') delete session.codecProfile.fileSizeBytes;
+        if (scenario === 'undated') delete session.codecProfile.probedAt;
+        if (scenario === 'subtitle') session.codecProfile.subtitles = [{ index: 2 }];
+        if (scenario === 'multi-audio') session.codecProfile.audioTracks.push({ index: 3, codec: 'aac' });
+        if (scenario === 'unknown-audio') session.codecProfile.audioTracks[0].codec = 'unknown';
+        const run = vm.runInNewContext('(' + source.slice(start, end) + ')', {
+            Number, Array, sessionStartupStats: {}, asRecord: x => x || {}, canUseStartupCache: () => true,
+            isFiniteMkvVodSession: () => false, finiteTsProfileEligible,
+            normalizeCodecToken: x => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ''),
+            privateResumeHlsBindingForSession: () => binding, privateStartupHlsCache: { hasCandidate: () => true },
+            sessions: { set: () => calls.push('register') },
+            tryStartPrivateResumeWindow: async () => { calls.push('fresh-check'); session.privateStartupInput = true; return scenario === 'hit'; },
+            closeFiniteMkvSeekBroker: async () => calls.push('drain'),
+        });
+        assert.equal(await run(session), scenario === 'hit', scenario);
+        if (scenario === 'hit') assert.deepEqual(calls, ['register', 'fresh-check']);
+        else if (scenario === 'miss') {
+            assert.deepEqual(calls, ['register', 'fresh-check', 'drain']);
+            assert.equal(session.privateStartupInput, false);
+        } else assert.deepEqual(calls, [], scenario);
+        assert.equal(session.codecProfile.metadataComplete, false);
+    }
+});
+
+test('a cold-input refusal after a prefix miss drains and unregisters before responding', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8').replace(/\r\n/g, '\n');
+    const start = source.indexOf('        try {\n            await ensureBoundedMkvInputPump(session,');
+    const end = source.indexOf('        // Cold playback owns a retained provider body', start);
+    assert.ok(start > 0 && end > start);
+    for (const [error, status] of [
+        [{ code: 'PROVIDER_BUSY', status: 458 }, 458],
+        [{ code: 'PROXY_AUTH_FAILED' }, 502],
+        [{ code: 'SOURCE_CONTAINER_MISMATCH', details: { protocol: 1 } }, 409],
+        [{ code: 'PROVIDER_REQUEST_FAILED', upstreamStatus: 404 }, 404],
+        [{ code: 'VOD_SIZE_UNAVAILABLE' }, 502],
+    ]) {
+        const session = { id: 'registered-prefix-miss', input: { active: true } };
+        const registry = new Map([[session.id, session]]), events = [];
+        const res = { status(value) { assert.equal(value, status); return this; },
+            json(value) { assert.equal(registry.size, 0); assert.equal(session.input.active, false); events.push('response'); return value; } };
+        const run = vm.runInNewContext('(async () => {' + source.slice(start, end) + '})', {
+            session, res, sessionRequestAbortController: { signal: { aborted: false } },
+            ensureBoundedMkvInputPump: async () => { throw error; },
+            stopSession: async (value) => { assert.equal(value, session); await Promise.resolve();
+                session.input.active = false; registry.delete(session.id); events.push('drained'); },
+            removeSessionDir: () => { throw Error('directory deletion cannot attest drainage'); },
+            providerFileRefusalResponse: () => null, sanitizeLog: () => 'safe', sourceUrl: 'https://provider.invalid/1',
+            console: { warn() {} },
+        });
+        await run();
+        assert.deepEqual(events, ['drained', 'response']);
+    }
+});
+
+test('a rejected startup check retains a safe reason independently of the destroyed session', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8');
+    const start = source.indexOf('async function tryStartPrivateStartupBeforePreopen(');
+    const end = source.indexOf('\nasync function capturePrivateStartupWindow', start);
+    for (const outcome of ['hit', 'target-changed', 'deferred-unavailable', 'miss', 'aborted']) {
+        const stats = {}, session = { id: 'private-session', ownerKey: 'private-owner', seekOffset: 0,
+            sourceUrl: 'https://secret.invalid/credentials', codecProfile: { audioTracks: [{}], subtitles: [] },
+            startupTimings: { recentResumeSampleTimings: [{ elapsedMs: 20 }] } };
+        const run = vm.runInNewContext('(' + source.slice(start, end) + ')', {
+            sessionStartupStats: stats, asRecord: x => x, canUseStartupCache: () => true,
+            isFiniteMkvVodSession: () => true, hasCompleteMkvPlaybackProfile: () => true,
+            privateResumeHlsBindingForSession: () => binding, privateStartupHlsCache: { hasCandidate: () => true },
+            sessions: { set() {} }, closeFiniteMkvSeekBroker: async () => {},
+            tryStartPrivateResumeWindow: async () => {
+                if (outcome === 'target-changed') session.startupTimings.recentResumeValidationOutcome = outcome;
+                if (outcome === 'deferred-unavailable') session.startupTimings.privateStartupValidationDeferred = true;
+                return outcome === 'hit';
+            },
+        });
+        await run(session, { aborted: outcome === 'aborted' });
+        assert.equal(stats.lastStartupCacheCheck.outcome, outcome);
+        assert.equal(stats.lastStartupCacheCheck.completedSamples, 1);
+        assert.deepEqual(Object.keys(stats.lastStartupCacheCheck).sort(), ['at', 'completedSamples', 'outcome']);
+        assert.doesNotMatch(JSON.stringify(stats), /private-|secret|credential/);
+    }
+});
+
+test('an unavailable fresh startup check keeps the prefix unleased without another check in the same creation', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8');
+    const start = source.indexOf('async function tryStartPrivateResumeWindow(');
+    const end = source.indexOf('\nfunction usesFiniteMkvSeekBroker', start);
+    for (const changedTarget of [false, true]) {
+        const calls = [], session = { seekOffset: 0, ownerKey: binding.ownerKey, startupTimings: {} };
+        const run = vm.runInNewContext('(' + source.slice(start, end) + ')', {
+            Date, Number, canUseStartupCache: () => true, canUseRecentResumeSamples: () => true,
+            privateResumeHlsBindingForSession: () => binding, privateResumeFormat: () => 'mkv',
+            privateStartupHlsCache: { hasCandidate: () => true, revalidationPlan: () => ({ kind: 'sampled-recent-v1' }),
+                acquire: () => { calls.push('invalidate'); return null; } },
+            revalidateRecentResumeSession: async () => { calls.push('fresh-drained');
+                session.startupTimings.recentResumeValidationUnavailable = { kind: 'transport' };
+                if (changedTarget) session.startupTimings.recentResumeValidationOutcome = 'target-changed';
+                return null; },
+            prepareFiniteMkvSeekBroker: async () => { calls.push('prepare-input'); return {}; },
+        });
+        assert.equal(await run(session), false);
+        assert.equal(session.privateResumeLease, undefined);
+        if (changedTarget) assert.deepEqual(calls, ['fresh-drained', 'prepare-input', 'invalidate']);
+        else {
+            assert.deepEqual(calls, ['fresh-drained']);
+            assert.equal(session.startupTimings.privateStartupValidationDeferred, true);
+            assert.equal(await run(session), false);
+            assert.deepEqual(calls, ['fresh-drained']);
+        }
+    }
+});
+
+test('startup continuation and rejected-prefix fallback retain the zero-position range broker', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8');
+    const uses = source.slice(source.indexOf('function usesFiniteMkvSeekBroker('), source.indexOf('function applyFiniteMkvSeekProviderIdentity('));
+    const prepare = source.slice(source.indexOf('async function prepareFiniteMkvSeekBroker('), source.indexOf('function applyFiniteMkvSeekBrokerFailure('));
+    const context = vm.createContext({ isFiniteMkvVodSession: () => true, finiteTsProfileEligible: () => false });
+    vm.runInContext(uses + prepare, context);
+    const broker = { inputUrl: 'http://127.0.0.1/private-source' }, session = { seekOffset: 0, finiteMkvSeekBroker: broker };
+    assert.equal(context.usesFiniteMkvSeekBroker(session), false);
+    assert.equal(await context.prepareFiniteMkvSeekBroker(session), null);
+    session.privateStartupInput = true;
+    assert.equal(context.usesFiniteMkvSeekBroker(session), true);
+    assert.equal(await context.prepareFiniteMkvSeekBroker(session), broker);
+    assert.equal(context.usesFiniteMkvSeekBroker({ ...session, finiteMkvSeekBroker: null }), false);
+    assert.equal(context.usesFiniteMkvSeekBroker({ seekOffset: 10, finiteMkvSeekBroker: broker }), true);
+});
+
+test('startup and resume coexist under the original budget, with no false end of film', async () => {
+    const cache = new PrivateResumeHlsCache(), startup = createPrivateStartupCache(cache);
+    assert.equal(await cache.capture({ ...args(), position: 5 }), true);
+    assert.equal(await startup.capture(args()), true);
+    assert.equal(cache.publicStatus().entries, 2);
+    const resume = cache.acquire(binding, 5, observed), prefix = startup.acquire(binding, 0, observed);
+    assert.ok(resume); assert.ok(prefix);
+    assert.equal(prefix.start, 0); assert.equal(prefix.end, 60); assert.equal(prefix.ended, false);
+    assert.doesNotMatch(prefix.playlist(), /ENDLIST/);
+    assert.equal(startup.acquire(binding, 5, observed), null);
+    resume.release(); prefix.release();
+});
+
+test('reopening a startup prefix retains its route but requires fresh matching bytes every time', async () => {
+    const crypto = require('node:crypto');
+    const { retainRecentDeliveryTarget, consumeRecentDeliveryTarget } = require('../services/media-gateway/src/recent-delivery-target');
+    const { SAMPLE_BYTES: N, RECENT_TTL_MS } = require('../services/media-gateway/src/recent-resume-samples');
+    let now = 100;
+    const facts = { ownerKey: binding.ownerKey, sourceUrl: 'https://provider.invalid/movie/x/y/1.mkv',
+        userAgent: 'Norva/Test', routeKey: 'unchanged-route', fileSizeBytes: observed.fileSizeBytes,
+        targetUrl: 'https://delivery.invalid/private', targetIdentity: observed.effectiveUrlIdentitySha256, now };
+    facts.targetHash = crypto.createHash('sha256').update(facts.targetUrl).digest('hex');
+    const current = { ...observed, validator: null,
+        samples: [0, 2 * N, 4 * N, 6 * N].map(start => ({ start, payload: Buffer.alloc(N, 7) })) };
+    const cache = new PrivateResumeHlsCache({ recentRevalidation: true, now: () => now });
+    const startup = createPrivateStartupCache(cache);
+    assert.equal(await startup.capture(args({ observed: { ...current, deliveryTarget: retainRecentDeliveryTarget(facts) } })), true);
+    const plans = [];
+    for (let i = 0; i < 3; i++) {
+        now += 100;
+        const plan = startup.revalidationPlan(binding, 0); plans.push(plan);
+        assert.equal(consumeRecentDeliveryTarget(plan.deliveryTarget, { ...facts, now })?.targetUrl, facts.targetUrl);
+        assert.equal(consumeRecentDeliveryTarget(plan.deliveryTarget, { ...facts, now }), null);
+        const lease = startup.acquire(binding, 0, current); assert.ok(lease); lease.release();
+    }
+    assert.notEqual(plans[0].deliveryTarget, plans[1].deliveryTarget);
+    assert.equal(startup.revalidationPlan({ ...binding, ownerKey: 'f'.repeat(64) }, 0), null);
+    assert.equal(startup.acquire(binding, 0, { ...current, samples: [] }), null);
+    assert.equal(startup.hasCandidate(binding, 0), false);
+    assert.equal(await startup.capture(args({ observed: { ...current, deliveryTarget: retainRecentDeliveryTarget(facts) } })), true);
+    now = 100 + RECENT_TTL_MS;
+    assert.equal(startup.revalidationPlan(binding, 0).deliveryTarget, null); // A new capture cannot refresh the old route's TTL.
+    cache.revokeOwner(binding.ownerKey);
+    assert.equal(startup.revalidationPlan(binding, 0), null);
+});
+
+for (const [name, extra] of [
+    ['short prefix', { playlist: playlist(56) }],
+    ['slid prefix', { playlist: playlist().replace('SEQUENCE:0', 'SEQUENCE:1') }],
+    ['nonzero video origin', { actualStartOffset: 0.1 }],
+    ['missing identity', { observed: { fileSizeBytes: 10_000_000 } }],
+    ['missing segment', { readAsset: async () => null }],
+    ['cancelled during capture', { isCurrent: () => false }],
+]) test(`startup rejects ${name}`, async () => {
+    const cache = new PrivateResumeHlsCache(), startup = createPrivateStartupCache(cache);
+    assert.equal(await startup.capture(args(extra)), false);
+    assert.equal(cache.publicStatus().entries, 0);
+    assert.equal(cache.publicStatus().reservedBytes, 0);
+});
+
+test('cancellation arriving during asset reads leaves no startup entry', async () => {
+    const cache = new PrivateResumeHlsCache(), startup = createPrivateStartupCache(cache);
+    let live = true;
+    assert.equal(await startup.capture(args({ isCurrent: () => live, readAsset: async () => {
+        live = false; return Buffer.alloc(188, 0x47);
+    } })), false);
+    assert.equal(cache.publicStatus().entries, 0);
+});
+
+test('background startup capture never evicts a recent viewer resume to reserve memory', async () => {
+    const cache = new PrivateResumeHlsCache({ maxBytes: 128 * 1024 * 1024, perFileBytes: 64 * 1024 * 1024 }), startup = createPrivateStartupCache(cache);
+    assert.equal(await cache.capture({ ...args(), position: 5 }), true);
+    assert.equal(await startup.capture(args()), false);
+    assert.equal(cache.hasCandidate(binding, 5), true);
+    assert.equal(cache.publicStatus().evictions, 0);
+});
+
+test('an unexpired prefix skips media acquisition and reports when to revisit it', async () => {
+    const h = preparation({ remainingSeconds: () => 350 });
+    const result = await h.manager.prepare(h);
+    assert.equal(result.prepared, true); assert.equal(result.refreshAfterSeconds, 230);
+    assert.equal(h.stats().created, 0); assert.equal(h.stats().stops, 0);
+});
+
+test('startup refuses missing subtitle coverage without falling back to header-only bytes', async () => {
+    const cache = new PrivateResumeHlsCache(), startup = createPrivateStartupCache(cache);
+    assert.equal(await startup.capture(args({ subtitleRenditions: [{ streamIndex: 2, playlistName: 'subtitle_2.m3u8' }],
+        readAsset: async name => name.endsWith('.ts') ? Buffer.alloc(188, 0x47) : null })), false);
+    assert.equal(cache.publicStatus().entries, 0);
+});
+
+test('startup obeys identity, track isolation, expiry and owner revocation', async () => {
+    let now = 0; const cache = new PrivateResumeHlsCache({ now: () => now, ttlMs: 1000 });
+    const startup = createPrivateStartupCache(cache);
+    assert.equal(await startup.capture(args()), true);
+    assert.equal(startup.hasCandidate({ ...binding, ownerKey: 'c'.repeat(64) }, 0), false);
+    assert.equal(startup.hasCandidate({ ...binding, profileHash: 'd'.repeat(64) }, 0), false);
+    assert.equal(startup.acquire(binding, 0, { ...observed, validator: { kind: 'etag', value: '"v2"' } }), null);
+    assert.equal(await startup.capture(args()), true); now = 1001;
+    assert.equal(startup.hasCandidate(binding, 0), false); now = 0;
+    assert.equal(await startup.capture(args()), true);
+    const lease = startup.acquire(binding, 0, observed); cache.revokeOwner(binding.ownerKey);
+    assert.throws(lease.assertValid, /REVOKED/); lease.release();
+});
+
+function preparation(options = {}) {
+    let current = true, covered = false, stored = false, stops = 0, created = 0;
+    const session = { id: 'session', status: 'ready' };
+    const manager = new StartupCachePreparation({ durationMs: 2000, pollMs: 2, recheckMs: 2,
+        allowsOwner: () => true, canStart: () => true, authorize: async () => current,
+        sessionForId: () => session, covered: async () => covered,
+        stop: async (s, job) => { stops++; if (options.drainFailure) throw Error('unconfirmed');
+            s.startupCacheStored = job.complete && !job.signal.aborted; stored = s.startupCacheStored; },
+        ...options });
+    manager.bindSessionCreate(async (req, res) => { created++; req.startupCacheJob.session = session;
+        res.status(201).json({ id: session.id }); });
+    return { manager, ownerKey: binding.ownerKey, accountKey: 'private-account', body: {},
+        setCurrent: value => { current = value; }, setCovered: value => { covered = value; },
+        stats: () => ({ stored, stops, created }) };
+}
+
+test('preparation stores only after sixty-second proof and transport drain', async () => {
+    const h = preparation(); h.setCovered(true);
+    const result = await h.manager.prepare(h);
+    assert.equal(result.prepared, true); assert.equal(result.seconds, 60);
+    assert.equal(result.providerDrained, true); assert.equal(h.manager.status().active, 0);
+    assert.equal(h.stats().stops, 1);
+});
+
+test('an occupied account or disabled owner opens no media session', async () => {
+    for (const option of [{ canStart: () => false }, { allowsOwner: () => false }]) {
+        const h = preparation(option), result = await h.manager.prepare(h);
+        assert.equal(result.prepared, false); assert.equal(h.stats().created, 0);
+    }
+});
+
+test('viewer preemption drains one preparation and never stores a short prefix', async () => {
+    const h = preparation(), preparing = h.manager.prepare(h);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const other = await h.manager.prepare(h); assert.equal(other.prepared, false);
+    const drained = await h.manager.preempt(job => job.accountKey === h.accountKey);
+    assert.equal(drained.providerDrained, true); assert.equal(drained.stopped, 1);
+    assert.equal((await preparing).prepared, false); assert.equal(h.stats().stored, false);
+});
+
+test('source revocation cancels preparation and an uncertain drain retains exclusion', async () => {
+    const h = preparation({ drainFailure: true }), preparing = h.manager.prepare(h);
+    await new Promise(resolve => setTimeout(resolve, 8)); h.setCurrent(false);
+    const result = await preparing;
+    assert.equal(result.prepared, false); assert.equal(result.providerDrained, false);
+    assert.equal(h.manager.status().active, 1);
+    assert.equal((await h.manager.preempt(() => true)).providerDrained, false);
+    assert.equal((await h.manager.prepare(h)).reason, 'not-admitted');
+});
