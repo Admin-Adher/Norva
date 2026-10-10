@@ -463,18 +463,158 @@ Preuves : `route-repeat-browser-5-{1,2}.safe.json`,
 `route-repeat-create-5-{1,2}.safe.json`, `route-repeat-summary-5.safe.json`,
 `route-repeat-drain-final.safe.json`, `closure.safe.json`.
 
+## Contrôle avec WatchPage et comparaison MP4 natif
+
+Révisions `a8581f85218568399b939296f8de562fe776897f` et
+`eeb38b20971eca6c62e7b3e78f148a6137f8da7c` ; toujours dans les deux services
+isolés, sans déploiement de production. Le banc charge maintenant le module
+`WatchPage` réel, son `loadVideo`, ses commandes et sa politique de réserve.
+L'Edge résout les vraies coordonnées catalogue, émet les claims ordinaires,
+et reçoit les heartbeats puis l'expiration. L'entrée catalogue/login complète
+du site public n'est pas reproduite. Le banc ne crée pas de progression métier.
+
+Le délai de référence est désormais l'événement **`playing`**, depuis le clic,
+et non la première image, qui peut être affichée pendant la préparation.
+Les mesures incluent les lectures fraîches obligatoires. Le banc relève aussi
+la progression de l'horloge vidéo par rapport au temps écoulé : l'absence
+de `waiting` ne suffit pas à conclure à une lecture continue.
+
+### Lost, MKV : préfixe retrouvé, démarrage rapide non systématique
+
+Une préparation en **5,726 s** conserve les 60 secondes, 4 708 836 octets.
+Deux sessions authentifiées distinctes utilisent ensuite le même préfixe :
+
+| Essai WatchPage | Lecture effective | Première image | Création | Validation fraîche | Position finale |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 17,786 s | 11,059 s | 2,687 s | 1,852 s | 140,371 s |
+| 2 | 4,224 s | 3,823 s | 3,031 s | 2,128 s | 143,414 s |
+
+Les quatre plages correspondent au même fichier dans chaque essai. Le second
+reçoit le premier fragment à 3,497 s, le met en buffer à 3,811 s et atteint sa
+réserve de six secondes avant la lecture. Les segments du préfixe arrivent en
+environ 0,1 à 0,2 seconde chacun. Le premier essai avait un contexte de contenu
+incomplet dans le banc, corrigé pour le second ; l'écart de démarrage ne constitue
+donc pas un A/B valide d'un correctif de production.
+
+**La fluidité n'est pas validée.** Aucun `waiting` n'est émis, mais le premier
+essai avance de 2,857 s de vidéo sur un intervalle de 8,135 s ; le second avance
+de seulement **1,047 s sur 12,639 s**, à la position 80,760 s. Dans ce dernier
+intervalle, `readyState=4` et le buffer couvre déjà 50,068 à 148,108 s. Une tâche
+JavaScript de 1,470 s est mesurée, sans expliquer la totalité du décalage. Les
+mesures ne permettent pas encore de départager l'ordonnancement du navigateur,
+la machine et le lecteur. Compteurs : 1/4 215 puis 17/4 307 images perdues.
+Il ne faut pas attribuer ce phénomène à une absence de données serveur.
+
+Le code vidéo 4 relevé à quelques millisecondes du clic, avant l'attachement du
+média, vient de la remise à zéro du banc ; il n'est pas compté comme un échec
+de décodage de la copie. Aucune modification du lecteur de production n'a été
+effectuée pour masquer ces observations.
+
+Preuves : `watch-first-{browser,create,transport}-5.safe.json`,
+`watch-path-{browser,create,transport}-5-1.safe.json`,
+`watch-validation-summary.safe.json`.
+
+### Minnal Murali, MPEG-TS : raccord contrôlé avec WatchPage
+
+Une préparation en **6,104 s** conserve 60,017 secondes (7 921 944 octets).
+La création authentifiée prend **5,984 s**, dont **4,947 s** de validation
+fraîche : quatre plages en 887, 837, 2 390 et 826 ms. Le préfixe est vérifié
+avant l'ouverture froide et réutilise sa cible privée retenue.
+
+Première image en **6,560 s**, lecture effective en **7,030 s**, position finale
+**192,813 s** à 202,152 s depuis le clic. La progression dépasse donc réellement
+le préfixe d'environ **133 secondes**. Aucun `waiting`, aucune erreur HLS,
+trois images perdues sur 4 594. Les échantillons ne montrent aucun intervalle
+avec `readyState=4` et un retard de progression supérieur à une seconde,
+ni tâche JavaScript supérieure à 500 ms. Cela ne certifie pas chaque image ou
+la qualité à l'écoute. Le buffer final couvre 162,218 à 316,229 s.
+
+L'onglet se déclare visible lors du contrôle DOM, bien que créé sans mise en
+avant demandée. Cette observation ne permet pas d'attribuer les écarts des
+autres essais à un onglet masqué. Après expiration ordinaire : zéro session,
+transport natif, pompe, encodeur et octet réservé ; un préfixe, un hit,
+zéro invalidation. Preuves : `warm-9.safe.json`,
+`watch-path-{browser,create,transport}-9-1.safe.json`,
+`watch-validation-summary.safe.json`, `watch-final-health.safe.json`.
+
+### MP4 natif : éviter une préparation inutilisable
+
+La voie native transmet le fichier MP4 au navigateur ; elle ne consomme pas le
+préfixe HLS préparé par le nouveau worker. Le prototype pouvait donc prendre
+une réservation fournisseur pour une minute qui ne serait pas utilisée.
+La préparation s'arrête désormais **avant réservation et ouverture fournisseur**
+quand la même autorité serveur que la lecture automatique choisit le MP4 natif.
+Elle retourne `native-mp4-prefix-unavailable`. Les corrections de conteneur,
+livraisons de sélection et MP4 nécessitant encore HLS conservent leur voie.
+
+Sur **KU - Jolt (2021)**, le refus attendu prend **0,390 s** ; compteurs de
+préparation, cache, session, pompe et encodeur à zéro. Ce correctif évite du
+travail inutile ; **il n'implémente pas de préfixe MP4 natif**. Cinquante tests
+ciblés réussissent, notamment l'absence de réservation après résolution de la
+cible et le maintien des autres voies. Preuves : `warm-6.safe.json`,
+`native-admission-tests.tap`.
+
+### Jolt, MP4 : index tardif et essai de plages plus grandes
+
+Le fichier fait 1 488 405 594 octets, avec un index en fin de fichier d'environ
+3,8 Mo. Le navigateur doit le recevoir avant sa première image. Le transport
+lisait cette zone en nombreuses plages de 256 Kio, chacune payant à nouveau
+un délai de réponse. Les premiers délais d'en-têtes vont d'environ 0,5 à 1,9 s.
+
+Le prototype conserve la petite première lecture et essaie ensuite **1 Mio**
+par plage initiale, uniquement pour `native-browser-mp4` et le propriétaire
+autorisé au pilote. La connexion fournisseur reste sérialisée, la croissance
+vers 8 Mio reste bornée, et les validateurs ne changent pas. Le cache brut
+persistant reste refusé sur ce fichier faute de validateur fort ; aucun ETag
+n'est inventé. Les clients natifs Windows/Android sont inchangés.
+
+Trois créations distinctes, depuis zéro, dans l'ordre A/B/A :
+
+| Réglage | Lecture effective | Observation avant saut |
+| --- | ---: | --- |
+| A, 256 Kio | 52,011 s | Trois attentes et des écarts d'horloge ; non fluide |
+| B, 1 Mio | 19,309 s | 114 s de progression, aucun `waiting`, zéro image perdue |
+| A, retour à 256 Kio | 31,769 s | Quatre attentes avant le saut |
+
+L'index est livré en moins d'allers-retours avec B. Le retour A montre néanmoins
+une variation réseau importante : **un seul essai B ne garantit pas ce gain**.
+La configuration B est restaurée sur le canary après le témoin A ; la production
+n'a pas été modifiée.
+
+Le saut vers **1 093,137 s (18:13)** reste non satisfaisant : attente initiale
+de 6,805 s avec B, puis 0,682 et **20,596 s** ; cette dernière coïncide avec une
+tâche JavaScript de **18,111 s**. Avec A, l'attente initiale est de 6,823 s, suivie
+notamment d'attentes de **12,418 et 9,656 s**, sans grande tâche JavaScript
+mesurée. Les traces mélangent donc réception insuffisante et pauses du
+navigateur ; le seul changement de taille de plage ne corrige pas le saut.
+
+Preuves : `watch-native-before.safe.json`, `watch-native-larger.safe.json`,
+`watch-native-control.safe.json`, leurs fichiers `*-transport.safe.json`,
+`native-ab-{256,1024}.safe.json`, `native-window-tests.tap`.
+Suite broker/plages/MP4 : **173 réussis, cinq ignorés**, avec recouvrement de la
+suite de 50 tests (ne pas additionner). Contrats CI de `eeb38b209` :
+**6 345 réussis, 35 ignorés**, syntaxe, région et constructions Phone, TV et
+Windows réussies (run `38074827454`).
+
+Les précédents parcours de 126,867 et 135,254 secondes dépassaient le cache
+d'environ 67 et 75 secondes : ils ne prouvaient pas deux minutes supplémentaires
+au-delà de la première minute. Toutes les durées du présent rapport distinguent
+la position atteinte de la durée passée après le cache.
+
 ## État et critères d'activation
 
-**Non activé en production. Gain de démarrage mesuré sur Lost et sur un MPEG-TS ;
-fluidité répétée et couverture multi-format encore insuffisantes.**
+**Non activé en production. Le module WatchPage réutilise le préfixe sur les
+copies MKV et MPEG-TS, mais Lost reste irrégulier. Le MP4 natif n'a toujours
+pas de préfixe réutilisable et ses sauts restent non satisfaisants.**
 PR760 conservée en brouillon. Les essais sont arrêtés par expiration ordinaire
 de leurs claims ; sessions, transports natifs, pompes et encodeurs du canary
 reviennent à zéro. Les deux Gateways de production restent sains et inactifs.
 La capture réelle, les validations fraîches répétées, la continuation et le
 drainage sont démontrés sur les deux copies ci-dessus ; la préemption réelle a
-été contrôlée auparavant. Avant activation : parcours public WatchPage, pauses
-brèves restantes et limites de routage, notamment MP4 natif, à traiter. Les
-graphes multiples ou sous-titres non couverts restent inéligibles.
+été contrôlée auparavant. Avant activation : entrée catalogue/login publique,
+irrégularités du navigateur, sauts et couverture du MP4 natif à traiter. Aucune
+écoute humaine n'est revendiquée. Les graphes multiples ou sous-titres non
+couverts restent inéligibles.
 
 Le pilote ne précharge pas tout le catalogue. Le budget mémoire et les TTL
 existants imposent une sélection bornée. Une source durablement trop lente

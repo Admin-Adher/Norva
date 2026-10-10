@@ -62,6 +62,14 @@ sélectionne cette voie pour la lecture automatique, la préparation répond
 Elle ne prépare plus une minute HLS que cette lecture ne pourrait pas utiliser.
 Cela ne constitue pas un cache MP4 natif ; les MP4 qui exigent encore une
 adaptation HLS conservent leur admission ordinaire.
+Dans le seul pilote propriétaire du préchargement, le transport `native-browser-mp4`
+essaie des plages séquentielles initiales de 1 Mio au lieu de 256 Kio, après
+sa petite lecture de confirmation. Cela réduit les allers-retours nécessaires
+aux index MP4 situés en fin de fichier. Le premier sondage, la sérialisation,
+les contrôles d'identité et le budget mémoire restent inchangés. Les clients
+natifs Windows/Android et les autres comptes gardent leur politique actuelle.
+Ce réglage est expérimental : les sauts MP4 réels restent irréguliers, et il ne
+crée pas de minute MP4 préchargée.
 Une vérification fraîche indisponible refuse la lecture du préfixe et conserve
 seulement les données privées jusqu'à leur expiration initiale. La même création
 ne retente pas la vérification pendant son repli ; le prochain essai doit réussir
