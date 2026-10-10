@@ -3,6 +3,7 @@ const { EventEmitter } = require('node:events');
 const { spawn } = require('node:child_process');
 const { createInterface } = require('node:readline');
 const { createNativeInput } = require('./native-input');
+const { access } = require('node:fs/promises');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function trackPreferences(value) {
@@ -42,10 +43,12 @@ function playbackRequest(value) {
 // One native process owns one exact cloud session. Its OS exit (not a renderer
 // notification) is the drain barrier. The next launch also waits for cloud close.
 class NativePlayerController extends EventEmitter {
-    constructor(executable, { spawnProcess = spawn, stopTimeoutMs = 5000, openInput = createNativeInput, host = null } = {}) {
+    constructor(executable, { spawnProcess = spawn, stopTimeoutMs = 5000, openInput = createNativeInput,
+        ensureExecutable = access, host = null } = {}) {
         super(); this.executable = executable; this.spawnProcess = spawnProcess; this.stopTimeoutMs = stopTimeoutMs;
         this.active = null; this.unacknowledged = new Set(); this.pending = false;
-        this.openInput = openInput; this.volume = 100; this.completed = new Map(); this.host = host;
+        this.openInput = openInput; this.ensureExecutable = ensureExecutable;
+        this.volume = 100; this.completed = new Map(); this.host = host;
     }
     async open(value) {
         const request = playbackRequest(value);
@@ -53,6 +56,12 @@ class NativePlayerController extends EventEmitter {
         this.pending = true; this.cancelOpening = false;
         let input;
         try {
+            // A portable relaunch must never remove a running instance's runtime.
+            // If resources are absent, reject before opening any media transport;
+            // the existing launch-failed path closes the cloud claim and informs the viewer.
+            try { await this.ensureExecutable(this.executable); }
+            catch { throw Error('NATIVE_PLAYER_UNAVAILABLE'); }
+            if (this.cancelOpening) throw Error('NATIVE_OPEN_CANCELLED');
             input = await this.openInput(request.url);
             if (this.cancelOpening) throw Error('NATIVE_OPEN_CANCELLED');
             const args = this.host ? ['--parent-window', this.host.handle, '--parent-process', String(this.host.processId)] : [];

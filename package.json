@@ -89,6 +89,9 @@
                 }
             ]
         },
+        "portable": {
+            "unpackDirName": true
+        },
         "extraResources": [
             {
                 "from": "native-player",

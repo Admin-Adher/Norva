@@ -200,6 +200,12 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
     app.quit();
 } else {
+    app.on('second-instance', () => {
+        for (const window of BaseWindow.getAllWindows()) {
+            if (window.isMinimized()) window.restore();
+            window.focus();
+        }
+    });
     app.whenReady().then(startDesktopApp).catch((error) => {
         console.error(error);
         app.quit();
