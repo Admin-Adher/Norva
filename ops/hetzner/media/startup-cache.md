@@ -68,6 +68,11 @@ sa petite lecture de confirmation. Cela réduit les allers-retours nécessaires
 aux index MP4 situés en fin de fichier. Le premier sondage, la sérialisation,
 les contrôles d'identité et le budget mémoire restent inchangés. Les clients
 natifs Windows/Android et les autres comptes gardent leur politique actuelle.
+Dans ce même périmètre, une demande explicite de fin de fichier de 4 Mio au
+plus peut être regroupée après le sondage initial, pour recevoir l'index MP4
+sans plusieurs allers-retours. Le fichier entier, les plages plus grandes ou
+ne finissant pas à EOF gardent le découpage ordinaire. Une seule connexion
+fournisseur et la validation intégrale avant mise en cache restent obligatoires.
 Ce réglage est expérimental : les sauts MP4 réels restent irréguliers, et il ne
 crée pas de minute MP4 préchargée.
 Une vérification fraîche indisponible refuse la lecture du préfixe et conserve

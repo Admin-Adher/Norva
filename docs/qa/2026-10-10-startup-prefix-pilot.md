@@ -601,11 +601,116 @@ d'environ 67 et 75 secondes : ils ne prouvaient pas deux minutes supplémentaire
 au-delà de la première minute. Toutes les durées du présent rapport distinguent
 la position atteinte de la durée passée après le cache.
 
+## Relecture instrumentée et index MP4 borné
+
+Révision `a409f6f37ca2f24212d6b4479152a22e4b96c348`, toujours dans les services
+isolés. Aucun code WatchPage de production n'est modifié pour ces essais.
+Le banc ajoute des mesures de durée des méthodes du lecteur, des événements
+de lecture/saut et des intervalles entre images. Le broker relève séparément
+l'attente de sa connexion fournisseur et la durée de réception de chaque plage.
+Ses journaux restent bornés aux douze premières et douze dernières plages,
+sans URL, jeton, identifiant de compte ou de session.
+
+### Lost : gel précédent non reproduit, sans réparation revendiquée
+
+Une nouvelle préparation prend **12,392 s** et conserve 60 secondes,
+4 708 836 octets. La création suivante prend 2,765 s, dont **1,547 s** pour les
+quatre lectures de revalidation. Première image en **3,813 s**, lecture en
+**4,132 s**, puis position finale **186,906 s** à 195,711 s depuis le clic.
+Le parcours dépasse donc le préfixe d'environ **127 secondes**.
+
+Aucun `waiting`, aucune image perdue sur 5 612, aucune méthode instrumentée
+supérieure à 25 ms ni tâche supérieure à 500 ms. Aucun intervalle entre images
+ne satisfait le détecteur de gel (plus de 500 ms réels et plus de 400 ms de
+progression manquante). Le buffer final couvre 155,309 à 308,108 s.
+L'horloge avance cependant d'environ 4,7 secondes de moins que le temps écoulé
+après démarrage. Ces mesures ne certifient donc pas chaque image. **Le gel
+précédent de douze secondes n'est pas reproduit ; sa cause reste ouverte.**
+
+Preuves : `clock-path-{browser,create,transport}-5-1.safe.json`,
+`index-replay-summary.safe.json`, `browser-host-cpu.safe.jsonl`.
+
+### Jolt : le coût de l'index est réduit, le saut reste variable
+
+Le témoin conserve les plages initiales de 1 Mio. Il démarre en **20,995 s**.
+Sa demande de fin de fichier reçoit 3 785 818 octets en **16,781 s**.
+Au saut vers 1 093,137 s, la première lecture fournisseur attend seulement
+**811 ms** la connexion ; l'attente du lecteur dure **9,238 s**. Les plages
+suivantes de 8 Mio prennent notamment **4,809 à 34,209 s**, sans attente
+supplémentaire du verrou. La lecture progresse ensuite de 92,588 secondes
+sans autre `waiting`. Cet essai ne démontre pas un blocage du verrou Norva.
+
+Le correctif regroupe uniquement une demande explicite vers la fin exacte du
+fichier, de taille **au plus 4 Mio**, après le sondage initial. Le navigateur
+peut ainsi obtenir le petit index de fin en une réponse, au lieu de répéter
+les délais de requête. Une seule connexion fournisseur reste autorisée ; les
+validations, l'expiration, la publication exclusive de plages complètes et
+le budget mémoire sont inchangés. Les demandes plus grandes, ne finissant
+pas à EOF, depuis zéro, et hors pilote gardent leur découpage ordinaire.
+
+| Essai | Lecture effective depuis le clic | Réception de la fin du fichier | Suite observée |
+| --- | ---: | ---: | --- |
+| Témoin, 1 Mio | 20,995 s | 16,781 s | Saut en 9,238 s, puis 92,588 s de progression |
+| Fin regroupée, première création | 12,104 s | 7,015 s | Saut en 6,777 s, puis quatre interruptions |
+| Fin regroupée, seconde création | 11,292 s | 6,297 s | 84,987 s parcourues depuis zéro, aucun `waiting` |
+
+Les deux créations corrigées sont distinctes et relisent effectivement la fin
+du fichier ; aucun cache intersession n'est déclaré réutilisé. Les traces
+Gateway confirment une seule plage fournisseur de 3 785 818 octets pour cet
+index, livrée en 6,847 puis 6,087 s. **Le gain de démarrage se répète ici,
+mais trois essais successifs ne neutralisent pas la variabilité réseau.**
+
+Dans le premier essai corrigé, les quatre interruptions après le saut durent
+**2,024 / 3,751 / 3,693 / 5,819 s**. Une plage de 8 Mio prend alors **38,219 s**,
+avec 0 ms d'attente de verrou. La position atteint 1 264,888 s, soit environ
+172 secondes après la cible, mais ce parcours n'est pas continu. Les intervalles
+entre images confirment les arrêts. Une image d'animation de 827 ms sans script
+mesuré est également relevée : la réception variable n'autorise pas à attribuer
+tous les phénomènes à un acteur réseau précis. Compteurs : zéro image perdue
+sur 5 988, ce qui ne signifie pas absence de gels.
+
+La seconde création ne comporte pas de saut ; elle compte dix images perdues
+sur 2 042, sans grand intervalle d'image détecté. Le code vidéo 4 à 17 ms est
+émis pendant la remise à zéro du banc, avant que la nouvelle création réseau
+de 547 ms ait répondu. `currentSrc` contient encore l'ancienne source à cet
+instant : le champ `mediaAttached` seul ne distingue pas les deux lectures.
+Aucune erreur média n'est relevée après attachement de la nouvelle réponse.
+
+L'index a aussi été analysé à partir des octets déjà reçus, sans nouvelle
+connexion fournisseur. `moov` commence à l'octet 1 484 647 221 et mesure
+3 758 373 octets. Pour la cible 1 093,137 s, le repère vidéo précédent est à
+**1 092,619 s**, dans l'octet 318 931 589, et l'échantillon AAC correspondant
+à **1 093,120 s**, dans l'octet 319 172 062. Cela ne montre pas de décalage
+structurel de 78 secondes entre les pistes. Le début temporaire de `buffered`
+ne suffit pas à diagnostiquer un tel défaut. **Aucune écoute humaine ou
+validation sonore complète n'est revendiquée.**
+
+Preuves : `clock-path-{browser,create,transport}-6-1.safe.json`,
+`clock-native-transport.safe.json`, `index-path-{browser,create,transport}-6-{1,2}.safe.json`,
+`index-native-transport-{1,2}.safe.json`, `jolt-index-layout.safe.json`,
+`index-replay-summary.safe.json`, `jolt-tail-repeat.jpg`.
+
+### Contrôles et clôture de cette étape
+
+Cinq tests couvrent les demandes éligibles, l'option désactivée, une fin trop
+grande, une plage ne finissant pas à EOF et un fichier entier. Ils comparent
+les octets réels, la réutilisation d'une plage complète et le maximum d'une
+connexion simultanée. Suite broker/plages/MP4 : **178 réussis, cinq ignorés**.
+Contrats CI du code `a409f6f37` : **6 350 réussis, 35 ignorés**, région et syntaxe
+réussies (run `38076926009`). Les paquets Android/Windows étaient encore en
+construction lors de ce relevé ; aucune publication n'est effectuée.
+
+Lectures expirées normalement, helper et deux services temporaires arrêtés.
+Zéro session, pompe, encodeur, préparation et octet réservé avant arrêt.
+Deux Gateways de production sains. Preuves : `tail-broker-regression.tap`,
+`index-final-health.safe.json`, `index-closure.safe.json`.
+
 ## État et critères d'activation
 
 **Non activé en production. Le module WatchPage réutilise le préfixe sur les
-copies MKV et MPEG-TS, mais Lost reste irrégulier. Le MP4 natif n'a toujours
-pas de préfixe réutilisable et ses sauts restent non satisfaisants.**
+copies MKV et MPEG-TS, mais l'ancien gel de Lost reste inexpliqué. Le démarrage
+MP4 est accéléré sur Jolt ; il n'a toujours pas de préfixe réutilisable et ses
+sauts restent non satisfaisants.**
 PR760 conservée en brouillon. Les essais sont arrêtés par expiration ordinaire
 de leurs claims ; sessions, transports natifs, pompes et encodeurs du canary
 reviennent à zéro. Les deux Gateways de production restent sains et inactifs.
