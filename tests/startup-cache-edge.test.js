@@ -9,7 +9,7 @@ class HttpError extends Error { constructor(status, message) { super(message); t
 function harness(options = {}) {
   const events = [], owner = 'a'.repeat(64);
   const target = { targetUrl: 'https://provider.invalid/movie/a/b/1.mkv', accountKey: 'account', accountHash: 'account-hash',
-    revision: 'revision', profileFingerprint: 'profile', resolved: { playbackHint: {} },
+    revision: 'revision', variantId: options.variantId || '', profileFingerprint: 'profile', resolved: { playbackHint: {} },
     profile: { audioTracks: [{ index: 1, codec: 'aac', default: true }], fileSizeBytes: 10000 } };
   const context = vm.createContext({ HttpError, crypto: require('node:crypto').webcrypto, Request, URL, Date, AbortSignal,
     ...require('../supabase/functions/_shared/native-mp4-gateway-policy.mjs'),
@@ -28,7 +28,8 @@ function harness(options = {}) {
     getRuntimeConfig: async () => ({}), mediaGatewayRouteForHlsPlaybackUser: async () => ({ url: 'https://gateway.invalid', token: 'gateway-token' }),
     gatewayPlaybackHints: x => x, boundedInt: (value, fallback, min, max) => Number.isInteger(value) ? Math.min(max, Math.max(min, value)) : fallback,
     releaseProviderFileProbe: async () => events.push('release-file'),
-    fetch: async () => { events.push('gateway'); if (options.transportFailure) throw Error('lost response');
+    fetch: async (_url, request) => { events.push('gateway'); target.sentSession = JSON.parse(request.body).session;
+      if (options.transportFailure) throw Error('lost response');
       return { json: async () => ({ protocol: 1, prepared: true, providerDrained: !options.uncertainDrain, refreshAfterSeconds: 240 }) }; },
   });
   vm.runInContext(code, context);
@@ -69,6 +70,23 @@ test('startup Edge requires both leases and current authority, then releases onl
   assert.ok(h.events.indexOf('claim_provider_file_probe') < h.events.indexOf('gateway'));
   assert.ok(h.events.indexOf('gateway') < h.events.indexOf('release-file'));
   assert.equal(h.events.at(-1), 'release_provider_account_language_validation');
+});
+
+test('catalogue movie prefix binds the same owned variant as ordinary playback and rejects a changed variant', async () => {
+  const variantId = '00000000-0000-4000-8000-000000000003';
+  const h = harness({ variantId });
+  assert.equal((await h.context.runStartupCachePreparation(h.request, h.db)).prepared, true);
+  const identity = h.target.sentSession.playbackIdentity;
+  assert.equal(identity.variantId, variantId);
+  assert.equal(identity.vodIdentityKey, await h.context.vodPlaybackIdentityKey(sourceId, 'movie', '1', variantId, h.target.targetUrl));
+  assert.notEqual(identity.vodIdentityKey, await h.context.vodPlaybackIdentityKey(sourceId, 'movie', '1', null, h.target.targetUrl));
+  const permit = { userId, sourceId, itemType: 'movie', itemId: '1', variantId,
+    leaseOwner: 'startup-cache:' + userId, identityKey: 'identity', accountHash: h.target.accountHash,
+    sourceRevision: h.target.revision, profileFingerprint: h.target.profileFingerprint, targetHash: 'hash:' + h.target.targetUrl };
+  assert.equal(await h.context.startupCachePermitCurrent(h.db, permit), true);
+  assert.equal(await h.context.startupCachePermitCurrent(h.db, { ...permit, variantId: 'other-variant' }), false);
+  const ordinary = src.slice(src.indexOf('const identityForTarget ='), src.indexOf('const vodIdentityKey =', src.indexOf('const identityForTarget =')));
+  assert.match(ordinary, /vodPlaybackIdentityKey\([\s\S]*playbackIdentity\.variantId/);
 });
 test('native MP4 cannot occupy an idle provider slot for an HLS prefix its playback route does not read', async () => {
   const profile = { container: 'mov,mp4,m4a,3gp,3g2,mj2', videoCodec: 'h264', videoPixelFormat: 'yuv420p',
