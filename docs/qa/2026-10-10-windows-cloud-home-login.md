@@ -30,4 +30,28 @@ Le processus Windows impose maintenant `NORVA_SERVER_HOST=127.0.0.1` avant de ch
 
 Le wrapper de contrôle fixe explicitement `userData` et `sessionData` dans un répertoire isolé. Le reçu constate `/app#home`, puis `/account`, puis `/app#home` entre 10:35:02 et 10:35:21 UTC. Aucun identifiant n'est saisi par l'agent et ces routes seules ne démontrent pas un parcours complet d'authentification automatisé. Le banc de développement signale une dépendance SQLite native absente et un nom mDNS déjà utilisé ; sa validation ne remplace pas le contrôle du portable construit en CI.
 
-Les quatre tâches CI du commit intermédiaire c9d0746 sont réussies (contrats, Phone, TV et Windows). Le paquet final doit inclure le dernier traitement des événements Electron et des chemins sans extension. Sa construction et son inspection restent à terminer ; native.3 n'est pas encore publiée à ce relevé.
+La CI finale du code `f5865b393602e356bb5021197c3d6c6b9698e69f` est réussie : 6 300 tests, 34 ignorés, contrats et paquets Phone/TV/Windows. Le portable x64 final mesure 239 575 482 octets ; SHA256 `3614569b4726cf4c10c00a4dec4cd08f0c3974319a8ae06a6998d64ef29e7786`. Huit sources embarquées correspondent au commit, les DLL LibVLC, polices, icônes et licences sont présentes ; artefacts QA et données de session exclus.
+
+Adrien a ouvert ce portable. Le processus réel et son ASAR sont vérifiés en version native.3, avec entrée cloud par défaut. Sa session existante ouvre le catalogue Séries ; le bouton Accueil conduit à `/app#home`. Les affiches signalées (Farming Life, Isekai Farming, Last Bullet, California King, Breaking Bad), le hero et l'avatar se chargent dans cette fenêtre. Cette inspection conserve la session ; elle ne revendique pas une inscription ou une connexion réelle automatisée à profil vierge. Capture : `.codex-artifacts/windows-login-20261010/native3-home.png`.
+
+PR758 intégrée par `b612d1016f07dc98b3401d09c7c4966585660a43`. [Native.3 publiée](https://github.com/Admin-Adher/Norva/releases/tag/v2.1.5-native.3) à 11:13:52 UTC. Le digest GitHub du portable correspond au SHA256 inspecté ; sources VideoLAN et sommes de contrôle jointes. Préversion portable non signée. Aucun nouvel essai de fluidité ni de qualité à l'écoute.
+
+## Filtres Séries : diagnostic et correction du 10 octobre
+
+Le menu vide ne vient pas du moteur LibVLC. L'API `media-language-facets` renvoie 500 après environ huit secondes sur les deux réplicas Edge pour Séries, alors que Films répond. La requête des déclarations audio propres au compte dépasse le budget. Les sous-titres ne sont alors pas projetés dans le menu, malgré une requête de sous-titres isolée fonctionnelle.
+
+Migration `20261010111000_series_declared_language_facets` : candidats Séries regroupés, codes distincts canonicalisés une seule fois et réglage du plan limité au nouveau helper. Appartenance exacte, compte/source/génération, identité fournisseur, fingerprint, visibilité et précédence des observations sont conservés. La branche Films garde le corps SQL antérieur. Les appels restent restreints au service role, sans élargissement d'accès utilisateur.
+
+Comparaison réelle des anciennes et nouvelles requêtes sur les quatre sources, Films et Séries : zéro différence dans les huit comparaisons. Fixture PGlite exécutant la migration : rejets d'appartenance, observations prioritaires, visibilité, lifecycle, isolement et branche Films vérifiés. Les 41 contrôles SQL obligatoires de CI réussissent. Le premier contrôle CI suivant échoue uniquement sur le manifeste d'assets i18n périmé ; celui-ci est régénéré dans le commit suivant.
+
+Validation temporaire par session, sans modifier les fonctions publiques : audio et inconnus passent en 3,96–6,69 secondes. Migration appliquée atomiquement par son rôle propriétaire à 11:17:30 UTC ; définition précédente sauvegardée. Deux premières tentatives s'arrêtent sans changement durable (différences de fins de ligne dans la garde puis rôle non propriétaire). La stack n'a pas de registre applicatif de migrations ; le reçu d'état effectif est conservé.
+
+Contrôle API après application, deux réplicas : six réponses 200. Toutes sources Séries : 43 langues audio et 34 langues de sous-titres, 6,28/7,19 secondes ; source Strng : 35/16 options, 3,75/3,95 secondes. Films : 75/50 options, 5,36/5,91 secondes. Aucun média fournisseur demandé. Dans native.3, les deux menus Séries sont ouverts et contiennent de nouveau leurs langues et compteurs ; captures `native3-series-audio.png` et `native3-series-subtitles.png`.
+
+Ces timings sont des mesures ponctuelles, proches du budget pour toutes sources ; ils ne garantissent pas chaque charge future. Reçus : `declarations-compare.safe.json`, `facets-temporary-validation.safe.json`, `facets-deployed.safe.json` et `facet-runtime.safe.json`, dans `.codex-artifacts/windows-login-20261010/`.
+
+## Recherche mobile
+
+La projection phone partagée retire Search de la barre du bas et garde l'action du header. Web mobile : cinq destinations ; shell Phone : six avec Téléchargements. Le bouton du header a une zone de 44 × 44 CSS px sur mobile. Contrats du modèle et inspection navigateur à 480 CSS px réussis : un seul bouton Search, zéro Search en bas, focus du champ après clic et aucun débordement horizontal.
+
+Le replay Android utilise le vrai header, le modèle, l'adapter et la feuille de style dans un System WebView visible, sans compte ou média fournisseur. Un premier échec révèle le header de 40px ; corrigé. Un second échec montre que le focus JavaScript ne prouve pas l'ouverture du clavier : le banc utilise maintenant une vraie touche sur le champ et exige `WindowInsets.Type.ime()` visible avant le contrôle. La validation finale à navigation gestes/trois boutons et échelles 1/1,3 reste en cours à ce relevé. PR759 en brouillon ; le retrait mobile n'est pas encore publié.
