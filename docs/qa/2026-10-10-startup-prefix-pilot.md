@@ -771,6 +771,59 @@ de production sains : `reserve-final-health.safe.json`,
 la dernière demande de trajet distinct lors du contrôle en lecture seule.
 PR760 reste en brouillon, sans déploiement.
 
+## Mesure MP4 par index et octets — expérience du 10 octobre, 21:06 Paris
+
+Le nouveau module isolé `mp4-indexed-byte-coverage.js` lit les tables de
+paquets du `moov` : tailles, chunks 32/64 bits, durées, images de synchronisation,
+offsets de composition et édition simple. Il calcule la couverture DTS continue
+à partir du point vidéo de synchronisation précédent et des paquets audio près
+de la cible. La couverture s'arrête au premier paquet dont les octets manquent.
+Les fragments MP4, éditions complexes, pistes ambiguës, tables tronquées,
+comptages excessifs et octets hors fichier sont refusés. **Sept tests ciblés
+réussissent.** Le module n'est raccordé à aucune route ni décision de production.
+
+Sur les 8 060 928 octets du contrôle précédent de Jolt, il retrouve
+**26,629 secondes après la cible**, après application des éditions audio/vidéo.
+Cette preuve situe les paquets ; elle ne garantit pas leur décodage, la
+présentation des images réordonnées ni la fluidité future.
+
+Un nouvel essai utilise Jolt et WatchPage réel avec claims ordinaires sur les
+services isolés. L'index est capturé à nouveau dans cette même lecture ; le
+banc mesure les octets reçus par son relais local, sans requête fournisseur
+supplémentaire. Il attend 24 secondes selon l'index, plutôt que selon
+`HTMLMediaElement.buffered`, puis demande `play()` seulement lorsque le saut
+est terminé, la position correcte et `readyState >= 2`.
+
+- Démarrage depuis zéro : **13,060 s**.
+- Saut vers **1 082,206 s** : reprise automatique après **54,615 s**,
+  sans pression manuelle sur Play. Couverture calculée au départ : **25,634 s**.
+- L'indication native reste décalée pendant la pause. La reprise automatique
+  dépasse néanmoins la condition qui bloquait le contrôle précédent.
+- Après reprise : **142,945 secondes de vidéo sur 143,286 secondes réelles**,
+  sans `waiting` ni grand intervalle entre images après la première seconde
+  de reprise. Le dernier paquet initialement prouvé était vers 1 107,84 s ;
+  la lecture atteint 1 225,151 s, avec réception de nouvelles données.
+  Treize images perdues sur 4 138 dans l'essai entier ; une grande coupure
+  couvre la pause volontaire, et un intervalle de 0,509 s précède le saut.
+  L'erreur vidéo initiale à 8,5 ms précède l'attachement du média ; aucune
+  nouvelle erreur n'est signalée pendant cette lecture.
+
+**Ce délai reste trop long.** Il n'existe toujours pas de préfixe MP4 natif
+réutilisable entre sessions. Le banc mesure des octets de transport, pas une
+preuve exposée par le cache authentifié du broker ; ce raccord reste à réaliser.
+Le seuil de 24 secondes reste expérimental et ne doit pas devenir un réglage
+général. L'entrée publique, d'autres copies et l'écoute ne sont pas validées.
+Les positions et conditions réseau diffèrent : aucun gain chiffré comparatif
+de reprise n'est revendiqué.
+
+Preuves : `jolt-indexed-coverage.safe.json`,
+`indexed-path-{browser,transport,create}-6-1.safe.json`,
+`indexed-validation-summary.safe.json`,
+`mp4-indexed-automatic-continuation.png`.
+Les claims sont expirés normalement ; le helper, son tunnel et les services
+isolés sont arrêtés après drainage. Les deux Gateways de production sont sains
+et inactifs : `indexed-final-health.safe.json`, `indexed-closure.safe.json`.
+
 ## État et critères d'activation
 
 **Non activé en production. Le module WatchPage réutilise le préfixe sur les
