@@ -1,5 +1,5 @@
 {
-  "status": "awaiting_optimized_portable_test",
+  "status": "final_portable_verified_publication_ready",
   "code": "a8c39550d0ebed850c67dc01cdfc2f17fd30d492",
   "pr": 757,
   "version": "2.1.5-native.2",
@@ -50,7 +50,7 @@
     "x64Only": true,
     "exeBytes": 239558491,
     "exeSha256": "bbcb0d10eaed6c6f668777893239d9d633c100de89f4477d33091b90b05a95e3",
-    "finalPortableUiVerified": false
+    "finalPortableUiVerified": true
   },
   "realTests": [
     {
@@ -122,7 +122,7 @@
   "limitations": [
     "Some copies remain slow or refuse delivery",
     "No full-film fluency or audible acceptance claimed",
-    "Portable UI launch rejected by automatic review; human confirmation pending"
+    "Exact portable manually opened and verified; audible acceptance remains unconfirmed"
   ],
   "productionGatewayChanged": false,
   "priorPackages": [
@@ -289,14 +289,15 @@
     "audibleAccepted": false
   },
   "finalPortableHandoff": {
-    "observedAsarSha256": "0ad63c3e372e28f12ea6168ff5bc05da39a7b70c154f5c0237e21c78c3351aeb",
     "finalExeSha256": "bbcb0d10eaed6c6f668777893239d9d633c100de89f4477d33091b90b05a95e3",
     "observedFirstManualLaunch": "previous_package",
     "automatedLaunchRefused": true,
     "previousWindowClosed": true,
     "exactFinalExe": "Norva-Windows-2.1.5-native.2-x64.exe",
-    "finalExeUiVerified": false,
-    "status": "awaiting_manual_final_exe_launch"
+    "finalExeUiVerified": true,
+    "status": "completed",
+    "observedPreviousAsarSha256": "0ad63c3e372e28f12ea6168ff5bc05da39a7b70c154f5c0237e21c78c3351aeb",
+    "observedAsarSha256": "1544a7ba05ca5929b26286b376b3f1aa47990fac5a4f8c8ccfdda75d18f4c495"
   },
   "draftRelease": {
     "prerelease": true,
@@ -305,5 +306,43 @@
     "assetsUploadedAndDigestsVerified": true,
     "id": 408840971,
     "tag": "v2.1.5-native.2"
+  },
+  "finalPortableValidation": {
+    "version": "2.1.5-native.2",
+    "asarSha256": "1544a7ba05ca5929b26286b376b3f1aa47990fac5a4f8c8ccfdda75d18f4c495",
+    "resumeClickAtMs": 1791625496970,
+    "preliminaryCardActionAtMs": 1791625486168,
+    "firstImageObservedAtMs": 1791625549057,
+    "firstObservedPositionSeconds": 1120,
+    "startupTiming": "UI sampling does not establish an exact first-frame delay",
+    "audioMenu": "Track 1 - [English], selected",
+    "operatorPauseObserved": true,
+    "playAfterPauseAtMs": 1791625599705,
+    "progressSampleAtMs": 1791625623580,
+    "preSeekAtMs": 1791625670511,
+    "preSeekPositionSeconds": 1172,
+    "seekAtMs": 1791625670511,
+    "seekTargetFraction": 0.3,
+    "playAfterSeekAtMs": 1791625685205,
+    "postSeekObservedAtMs": 1791625719680,
+    "firstPostSeekSample": {
+      "atMs": 1791625781657,
+      "positionSeconds": 2097
+    },
+    "subtitleMenuOpened": true,
+    "secondPostSeekSample": {
+      "atMs": 1791625855828,
+      "positionSeconds": 2161
+    },
+    "finalPausedPositionSeconds": 2206,
+    "fullscreenVerified": true,
+    "exitFullscreenVerified": true,
+    "returnAtMs": 1791625938714,
+    "catalogueReturned": true,
+    "nativePlayersAfterReturn": 0,
+    "resourcesPreservedAfterReturn": true,
+    "audibleAccepted": false,
+    "videoFluidity": "Sampled screenshots and timeline progress, not exhaustive frame-interval telemetry",
+    "atUtc": "2026-10-10T09:53:50.019Z"
   }
 }
