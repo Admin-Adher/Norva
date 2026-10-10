@@ -6949,7 +6949,9 @@ class WatchPage {
         this.clearExternalSubtitleTracks();
         if (this.video) {
             this.video.pause();
-            this.video.src = '';
+            // An empty src resolves to the document URL and can start another
+            // request during teardown. Detach the old resource completely.
+            this.video.removeAttribute?.('src');
             this.video.load();
         }
         // Teardown sessions after destroying HLS so stale playlists are not

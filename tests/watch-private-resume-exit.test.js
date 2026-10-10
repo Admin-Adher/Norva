@@ -77,7 +77,12 @@ test('normal stop captures before resetting the media clock; internal teardown k
             'stopCloudPlaybackHeartbeat']) page[name]=()=>{};
         page.stopTranscodeSession=async()=>{};
         page.activeCloudPlaybackSessionIds=new Set(['current']);
-        page.video.pause=()=>{};page.video.load=()=>{page.video.currentTime=0;};
+        let detached=false;
+        page.video.pause=()=>{};
+        page.video.removeAttribute=name=>{assert.equal(name,'src');detached=true;};
+        Object.defineProperty(page.video,'src',{get:()=>detached?'':'https://norva.invalid/previous.mp4',
+            set:()=>assert.fail('teardown must not navigate the media element to an empty document URL')});
+        page.video.load=()=>{assert.equal(detached,true);page.video.currentTime=0;};
         await page.stop({enqueueStoryboard});
         assert.equal(calls.length,1);assert.equal(calls[0].options.resumePosition,enqueueStoryboard?315.5:null);
         assert.equal(page.video.currentTime,0);
