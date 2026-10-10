@@ -4347,6 +4347,11 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 // Complete/cache its first bounded chunk before an abandoned
                 // speculative 8 MiB read would incur the provider release delay.
                 finiteFirstWindowBytes: claims.nativeContainer === 'ts' ? 0 : 256 * 1024,
+                // A browser explicitly asking for a small suffix through EOF
+                // normally needs the complete tail index before first frame.
+                // Coalesce only that bounded request inside the owner pilot.
+                finiteTailWindowBytes: claims.scope === 'native-browser-mp4' && canUseStartupCache(entry.ownerHash)
+                    ? 4 * 1024 * 1024 : 0,
                 finiteAlignFirstWindow: claims.nativeContainer !== 'ts',
                 // Native TS binary seeking commonly corrects backwards by a
                 // few packets. Keep a bounded preceding slice in this session.
@@ -4388,7 +4393,8 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                         providerFetches: broker.providerFetches, providerBytes: broker.providerBytes,
                         interruptedProviderFetches: broker.interruptedProviderFetches,
                         resumeRangeReusedBytes: broker.resumeRangeReusedBytes,
-                        windowTrace: broker.windowTrace.slice(0, 12) }));
+                        windowTrace: broker.windowTrace.slice(0, 12),
+                        lastWindows: broker.windowTrace.slice(-12) }));
                     entry.ac.signal.removeEventListener('abort', abortEntry); releaseRawPump(pump);
                 }
             } };
@@ -6126,7 +6132,7 @@ function startFiniteMkvSeekResponse(context, res, range) {
     if (context.validator?.kind === 'last-modified') res.setHeader('Last-Modified', context.validator.value);
 }
 
-function beginFiniteMkvSeekWindowTrace(context, requestId, localRange, providerRange) {
+function beginFiniteMkvSeekWindowTrace(context, requestId, localRange, providerRange, providerSlotWaitMs = 0) {
     const startedAtMs = Number(context.now?.() ?? Date.now());
     const trace = {
         requestId,
@@ -6135,6 +6141,7 @@ function beginFiniteMkvSeekWindowTrace(context, requestId, localRange, providerR
         providerStart: providerRange.start,
         providerEnd: providerRange.end,
         startedAtMs,
+        providerSlotWaitMs,
         responseHeadersMs: null,
         firstByteMs: null,
         durationMs: null,
@@ -6316,7 +6323,10 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     0,
                     finiteProviderWindowsCompleted - finiteWarmupWindowsCompleted,
                 );
-                const effectiveWindowBytes = finiteWindowIsWarmup
+                const boundedTail = !finiteWindowIsWarmup && context.finiteTailWindowBytes > 0
+                    && range.start > 0 && range.end === range.total - 1
+                    && range.total - range.start <= context.finiteTailWindowBytes;
+                const effectiveWindowBytes = boundedTail ? context.finiteTailWindowBytes : finiteWindowIsWarmup
                     ? context.finiteWarmupWindowBytes
                     : (regularProviderWindowsCompleted === 0 && context.finiteFirstWindowBytes > 0)
                         ? context.finiteFirstWindowBytes
@@ -6333,7 +6343,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     // The first slice ends on a stable base-window boundary. A
                     // later overlapping cue can reuse the cached suffix and fetch
                     // only its missing tail instead of redownloading the prefix.
-                    alignToWindowEnd: context.finiteAlignFirstWindow && regularProviderWindowsCompleted === 0,
+                    alignToWindowEnd: !boundedTail && context.finiteAlignFirstWindow && regularProviderWindowsCompleted === 0,
                 });
                 const cached = finiteMkvSeekCacheLookup(context, finiteWindowRange, {
                     allowPrefix: true,
@@ -6376,6 +6386,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 finiteBufferedBytes = 0;
             }
             let releaseFiniteProviderSlot = null;
+            let finiteProviderSlotWaitMs = 0;
             const retainedPause = context.retainedInputBarrier ? new AbortController() : null;
             const rangeYield = context.finiteYieldToNewRange ? new AbortController() : null;
             try {
@@ -6393,10 +6404,12 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 attempt.waitingProviderRange = { ...finiteProviderRange,
                     start: finiteProviderRange.start + finiteBufferedBytes };
                 for (const other of context.activeFiniteAttempts) other.yieldToNewRange?.(attempt);
+                const providerSlotStartedAt = Number(context.now?.() ?? Date.now());
                 releaseFiniteProviderSlot = await acquireFiniteMkvSeekProviderSlot(context, controller.signal, retainedPause ? () => {
                     retainedPause.abort(new Error('RETAINED_INPUT_PAUSE'));
                     attempt.upstreamController?.abort(retainedPause.signal.reason);
                 } : null);
+                finiteProviderSlotWaitMs = Math.max(0, Number(context.now?.() ?? Date.now()) - providerSlotStartedAt);
                 attempt.waitingProviderRange = null;
                 // The pre-queue grace may have elapsed while a newer cue was
                 // still fetching. Libav cannot close its old socket until that
@@ -6474,7 +6487,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
             let strictRangeCollector = null;
             let receivedBytes = 0;
             const finiteWindowTrace = finiteSeek
-                ? beginFiniteMkvSeekWindowTrace(context, requestId, range, remainingRange)
+                ? beginFiniteMkvSeekWindowTrace(context, requestId, range, remainingRange, finiteProviderSlotWaitMs)
                 : null;
             let upstreamStatus = null;
             let diagnosticStage = 'request';
@@ -7429,6 +7442,9 @@ async function createStrictLidBroker(options = {}) {
         && options.finiteInitialSequentialWindowBytes > 0
         ? Math.max(context.finiteSequentialGrowthBytes > 0 ? 64 * 1024 : context.finiteWindowBytes,
             Math.min(context.finiteSequentialWindowBytes, options.finiteInitialSequentialWindowBytes)) : 0;
+    context.finiteTailWindowBytes = pathPrefix === 'finite-mkv-seek'
+        && Number.isSafeInteger(options.finiteTailWindowBytes) && options.finiteTailWindowBytes > 0
+        ? Math.min(4 * 1024 * 1024, options.finiteTailWindowBytes) : 0;
     // Disjoint MP4 tracks can alternate after just one packet. Complete a
     // small first range so the next visit can reuse validated bytes instead
     // of repeatedly abandoning an 8 MiB window. Sequential reads still grow.
@@ -7651,6 +7667,8 @@ async function createStrictLidBroker(options = {}) {
                 localEnd: trace.localEnd,
                 providerStart: trace.providerStart,
                 providerEnd: trace.providerEnd,
+                startedAtMs: trace.startedAtMs,
+                providerSlotWaitMs: trace.providerSlotWaitMs,
                 responseHeadersMs: trace.responseHeadersMs,
                 firstByteMs: trace.firstByteMs,
                 durationMs: trace.durationMs,

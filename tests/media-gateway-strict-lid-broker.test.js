@@ -4055,6 +4055,39 @@ test('stable MKV delivery reduces remote round trips and resets small at each ne
   }
 });
 
+for (const kind of ['tail', 'disabled', 'oversized', 'not-eof', 'whole-file'])
+test(`MP4 bounded tail coalescing: ${kind}`, async t => {
+  const N=65536, data=Buffer.from(Array.from({length:8*N},(_,i)=>i%251)), ranges=[];
+  let active=0,peak=0;
+  const provider=http.createServer((req,res)=>{
+    ranges.push(req.headers.range);active++;peak=Math.max(peak,active);
+    res.once('finish',()=>{active--});sendExactRange(req,res,data);
+  });
+  const sourceUrl=await listen(provider);
+  const broker=await brokerHarness().createStrictLidBroker({sourceUrl,fileSizeBytes:data.length,
+    pathPrefix:'finite-mkv-seek',finiteWindowBytes:4*N,finiteFirstWindowBytes:N,
+    finiteAlignFirstWindow:true,finiteSequentialWindowBytes:4*N,
+    finiteTailWindowBytes:kind==='disabled'?0:3*N,finiteCacheBytes:8*N,
+    releaseDelayMs:0,completedReleaseDelayMs:0});
+  t.after(async()=>{await broker.close();await closeServer(provider)});
+  const start=kind==='whole-file'?0:kind==='oversized'?4*N:5*N+17;
+  const end=kind==='not-eof'?7*N-1:data.length-1;
+  const response=await fetch(broker.inputUrl,{headers:{Range:`bytes=${start}-${end}`}});
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()),data.subarray(start,end+1));
+  if(kind==='tail') {
+    assert.deepEqual(ranges,[`bytes=${start}-${end}`]);
+    const before=ranges.length;
+    const cached=await fetch(broker.inputUrl,{headers:{Range:`bytes=${start}-${end}`}});
+    assert.deepEqual(Buffer.from(await cached.arrayBuffer()),data.subarray(start,end+1));
+    assert.equal(ranges.length,before,'only the complete validated suffix may be reused');
+  } else {
+    const first=ranges[0].slice(6).split('-').map(Number);
+    assert.ok(first[1]-first[0]+1<=N,'unqualified requests keep the small initial read');
+    assert.ok(ranges.length>1);
+  }
+  assert.equal(peak,1);assert.equal(broker.terminalError,null);
+});
+
 test('small MP4 first range grows for sustained sequential delivery',async t=>{
  const data=Buffer.alloc(2*1024*1024,0x45),ranges=[];
  const provider=http.createServer((req,res)=>{ranges.push(req.headers.range);sendExactRange(req,res,data);});
