@@ -17,7 +17,10 @@ function harness(options = {}) {
     PLAYBACK_SESSION_UUID_PATTERN: /^[a-f0-9-]{36}$/, recordOrEmpty: value => value || {}, stringOr: (value, fallback) => typeof value === 'string' ? value : fallback,
     sha256Hex: async value => value === userId ? owner : 'hash:' + value,
     resolveSourceIdentity: async () => ({ key: 'identity' }), assertProviderCircuitClosed: async () => {},
-    userHasLiveSession: async () => false, accountPregenActive: async () => false,
+    userHasLiveSession: async () => false, accountPregenActive: async (_db, user, source) => {
+      assert.equal(user, userId); assert.equal(source, sourceId);
+      return options.pregenBusy === true;
+    },
     getRuntimeConfig: async () => ({}), mediaGatewayRouteForHlsPlaybackUser: async () => ({ url: 'https://gateway.invalid', token: 'gateway-token' }),
     gatewayPlaybackHints: x => x, boundedInt: (value, fallback, min, max) => Number.isInteger(value) ? Math.min(max, Math.max(min, value)) : fallback,
     releaseProviderFileProbe: async () => events.push('release-file'),
@@ -30,7 +33,9 @@ function harness(options = {}) {
     if (name === 'provider_account_busy') return { data: options.busy === true };
     return { data: !(options.accountRefused && name === 'claim_provider_account_language_validation') };
   }, from: name => {
-    const q = { select() { return this; }, eq() { return this; }, maybeSingle: async () => ({ data: { expires_at: new Date(Date.now() + 180000).toISOString() } }) };
+    const q = { select() { return this; }, eq() { return this; }, maybeSingle: async () => ({ data:
+      options.revokedFileLease && name === 'provider_file_probe_leases'
+        ? null : { expires_at: new Date(Date.now() + 180000).toISOString() } }) };
     return q;
   } };
   const request = new Request('https://edge.invalid/startup-cache/prepare', { method: 'POST',
@@ -45,10 +50,14 @@ test('startup Edge entry rejects unauthenticated or caller-selected target/profi
   await assert.rejects(h.context.runStartupCachePreparation(new Request(h.request.url, { method: 'POST', body: '{}' }), h.db), e => e.status === 401);
   assert.deepEqual(h.events, []);
 });
-for (const scenario of ['busy', 'accountRefused', 'missingEvidence']) test(`startup Edge opens no transport on ${scenario}`, async () => {
+for (const scenario of ['busy', 'accountRefused', 'missingEvidence', 'pregenBusy', 'revokedFileLease']) test(`startup Edge opens no transport on ${scenario}`, async () => {
   const h = harness({ [scenario]: true });
   assert.equal((await h.context.runStartupCachePreparation(h.request, h.db)).prepared, false);
   assert.equal(h.events.includes('gateway'), false);
+  if (scenario === 'revokedFileLease') {
+    assert.equal(h.events.filter(name => name === 'claim_provider_file_probe').length, 1);
+    assert.equal(h.events.filter(name => name === 'claim_provider_account_language_validation').length, 1);
+  }
 });
 test('startup Edge requires both leases and current authority, then releases only after confirmed drain', async () => {
   const h = harness(), result = await h.context.runStartupCachePreparation(h.request, h.db);

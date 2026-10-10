@@ -16082,11 +16082,16 @@ async function startupCachePermitCurrent(db: SupabaseClient, permit: JsonRecord)
       || await sha256Hex(current.targetUrl) !== permit.targetHash) return false;
     await assertProviderCircuitClosed(current.accountHash, db);
     const { data: busy, error: busyError } = await db.rpc("provider_account_busy", { p_key: current.accountKey });
-    if (busyError || busy !== false || await userHasLiveSession(db, userId) || await accountPregenActive(db, userId)) return false;
+    if (busyError || busy !== false || await userHasLiveSession(db, userId)
+      || await accountPregenActive(db, userId, sourceId)) return false;
     const { data: lease, error } = await db.from("provider_account_language_validation_leases")
       .select("expires_at").eq("provider_account_hash", current.accountHash)
       .eq("lease_owner", permit.leaseOwner).maybeSingle();
     if (error || !lease || Date.parse(String(lease.expires_at)) <= Date.now()) return false;
+    const { data: fileLease, error: fileLeaseError } = await db.from("provider_file_probe_leases")
+      .select("expires_at").eq("identity_key", permit.identityKey)
+      .eq("lease_owner", permit.leaseOwner).maybeSingle();
+    if (fileLeaseError || !fileLease || Date.parse(String(fileLease.expires_at)) <= Date.now()) return false;
     const account = await db.rpc("claim_provider_account_language_validation", {
       p_provider_account_hash: current.accountHash, p_lease_owner: permit.leaseOwner, p_ttl_seconds: 180 });
     if (account.error || account.data !== true) return false;
@@ -16131,7 +16136,7 @@ async function runStartupCachePreparation(req: Request, db: SupabaseClient): Pro
     if (error || typeof busy !== "boolean") return { protocol: 1, prepared: false, reason: "activity-unavailable" };
     if (busy) return { protocol: 1, prepared: false, reason: "account-presence" };
     if (await userHasLiveSession(db, userId)) return { protocol: 1, prepared: false, reason: "viewer-active" };
-    if (await accountPregenActive(db, userId)) return { protocol: 1, prepared: false, reason: "background-job-active" };
+    if (await accountPregenActive(db, userId, sourceId)) return { protocol: 1, prepared: false, reason: "background-job-active" };
     const account = await db.rpc("claim_provider_account_language_validation", {
       p_provider_account_hash: target.accountHash, p_lease_owner: leaseOwner, p_ttl_seconds: 180 });
     accountClaimed = !account.error && account.data === true;
