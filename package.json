@@ -1,6 +1,6 @@
 {
     "name": "norva",
-    "version": "2.1.5-native.1",
+    "version": "2.1.5-native.2",
     "description": "Modern playlist media player",
     "license": "GPL-3.0-only",
     "main": "electron-main.js",
@@ -88,6 +88,9 @@
                     ]
                 }
             ]
+        },
+        "portable": {
+            "unpackDirName": true
         },
         "extraResources": [
             {

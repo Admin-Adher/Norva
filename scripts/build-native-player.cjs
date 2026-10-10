@@ -5,13 +5,14 @@ if(process.platform!=='win32')throw Error('The Windows native player is built on
 const sdk=process.env.NORVA_DOTNET || 'dotnet';
 const result=spawnSync(sdk,['publish',path.join(root,'clients/windows-player/Norva.NativePlayer.csproj'),'-c','Release','-p:RestoreLockedMode=true','-o',output],{cwd:root,stdio:'inherit',shell:false,env:{...process.env,DOTNET_CLI_TELEMETRY_OPTOUT:'1'}});
 if(result.status!==0)throw Error('Native player compilation failed. Install the SDK pinned by the Windows workflow.');
-for(const file of ['Norva.NativePlayer.exe','libvlc/win-x64/libvlc.dll','norva-theme.css']){
+for(const file of ['Norva.NativePlayer.exe','libvlc/win-x64/libvlc.dll','norva-theme.css','fonts/Inter-Regular.ttf','fonts/LICENSE.txt']){
  if(!fs.existsSync(path.join(output,file)))throw Error('Native runtime incomplete: '+file);
 }
 fs.copyFileSync(path.join(root,'clients/windows-player/THIRD-PARTY-NOTICES.md'),path.join(output,'THIRD-PARTY-NOTICES.md'));
 fs.cpSync(path.join(root,'clients/windows-player/licenses'),path.join(output,'licenses'),{recursive:true});
 fs.copyFileSync(path.join(root,'clients/windows-player/packages.lock.json'),path.join(output,'packages.lock.json'));
 fs.copyFileSync(path.join(root,'clients/windows-player/source-manifest.json'),path.join(output,'source-manifest.json'));
+fs.writeFileSync(path.join(output,'norva-player-icons.json'),JSON.stringify(require('./native-player-web-assets.cjs').nativePlayerWebAssets(fs.readFileSync(path.join(root,'public/app.html'),'utf8'))));
 const nuget=process.env.NUGET_PACKAGES||path.join(require('node:os').homedir(),'.nuget/packages');
 for(const [pkg,files] of Object.entries({'microsoft.netcore.app.runtime.win-x64':['LICENSE.TXT','THIRD-PARTY-NOTICES.TXT'],'microsoft.windowsdesktop.app.runtime.win-x64':['LICENSE']})) {
  const base=path.join(nuget,pkg,'10.0.12'),destination=path.join(output,'licenses',pkg);fs.mkdirSync(destination,{recursive:true});
@@ -28,7 +29,7 @@ const messages = {};
 for(const name of ['web.json','web-extra.json','web-tail.json','native.json','reviewed.json']) {
  for(const [key,value] of Object.entries(JSON.parse(fs.readFileSync(path.join(root,'i18n',name),'utf8')))) messages[key]={...messages[key],...value};
 }
-const keys={back:'ui_web_76900f1bfd16',play:'ui_web_436e61016e26',pause:'ui_web_42dd586c06d6',fullscreen:'ui_web_c461dbb2bab7',audio:'ui_web_f3161deff512',subtitles:'ui_web_b4463f5175c6',off:'ui_web_ca7981b46ecf',failure:'ui_web_0535388758c1',volume:'Volume',position:'ui_web_c12ff673ae98',preparing:'Preparing playback…'};
+const keys={back:'ui_web_76900f1bfd16',play:'ui_web_436e61016e26',pause:'ui_web_42dd586c06d6',fullscreen:'ui_web_c461dbb2bab7',audio:'ui_web_f3161deff512',subtitles:'ui_web_b4463f5175c6',off:'ui_web_ca7981b46ecf',failure:'ui_web_0535388758c1',volume:'Volume',position:'ui_web_c12ff673ae98',preparing:'Preparing playback…',restart:'ui_web_ad078cce6331',backward:'ui_web_b07313d85440',forward:'ui_web_26551d43abbb',mute:'ui_web_8dd6857baf02',speed:'ui_web_afec2b22114c'};
 const labels={};
 for(const [label,key] of Object.entries(keys)){
  const entry=messages[key];if(!entry?.en)throw Error('Missing native translation: '+label);

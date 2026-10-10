@@ -5,6 +5,9 @@ namespace Norva.NativePlayer;
 // Read the canonical product tokens bundled with the player. No second palette.
 internal static class PlayerTheme
 {
+    static readonly System.Drawing.Text.PrivateFontCollection Fonts = LoadFonts();
+    static System.Drawing.Text.PrivateFontCollection LoadFonts(){var fonts=new System.Drawing.Text.PrivateFontCollection();fonts.AddFontFile(Path.Combine(AppContext.BaseDirectory,"fonts","Inter-Regular.ttf"));return fonts;}
+    internal static Font Font(float size,FontStyle style=FontStyle.Regular)=>new(Fonts.Families[0],size,style);
     static readonly string Css = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "norva-theme.css"));
     internal static Color Color(string token)
     {

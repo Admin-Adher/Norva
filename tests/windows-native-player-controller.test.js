@@ -9,6 +9,7 @@ function fixture(){
     const child=new EventEmitter(); for(const key of ['stdin','stdout','stderr'])child[key]=new PassThrough();
     const writes=[]; child.stdin.on('data',c=>writes.push(JSON.parse(c.toString()))); child.kill=()=>child.emit('exit',1);
     const calls=[],controller=new NativePlayerController('native-player.exe',{spawnProcess:(...args)=>{calls.push(args);return child;},stopTimeoutMs:10,
+        ensureExecutable:async()=>{},
         openInput:async()=>({url:'http://127.0.0.1:1/private-token',stop:async()=>{}})});
     const events=[];controller.on('event',e=>events.push(e));
     return{controller,child,writes,calls,events,event:e=>child.stdout.write(JSON.stringify(e)+'\n')};
@@ -46,15 +47,29 @@ for(const patch of [{sessionId:'not-a-uuid'},{resumeSeconds:-1},{resumeSeconds:I
 });
 
 test('closing the catalogue while an input opens cannot spawn a late decoder',async()=>{
-    let release,stopped=0,spawned=0;
+    let release,started,stopped=0,spawned=0;
     const input=new Promise(resolve=>{release=resolve;});
+    const opening=new Promise(resolve=>{started=resolve;});
     const controller=new NativePlayerController('native-player.exe',{
-        openInput:()=>input,spawnProcess:()=>{spawned++;throw Error('unexpected spawn');}
+        ensureExecutable:async()=>{},
+        openInput:()=>{started();return input;},spawnProcess:()=>{spawned++;throw Error('unexpected spawn');}
     });
-    const opened=controller.open(request);await controller.stop();
+    const opened=controller.open(request);await opening;await controller.stop();
     release({url:'http://127.0.0.1:1/fixture',stop:async()=>{stopped++;}});
     await assert.rejects(opened,/NATIVE_OPEN_CANCELLED/);
     assert.equal(spawned,0);assert.equal(stopped,1);assert.equal(controller.pending,false);
+});
+
+test('missing portable runtime rejects safely before any media transport or decoder opens',async()=>{
+    let opened=0,spawned=0;
+    const controller=new NativePlayerController('missing-player.exe',{
+        ensureExecutable:async()=>{throw Error('private local path');},
+        openInput:async()=>{opened++;},spawnProcess:()=>{spawned++;}
+    });
+    await assert.rejects(controller.open(request),/^Error: NATIVE_PLAYER_UNAVAILABLE$/);
+    assert.equal(opened,0);assert.equal(spawned,0);
+    assert.equal(controller.pending,false);assert.equal(controller.active,null);
+    assert.equal(controller.unacknowledged.size,0);
 });
 
 test('closed is withheld until the byte transport has drained',async()=>{
@@ -88,4 +103,17 @@ test('volume changes are bounded to the owning player',async()=>{
     h.event({type:'volume',sessionId:'other',value:20});assert.equal(h.controller.volume,100);
     h.event({type:'volume',sessionId:request.sessionId,value:101});assert.equal(h.controller.volume,100);
     h.event({type:'volume',sessionId:request.sessionId,value:30});assert.equal(h.controller.volume,30);h.child.emit('exit',0);
+});
+
+test('embedding host comes from the trusted main process, never the renderer request',async()=>{
+    const h=fixture();h.controller.host={handle:'1234',processId:42};
+    await h.controller.open({...request,host:{handle:'dead',processId:999},parentWindow:'bad'});
+    assert.deepEqual(h.calls[0][1],['--parent-window','1234','--parent-process','42']);
+    assert.equal(h.calls[0][2].windowsHide,true);
+    h.event({type:'ready',protocol:1});assert.equal(h.writes[0].host,undefined);
+    let fullscreen;h.controller.on('fullscreen',value=>fullscreen=value);
+    h.event({type:'fullscreen',sessionId:'other',enabled:true});assert.equal(fullscreen,undefined);
+    h.event({type:'fullscreen',sessionId:request.sessionId,enabled:true});assert.equal(fullscreen,true);
+    h.controller.setFullscreen(false);assert.deepEqual(h.writes.at(-1),{type:'fullscreen',enabled:false});
+    h.child.emit('exit',0);
 });

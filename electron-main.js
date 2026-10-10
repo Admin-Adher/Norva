@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, BaseWindow, WebContentsView, shell, ipcMain } = require('electron');
 const fs = require('fs');
 const http = require('http');
 const net = require('net');
@@ -91,7 +91,7 @@ function createWindow(url, transcoderUrl) {
         'native-player', 'Norva.NativePlayer.exe');
     const nativeEnabled = process.platform === 'win32' && process.env.NORVA_DESKTOP_NATIVE_PLAYER !== '0'
         && fs.existsSync(nativeExecutable);
-    const window = new BrowserWindow({
+    const options = {
         width: 1280,
         height: 820,
         minWidth: 960,
@@ -103,6 +103,7 @@ function createWindow(url, transcoderUrl) {
             contextIsolation: true,
             nodeIntegration: false,
             sandbox: true,
+            backgroundThrottling: !nativeEnabled,
             preload: path.join(__dirname, 'preload.js'),
             // Tells the page where the in-app transcoder lives (residential IP),
             // so cloud-mode playback transcodes locally instead of via the
@@ -112,10 +113,28 @@ function createWindow(url, transcoderUrl) {
                 ...(nativeEnabled ? ['--norva-native-player=1',`--norva-native-origin=${new URL(url).origin}`] : [])
             ]
         }
-    });
+    };
+    let window, catalogueView;
+    if (nativeEnabled) {
+        const {webPreferences, ...frameOptions} = options;
+        window = new BaseWindow(frameOptions);
+        catalogueView = new WebContentsView({webPreferences});
+        window.contentView.addChildView(catalogueView);
+        const layout = () => { const [width,height] = window.getContentSize(); catalogueView.setBounds({x:0,y:0,width,height}); };
+        layout(); window.on('resize',layout);
+        // Preserve the existing exact-origin IPC/navigation contract.
+        window.webContents = catalogueView.webContents;
+        window.loadURL = url => window.webContents.loadURL(url);
+        window.on('closed', () => { if (!window.webContents.isDestroyed()) window.webContents.close(); });
+    } else window = new BrowserWindow(options);
 
     if (nativeEnabled) require('./desktop/native-player-ipc').wireNativePlayer({
-        ipcMain, window, executable:nativeExecutable, origin:new URL(url).origin
+        ipcMain, window, catalogueView, executable:nativeExecutable, origin:new URL(url).origin,
+        diagnostic: value => {
+            // Bounded technical timings only: no account/session IDs, URLs,
+            // headers, native decoder stderr or media bytes in this receipt.
+            try { fs.writeFileSync(path.join(app.getPath('userData'), 'native-playback-last.json'), JSON.stringify({at:new Date().toISOString(), ...value})); } catch { }
+        }
     });
 
     window.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
@@ -181,13 +200,19 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
     app.quit();
 } else {
+    app.on('second-instance', () => {
+        for (const window of BaseWindow.getAllWindows()) {
+            if (window.isMinimized()) window.restore();
+            window.focus();
+        }
+    });
     app.whenReady().then(startDesktopApp).catch((error) => {
         console.error(error);
         app.quit();
     });
 
     app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) {
+        if (BaseWindow.getAllWindows().length === 0) {
             startDesktopApp().catch((error) => {
                 console.error(error);
                 app.quit();

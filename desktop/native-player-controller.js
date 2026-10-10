@@ -3,6 +3,7 @@ const { EventEmitter } = require('node:events');
 const { spawn } = require('node:child_process');
 const { createInterface } = require('node:readline');
 const { createNativeInput } = require('./native-input');
+const { access } = require('node:fs/promises');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function trackPreferences(value) {
@@ -42,10 +43,12 @@ function playbackRequest(value) {
 // One native process owns one exact cloud session. Its OS exit (not a renderer
 // notification) is the drain barrier. The next launch also waits for cloud close.
 class NativePlayerController extends EventEmitter {
-    constructor(executable, { spawnProcess = spawn, stopTimeoutMs = 5000, openInput = createNativeInput } = {}) {
+    constructor(executable, { spawnProcess = spawn, stopTimeoutMs = 5000, openInput = createNativeInput,
+        ensureExecutable = access, host = null } = {}) {
         super(); this.executable = executable; this.spawnProcess = spawnProcess; this.stopTimeoutMs = stopTimeoutMs;
         this.active = null; this.unacknowledged = new Set(); this.pending = false;
-        this.openInput = openInput; this.volume = 100; this.completed = new Map();
+        this.openInput = openInput; this.ensureExecutable = ensureExecutable;
+        this.volume = 100; this.completed = new Map(); this.host = host;
     }
     async open(value) {
         const request = playbackRequest(value);
@@ -53,9 +56,16 @@ class NativePlayerController extends EventEmitter {
         this.pending = true; this.cancelOpening = false;
         let input;
         try {
+            // A portable relaunch must never remove a running instance's runtime.
+            // If resources are absent, reject before opening any media transport;
+            // the existing launch-failed path closes the cloud claim and informs the viewer.
+            try { await this.ensureExecutable(this.executable); }
+            catch { throw Error('NATIVE_PLAYER_UNAVAILABLE'); }
+            if (this.cancelOpening) throw Error('NATIVE_OPEN_CANCELLED');
             input = await this.openInput(request.url);
             if (this.cancelOpening) throw Error('NATIVE_OPEN_CANCELLED');
-            const child = this.spawnProcess(this.executable, [], { shell:false, windowsHide:false, stdio:['pipe','pipe','pipe'] });
+            const args = this.host ? ['--parent-window', this.host.handle, '--parent-process', String(this.host.processId)] : [];
+            const child = this.spawnProcess(this.executable, args, { shell:false, windowsHide:true, stdio:['pipe','pipe','pipe'] });
             const state = { child, request, input, ready:false, progress:null, reason:'player_exited' };
             state.exited = new Promise(resolve => { state.resolveExit = resolve; });
             this.active = state;
@@ -69,6 +79,9 @@ class NativePlayerController extends EventEmitter {
                     state.ready = true; this.send(state, {...request,url:input.url,volume:this.volume}); return;
                 }
                 if (event.sessionId !== request.sessionId) return;
+                if (event.type === 'fullscreen' && this.host) {
+                    this.emit('fullscreen', event.enabled === true); return;
+                }
                 if (event.type === 'closed') { state.reason = String(event.reason || 'player_exited').slice(0,64); return; }
                 if (event.type === 'preferences') {
                     this.emit('event',{type:'preferences',sessionId:request.sessionId,sourceId:request.sourceId,itemId:request.itemId,itemType:request.itemType,preferences:trackPreferences(event.preferences)});return;
@@ -90,6 +103,9 @@ class NativePlayerController extends EventEmitter {
             const exited = async () => {
                 if (settled) return; settled = true; clearTimeout(state.readyTimeout); lines.close();
                 await input.stop();
+                this.emit('diagnostic', {reason:state.reason, ready:state.ready,
+                    progress:state.progress ? Object.fromEntries(['positionSeconds','durationSeconds','decodedAudio','decodedVideo','displayedPictures','lostPictures'].map(key => [key,state.progress[key]])) : null,
+                    transport:input.counters || null});
                 if (this.active === state) this.active = null;
                 this.unacknowledged.add(request.sessionId);
                 this.completed.set(request.sessionId,{sourceId:request.sourceId,itemId:request.itemId,itemType:request.itemType,reason:state.reason});
@@ -105,6 +121,7 @@ class NativePlayerController extends EventEmitter {
     }
     send(state, value) { if (!state.child.stdin.destroyed) state.child.stdin.write(JSON.stringify(value)+'\n'); }
     authorize(id) { if (this.active?.request.sessionId === id) this.send(this.active, { type:'authorize',sessionId:id }); }
+    setFullscreen(enabled) { if (this.active?.ready) this.send(this.active, { type:'fullscreen', enabled:enabled === true }); }
     acknowledge(id) {
         if (!UUID.test(id || '') || !this.unacknowledged.delete(id)) return;
         const ended=this.completed.get(id); this.completed.delete(id);

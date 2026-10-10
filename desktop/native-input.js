@@ -7,12 +7,19 @@ const crypto = require('node:crypto');
 // LibVLC may ask for the beginning and the index concurrently. Bounded reads
 // release the source before another lane runs; no full-response deadlock and
 // never two provider requests. Bytes live only within this exact session.
-async function createNativeInput(sourceUrl, { windowBytes = 2 * 1024 * 1024, timeoutMs = 15000 } = {}) {
+async function createNativeInput(sourceUrl, { windowBytes = 256 * 1024, timeoutMs = 15000,
+    cacheWindows = Math.min(64, Math.floor(16 * 1024 * 1024 / windowBytes)) } = {}) {
+    if (!Number.isSafeInteger(cacheWindows) || cacheWindows < 1 || cacheWindows > 64
+        || cacheWindows * windowBytes > 16 * 1024 * 1024) throw Error('NATIVE_INPUT_CACHE_BOUND');
+    if (!Number.isSafeInteger(windowBytes) || windowBytes < 1 || windowBytes > 2 * 1024 * 1024) throw Error('NATIVE_INPUT_WINDOW_BOUND');
     const token = crypto.randomBytes(24).toString('hex');
     let stopped = false, total = null, pending = Promise.resolve(), activeRequest = null;
-    let validator = null, cache = null;
+    let validator = null, changed = false;
+    // Small complete ranges let LibVLC parse headers/index without waiting for
+    // an unrelated 2 MiB body. The byte budget stays 16 MiB, within this session.
+    const cache = new Map(); // at most 16 MiB; only complete windows in this exact session
     const agents = { 'http:':new http.Agent({keepAlive:true,maxSockets:1}), 'https:':new https.Agent({keepAlive:true,maxSockets:1}) };
-    const counters = { sourceRequests:0, maximumConcurrentSourceRequests:0, activeSourceRequests:0, completedBytes:0, ranges:[] };
+    const counters = { sourceRequests:0, maximumConcurrentSourceRequests:0, activeSourceRequests:0, completedBytes:0, cacheHits:0, cachedBytes:0, maximumCachedBytes:0, ranges:[] };
     const drains = new Set();
     async function requestRange(address, start, end, redirects = 0) {
         if (stopped) throw Error('NATIVE_INPUT_CLOSED');
@@ -23,10 +30,13 @@ async function createNativeInput(sourceUrl, { windowBytes = 2 * 1024 * 1024, tim
         const result = await new Promise((resolve,reject) => {
             const transport = url.protocol === 'https:' ? https : http;
             let outcome = null, failure = null, responseBody, status = null;
+            let headersMs=null, firstByteMs=null, payloadCompleteMs=null, bodyEndMs=null, contentLength=null;
             const began = Date.now();
             const request = transport.get(url, {agent:agents[url.protocol],headers:{Range:`bytes=${start}-${end}`,'Accept-Encoding':'identity','User-Agent':'VLC/3.0.24 LibVLC/3.0.24'}}, response => {
                 responseBody=response;
                 status=response.statusCode;
+                headersMs=Date.now()-began;
+                if (/^\d+$/.test(String(response.headers['content-length']||''))) contentLength=Number(response.headers['content-length']);
                 const fail = code => { failure ||= Error(code); response.destroy(); request.destroy(); };
                 response.once('error', () => fail('NATIVE_INPUT_NETWORK'));
                 response.once('aborted', () => fail('NATIVE_INPUT_INCOMPLETE'));
@@ -44,14 +54,19 @@ async function createNativeInput(sourceUrl, { windowBytes = 2 * 1024 * 1024, tim
                     fail('NATIVE_INPUT_RANGE_UNAVAILABLE');return;
                 }
                 const identity=String(response.headers.etag || response.headers['last-modified'] || '');
-                if ((total !== null && size !== total) || (validator !== null && identity !== validator)) {fail('NATIVE_INPUT_CHANGED');return;}
+                if ((total !== null && size !== total) || (validator !== null && identity !== validator)) {
+                    changed=true;cache.clear();counters.cachedBytes=0;fail('NATIVE_INPUT_CHANGED');return;
+                }
                 const expected=actualEnd-start+1, chunks=[];let length=0;
                 response.on('data',chunk=>{
+                    firstByteMs ??= Date.now()-began;
                     length+=chunk.length;
                     if(length>expected || length>windowBytes){fail('NATIVE_INPUT_OVERSIZE');return;}
                     chunks.push(chunk);
+                    if(length===expected)payloadCompleteMs=Date.now()-began;
                 });
                 response.once('end',()=>{
+                    bodyEndMs=Date.now()-began;
                     if(length!==expected){failure ||= Error('NATIVE_INPUT_INCOMPLETE');return;}
                     if(!failure)outcome={start,payload:Buffer.concat(chunks),total:size,identity};
                 });
@@ -63,7 +78,8 @@ async function createNativeInput(sourceUrl, { windowBytes = 2 * 1024 * 1024, tim
                 clearTimeout(deadline);counters.activeSourceRequests--;if(activeRequest===request)activeRequest=null;
                 if(stopped)failure ||= Error('NATIVE_INPUT_CLOSED');
                 counters.completedBytes += outcome?.payload?.length || 0;
-                counters.ranges.push({start,end,status,elapsedMs:Date.now()-began,bytes:outcome?.payload?.length||0,error:failure?.message||null});
+                counters.ranges.push({start,end,status,elapsedMs:Date.now()-began,headersMs,firstByteMs,payloadCompleteMs,bodyEndMs,contentLength,
+                    bytes:outcome?.payload?.length||0,error:failure?.message||null});
                 if(counters.ranges.length>64)counters.ranges.shift();
                 if(failure || !outcome)reject(failure || Error('NATIVE_INPUT_INCOMPLETE'));else resolve(outcome);
                 done();
@@ -77,11 +93,19 @@ async function createNativeInput(sourceUrl, { windowBytes = 2 * 1024 * 1024, tim
     function read(start, isClosed) {
         const operation = pending.catch(()=>{}).then(async()=>{
             if(stopped || isClosed()) throw Error('NATIVE_INPUT_CLOSED');
-            if(cache && start>=cache.start && start<cache.start+cache.payload.length)return cache;
+            if(changed) throw Error('NATIVE_INPUT_CHANGED');
             const base=Math.floor(start/windowBytes)*windowBytes;
+            const existing=cache.get(base);
+            if(existing && start<existing.start+existing.payload.length) {
+                cache.delete(base);cache.set(base,existing);counters.cacheHits++;return existing;
+            }
             const chunk=await requestRange(sourceUrl,base,total===null?base+windowBytes-1:Math.min(total-1,base+windowBytes-1));
             if(stopped)throw Error('NATIVE_INPUT_CLOSED');
-            cache=chunk;return chunk;
+            cache.set(base,chunk);
+            while(cache.size>cacheWindows)cache.delete(cache.keys().next().value);
+            counters.cachedBytes=[...cache.values()].reduce((sum,value)=>sum+value.payload.length,0);
+            counters.maximumCachedBytes=Math.max(counters.maximumCachedBytes,counters.cachedBytes);
+            return chunk;
         });
         pending=operation.then(()=>{},()=>{});return operation;
     }
@@ -116,7 +140,7 @@ async function createNativeInput(sourceUrl, { windowBytes = 2 * 1024 * 1024, tim
     let stopping;
     return {url:`http://127.0.0.1:${server.address().port}/${token}`,counters,
         stop(){return stopping ||= (async()=>{stopped=true;activeRequest?.destroy();for(const agent of Object.values(agents))agent.destroy();
-            for(const socket of sockets)socket.destroy();await pending;await Promise.allSettled([...drains]);await new Promise(resolve=>server.close(resolve));cache=null;})();}
+            for(const socket of sockets)socket.destroy();await pending;await Promise.allSettled([...drains]);await new Promise(resolve=>server.close(resolve));cache.clear();counters.cachedBytes=0;})();}
     };
 }
 module.exports={createNativeInput};

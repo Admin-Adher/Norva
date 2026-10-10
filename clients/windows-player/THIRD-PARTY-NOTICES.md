@@ -5,6 +5,7 @@ Norva is licensed under GPL-3.0-only. This build dynamically links the following
 - LibVLCSharp and LibVLCSharp.WinForms 3.10.1 — LGPL-2.1-or-later. Source: https://code.videolan.org/videolan/LibVLCSharp .
 - VideoLAN.LibVLC.Windows 3.0.24 — LGPL-2.1-or-later package. Source and build scripts: https://code.videolan.org/videolan/libvlc-nuget and https://code.videolan.org/videolan/vlc .
 - .NET Windows Desktop runtime 10.0 — MIT. Source and notices: https://github.com/dotnet/windowsdesktop and https://github.com/dotnet/runtime .
+- Inter 4.1 — SIL Open Font License 1.1. Unmodified `extras/ttf/Inter-Regular.ttf` from https://github.com/rsms/inter/releases/tag/v4.1 ; copyright and license are distributed in `fonts/LICENSE.txt`.
 
 Native libraries are separate replaceable DLLs, not statically linked into Norva's executable. Their license texts and .NET notices are in `licenses/`. The exact NuGet graph and integrity hashes are in `packages.lock.json`.
 

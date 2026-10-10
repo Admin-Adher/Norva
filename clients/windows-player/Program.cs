@@ -9,12 +9,15 @@ internal static class Program
     internal static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
 
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
         Console.InputEncoding = Encoding.UTF8;
         Console.OutputEncoding = new UTF8Encoding(false);
         ApplicationConfiguration.Initialize();
-        using var window = new PlayerWindow();
+        NativeHost? host;
+        try { host = NativeHost.FromArguments(args); } catch { return; }
+        using var hostLifetime = host;
+        using var window = new PlayerWindow(host);
         window.Shown += (_, _) => _ = Task.Run(async () => {
             try {
                 while (await ReadBoundedLine() is { } line) {

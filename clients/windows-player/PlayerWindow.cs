@@ -10,12 +10,13 @@ internal sealed partial class PlayerWindow : Form
     readonly LibVLC engine;
     readonly MediaPlayer player;
     readonly VideoView view;
+    readonly NativeHost? host;
     readonly Label status = new() { Dock = DockStyle.Fill, AutoSize = false, TextAlign = ContentAlignment.MiddleLeft };
-    readonly TrackBar timeline = new() { Dock = DockStyle.Fill, Maximum = 10_000, TickStyle = TickStyle.None, AccessibleName = "Position de lecture" };
-    readonly Button pause;
-    readonly Button back, fullscreen;
+    readonly PlayerSlider timeline = new() { Maximum = 10_000, AccessibleName = "Position de lecture" };
+    readonly PlayerIconButton pause;
+    readonly PlayerIconButton back, fullscreen;
     readonly Label volumeLabel = new() { AutoSize=true };
-    readonly TrackBar volume = new() { Minimum=0, Maximum=100, Value=100, Width=150, TickStyle=TickStyle.None };
+    readonly PlayerSlider volume = new() { Minimum=0, Maximum=100, Value=100, Width=100 };
     readonly ComboBox audio = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, AccessibleName = "Piste audio" };
     readonly ComboBox subtitles = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, AccessibleName = "Sous-titres" };
     readonly System.Windows.Forms.Timer clock = new() { Interval = 500 };
@@ -25,41 +26,28 @@ internal sealed partial class PlayerWindow : Form
     long lastProgress, initialSeek, lastPosition, lastDuration;
     Media? media;
 
-    internal PlayerWindow()
+    internal PlayerWindow(NativeHost? host = null)
     {
+        this.host = host;
         Text = "Norva"; Width = 1120; Height = 760; MinimumSize = new Size(880, 580);
         StartPosition = FormStartPosition.CenterScreen; KeyPreview = true;
+        if (host != null) {
+            ShowInTaskbar = false; FormBorderStyle = FormBorderStyle.None;
+            MinimumSize = Size.Empty; StartPosition = FormStartPosition.Manual; Location = Point.Empty;
+        }
         BackColor = PlayerTheme.Color("color-bg-primary"); ForeColor = PlayerTheme.Color("color-text-primary");
-        Font = new Font("Inter", 11); AutoScaleMode = AutoScaleMode.Dpi;
+        Font = PlayerTheme.Font(11); AutoScaleMode = AutoScaleMode.Dpi;
         engine = new LibVLC("--no-video-title-show", "--no-sub-autodetect-file", "--quiet");
         player = new MediaPlayer(engine) { EnableHardwareDecoding = true, EnableKeyInput = false, EnableMouseInput = false };
         view = new VideoView { Dock = DockStyle.Fill, MediaPlayer = player, BackColor = BackColor, TabStop = false };
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(16) };
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
-        var heading = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
-        heading.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
-        heading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        back=PlayerTheme.Button("Back",Close); heading.Controls.Add(back, 0, 0); heading.Controls.Add(status, 1, 0);
-        layout.Controls.Add(heading, 0, 0); layout.Controls.Add(view, 0, 1); layout.Controls.Add(timeline, 0, 2);
-        var controls = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true };
-        pause = PlayerTheme.Button("Pause", () => { if (opened && !failed) player.Pause(); });
-        controls.Controls.Add(pause);
-        controls.Controls.Add(PlayerTheme.Button("−10 s", () => Seek(player.Time - 10_000)));
-        controls.Controls.Add(PlayerTheme.Button("+10 s", () => Seek(player.Time + 10_000)));
-        controls.Controls.Add(audio); controls.Controls.Add(subtitles);
-        fullscreen=PlayerTheme.Button("Fullscreen",ToggleFullScreen);controls.Controls.Add(fullscreen);
-        layout.Controls.Add(controls, 0, 3); Controls.Add(layout);
-        var sound = new FlowLayoutPanel { Dock=DockStyle.Fill, WrapContents=false };
-        sound.Controls.Add(volumeLabel);sound.Controls.Add(volume);layout.Controls.Add(sound,0,4);
+        back=new PlayerIconButton("back",Close,48,true);
+        pause=new PlayerIconButton("pause",()=>{if(opened&&!failed)player.Pause();},64,true);
+        fullscreen=new PlayerIconButton("fullscreen",ToggleFullScreen);
+        BuildControls();
         volume.ValueChanged += (_,_) => { player.Volume=volume.Value;Program.Emit(new {type="volume",sessionId=session,value=volume.Value}); };
         status.Text = "Préparation de la lecture…";
         timeline.MouseDown += (_, _) => dragging = true;
-        timeline.MouseUp += (_, _) => { dragging = false; Seek((long)(timeline.Value / 10_000d * player.Length)); };
-        timeline.KeyUp += (_, e) => { if (e.KeyCode is Keys.Left or Keys.Right or Keys.Home or Keys.End) Seek((long)(timeline.Value / 10_000d * player.Length)); };
+        timeline.Committed += (_, _) => { dragging = false; Seek((long)(timeline.Value / 10_000d * player.Length)); };
         audio.SelectedIndexChanged += (_, _) => { if (!refreshingTracks && audio.SelectedItem is TrackChoice t) { player.SetAudioTrack(t.Id);audioPreferenceApplied=true;EmitPreference("audio",t.Id); } };
         subtitles.SelectedIndexChanged += (_, _) => { if (!refreshingTracks && subtitles.SelectedItem is TrackChoice t) { player.SetSpu(t.Id);subtitlePreferenceApplied=true;EmitPreference("subtitle",t.Id); } };
         player.Playing += (_, _) => OnUi(() => {
@@ -74,25 +62,35 @@ internal sealed partial class PlayerWindow : Form
             else FailPlayback();
         });
         KeyDown += (_, e) => {
-            if (e.KeyCode == Keys.Escape) { if (fullScreen) ToggleFullScreen(); else Close(); }
+            ShowControls(); keyboardControls=true;
+            if (e.KeyCode == Keys.Escape) { if (trackMenu.Visible) trackMenu.Close(); else if (fullScreen) ToggleFullScreen(); else Close(); e.SuppressKeyPress=true; }
             else if (e.KeyCode == Keys.F11) ToggleFullScreen();
-            else if (e.KeyCode == Keys.Space && ActiveControl is not ComboBox) { player.Pause(); e.Handled = true; }
+            else if (e.KeyCode == Keys.Space && ActiveControl is not ComboBox) { if(opened&&!failed)player.Pause(); e.SuppressKeyPress = true; }
         };
         clock.Tick += (_, _) => Tick(); clock.Start();
         FormClosing += (_, _) => Shutdown();
-        Shown += (_, _) => Program.Emit(new { type = "ready", protocol = 1 });
+        Shown += (_, _) => { try {host?.Attach(this);back.Focus();Program.Emit(new { type = "ready", protocol = 1 });} catch {CloseWithReason("embedding_failed");} };
     }
+
+    protected override bool ProcessCmdKey(ref Message message, Keys keyData)
+    {
+        if ((keyData & Keys.KeyCode) == Keys.Tab) { ShowControls(); keyboardControls=true; }
+        return base.ProcessCmdKey(ref message,keyData);
+    }
+
 
     void OnUi(Action action) { if (!closing && IsHandleCreated) try { BeginInvoke(action); } catch { } }
     void FailPlayback() {
         if (failed || closing) return;
         failed = true; player.Stop();
         status.Text = PlayerStrings.Get("failure");
+        ShowControls();status.Visible=true;
         pause.Enabled = timeline.Enabled = audio.Enabled = subtitles.Enabled = false;
         Emit("failed");
     }
     void Seek(long milliseconds) { if (!closing && !failed && player.IsSeekable) player.Time = Math.Clamp(milliseconds, 0, Math.Max(0, player.Length - 500)); }
     void ToggleFullScreen() {
+        if (host != null) { Program.Emit(new { type="fullscreen", sessionId=session, enabled=!fullScreen }); return; }
         fullScreen = !fullScreen; FormBorderStyle = fullScreen ? FormBorderStyle.None : FormBorderStyle.Sizable;
         WindowState = fullScreen ? FormWindowState.Maximized : FormWindowState.Normal;
     }
@@ -108,6 +106,7 @@ internal sealed partial class PlayerWindow : Form
     void Shutdown() {
         if (closing) return; closing = true; clock.Stop();
         Emit("progress"); player.Stop(); // Stop is synchronous in LibVLC 3; transport drains before closed.
+        tooltips.Dispose();audio.Dispose();subtitles.Dispose();trackMenu.Dispose();
         player.Dispose(); media?.Dispose(); engine.Dispose();
         Program.Emit(new { type = "closed", sessionId = session, reason });
     }
