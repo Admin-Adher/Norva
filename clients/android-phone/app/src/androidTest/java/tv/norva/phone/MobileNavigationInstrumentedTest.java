@@ -38,17 +38,20 @@ public class MobileNavigationInstrumentedTest {
             assertEquals("Navigation mounted","\"Prêt\"",ready);
             for(int zoom:new int[]{100,130}){
                 i.runOnMainSync(()->holder.get().getSettings().setTextZoom(zoom));Thread.sleep(250);
-                String check="(()=>{const nav=document.getElementById('bottom-nav'),search=document.getElementById('nav-search'),links=[...nav.querySelectorAll('a:not([hidden])')];"
+                String check="(()=>{try{const nav=document.getElementById('bottom-nav'),search=document.getElementById('nav-search'),links=[...nav.querySelectorAll('a:not([hidden])')];"
                     +"if(nav.querySelector('[data-action=search]')||document.querySelectorAll('#nav-search').length!==1)throw Error('duplicate search');"
                     +"if(links.length!==6)throw Error('destinations '+links.length);"
                     +"if(search.hidden||search.getBoundingClientRect().height<44)throw Error('header search unavailable');"
                     +"if(links.some(e=>e.getBoundingClientRect().width<44||e.getBoundingClientRect().height<44))throw Error('small destination');"
                     +"if(document.documentElement.scrollWidth>innerWidth+1)throw Error('overflow');"
-                    +"if(nav.getBoundingClientRect().bottom>innerHeight+1)throw Error('covered bottom bar');return 'ok';})()";
+                    +"if(nav.getBoundingClientRect().bottom>innerHeight+1)throw Error('covered bottom bar');return 'ok';}catch(error){return String(error);}})()";
                 assertEquals("Layout zoom="+zoom,"\"ok\"",evaluate(i,holder.get(),check));
                 evaluate(i,holder.get(),"document.getElementById('qa-search').focus()");
                 i.runOnMainSync(()->((android.view.inputmethod.InputMethodManager)a.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).showSoftInput(holder.get(),android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT));
                 Thread.sleep(700);
+                AtomicReference<Boolean> imeVisible=new AtomicReference<>(false);
+                i.runOnMainSync(()->{android.view.WindowInsets insets=holder.get().getRootWindowInsets();imeVisible.set(insets!=null&&insets.isVisible(android.view.WindowInsets.Type.ime()));});
+                assertTrue("Keyboard visible during layout check",imeVisible.get());
                 assertEquals("IME focus","\"qa-search\"",evaluate(i,holder.get(),"document.activeElement.id"));
                 assertEquals("Layout during IME zoom="+zoom,"\"ok\"",evaluate(i,holder.get(),check));
                 i.runOnMainSync(()->((android.view.inputmethod.InputMethodManager)a.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(holder.get().getWindowToken(),0));
