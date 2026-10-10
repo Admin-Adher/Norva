@@ -28,6 +28,7 @@ function fixture(abandonState = 'abandoned') {
         } },
         capturePrivateResumeWindow: async s => events.push(context.privateResumeProducerReleased(s)
             ? 'capture-allowed' : 'capture-refused'),
+        capturePrivateStartupWindow: async () => false,
         wakePlaybackBlockedQueues() {}, removeSessionDir: async () => events.push('directory-removed') };
     vm.createContext(context); vm.runInContext(released + stop, context);
     return { context, session, events };
