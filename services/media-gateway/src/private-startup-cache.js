@@ -17,6 +17,9 @@ function createPrivateStartupCache(cache) {
     const stats = { stores: 0, hits: 0, rejects: 0 };
     const prepared = new Map();
     return Object.freeze({
+        recordAssetFailure(reason) {
+            if (['size-budget', 'not-finalized'].includes(reason)) stats.lastAssetFailure = reason;
+        },
         remember(body, binding) {
             const key = preparationKey(body);
             if (!prepared.has(key) && prepared.size >= 32) prepared.delete(prepared.keys().next().value);

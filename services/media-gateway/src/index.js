@@ -2875,7 +2875,12 @@ const startupCachePreparation = new StartupCachePreparation({
     covered: async session => {
         const name = exactSubtitleHlsEnabled(session) ? session.videoPlaylistPath : session.playlistPath;
         const parsed = parseResumeMediaPlaylist(await fsp.readFile(name, 'utf8').catch(() => ''));
-        return Boolean(parsed && parsed.sequence === 0 && parsed.duration >= 60 && session.actualStartOffset === 0);
+        if (!parsed || parsed.sequence !== 0 || parsed.duration < 60 || session.actualStartOffset !== 0) return false;
+        // Finalized video alone does not prove the first minute's subtitles.
+        // Let the ordinary collector commit its coverage before stopping it.
+        return Boolean(await captureSubtitleWindow({ renditions: exactSubtitleRenditionsForSession(session),
+            videoSegments: parsed.segments.filter(segment => segment.start < 60), sourcePesClock: retainedSubtitleClock(session),
+            readAsset: (name, remainingBytes) => readPrivateResumeAsset(session, name, remainingBytes) }));
     },
     stop: (session, job) => stopSession(session, { reason: job.complete && !job.signal.aborted ? 'startup-prefix-prepared' : 'startup-prefix-cancelled' }),
 });
@@ -12311,14 +12316,6 @@ app.post('/sessions', requireGatewayAuth, startupCachePreparation.bindSessionCre
         const playbackProxyKey = proxyKeyFromUrl(sourceUrl);
         const playbackProviderSlotKey = providerSlotKeyFromUrl(sourceUrl, normalizedOwnerKey);
         const startupJob = req.startupCacheJob || null;
-        if (startupJob) {
-            await startupJob.assertAuthorized();
-            if (!startupCachePreparation.canStart(req.body)) throw Error('STARTUP_PREPARATION_ACCOUNT_BUSY');
-        } else {
-            const drained = await startupCachePreparation.preempt(job => job.ownerKey === normalizedOwnerKey
-                || job.accountKey === playbackProxyKey);
-            if (!drained.providerDrained) return res.status(503).json({ code: 'STARTUP_PREPARATION_DRAIN_UNCONFIRMED' });
-        }
         // Observe abandonment before admission or lock allocation. A queued
         // browser navigation must release immediately rather than wait behind a
         // previous startup and keep shared QoS elevated.
@@ -12353,6 +12350,18 @@ app.post('/sessions', requireGatewayAuth, startupCachePreparation.bindSessionCre
                 normalizedOwnerKey, playbackSessionId, abortSessionRequest);
             preparationExpiryTimer = setTimeout(abortSessionRequest, Math.max(1, deadline - Date.now()));
         }
+        // Install cancellation listeners and check the incoming request before
+        // yielding. Node may auto-destroy an already consumed request body on
+        // the next tick; that is not evidence that its response was abandoned.
+        if (startupJob) {
+            await startupJob.assertAuthorized();
+            if (!startupCachePreparation.canStart(req.body)) throw Error('STARTUP_PREPARATION_ACCOUNT_BUSY');
+        } else if (startupCachePreparation.jobs.size) {
+            const drained = await startupCachePreparation.preempt(job => job.ownerKey === normalizedOwnerKey
+                || job.accountKey === playbackProxyKey);
+            if (!drained.providerDrained) return res.status(503).json({ code: 'STARTUP_PREPARATION_DRAIN_UNCONFIRMED' });
+        }
+        if (sessionRequestAbortController.signal.aborted) return;
         const admissionStartedAt = Date.now();
         viewerSessionStartupAdmission = await viewerStartupQueue.acquire(
             normalizedOwnerKey,
@@ -16069,7 +16078,11 @@ async function readPrivateResumeAsset(session, name, remainingBytes) {
     const file = path.join(session.outputDir, name);
     if (!isWithin(session.outputDir, file)) return null;
     const stat = await fsp.lstat(file).catch(() => null);
-    if (!stat?.isFile() || stat.isSymbolicLink() || stat.size < 1 || stat.size > remainingBytes) return null;
+    if (!stat?.isFile() || stat.isSymbolicLink() || stat.size < 1 || stat.size > remainingBytes) {
+        if (session.startupCacheJob) privateStartupHlsCache.recordAssetFailure(
+            stat?.isFile() && stat.size > remainingBytes ? 'size-budget' : 'not-finalized');
+        return null;
+    }
     return fsp.readFile(file);
 }
 
