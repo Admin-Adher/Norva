@@ -16086,15 +16086,19 @@ async function capturePrivateResumeWindow(session, playlistClock = null) {
 }
 
 async function tryStartPrivateStartupBeforePreopen(session, signal) {
-    // The early path only uses a complete single-audio Matroska graph without
-    // subtitles. Other graphs still receive normal enrichment/topology freezing
-    // first; a historical profile must never silently omit a rendition.
+    // Check the cached prefix before minting another cold delivery response.
+    // Restrict this path to complete Matroska or a finite, dated server TS
+    // probe, with one audio lane and no subtitles. Partial in-band TS discovery
+    // must still receive ordinary enrichment; do not promote metadataComplete.
     const profile = asRecord(session?.codecProfile);
     if (session.startupCacheJob || Number(session.seekOffset) !== 0
-        || !canUseStartupCache(session.ownerKey) || !isFiniteMkvVodSession(session)
-        || !hasCompleteMkvPlaybackProfile(profile)
+        || !canUseStartupCache(session.ownerKey)
         || !Array.isArray(profile.audioTracks) || profile.audioTracks.length !== 1
         || !Array.isArray(profile.subtitles) || profile.subtitles.length !== 0) return false;
+    const finiteMkv = isFiniteMkvVodSession(session);
+    if (finiteMkv ? !hasCompleteMkvPlaybackProfile(profile)
+        : normalizeCodecToken(profile.probeSource ?? profile.probe_source) !== 'gatewayprobe'
+            || !finiteTsProfileEligible(session)) return false;
     const binding = privateResumeHlsBindingForSession(session);
     if (!binding || !privateStartupHlsCache.hasCandidate(binding, 0)) return false;
     sessions.set(session.id, session);

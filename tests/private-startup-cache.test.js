@@ -36,6 +36,41 @@ test('matching zero prefix is validated before cold source opening; misses drain
     }
 });
 
+test('early TS prefix needs a finite server probe and the unchanged single-track graph', async () => {
+    const { finiteTsProfileEligible } = require('../services/media-gateway/src/finite-ts-startup');
+    const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8');
+    const start = source.indexOf('async function tryStartPrivateStartupBeforePreopen(');
+    const end = source.indexOf('\nasync function capturePrivateStartupWindow', start);
+    for (const scenario of ['hit', 'miss', 'inband', 'live', 'unknown-size', 'undated', 'subtitle', 'multi-audio', 'unknown-audio']) {
+        const calls = [], session = { id: 'test-ts', ownerKey: 'owner', seekOffset: 0, startupTimings: {},
+            codecProfileSource: 'request', playbackIdentity: { itemType: scenario === 'live' ? 'live' : 'movie' },
+            codecProfile: { container: 'mpegts', probeSource: scenario === 'inband' ? 'gateway_inband' : 'gateway_probe',
+                probedAt: new Date().toISOString(), metadataComplete: false, durationSeconds: 100,
+                fileSizeBytes: 10000000, videoCodec: 'h264', audioTracks: [{ index: 1, codec: 'aac' }], subtitles: [] } };
+        if (scenario === 'unknown-size') delete session.codecProfile.fileSizeBytes;
+        if (scenario === 'undated') delete session.codecProfile.probedAt;
+        if (scenario === 'subtitle') session.codecProfile.subtitles = [{ index: 2 }];
+        if (scenario === 'multi-audio') session.codecProfile.audioTracks.push({ index: 3, codec: 'aac' });
+        if (scenario === 'unknown-audio') session.codecProfile.audioTracks[0].codec = 'unknown';
+        const run = vm.runInNewContext('(' + source.slice(start, end) + ')', {
+            Number, Array, asRecord: x => x || {}, canUseStartupCache: () => true,
+            isFiniteMkvVodSession: () => false, finiteTsProfileEligible,
+            normalizeCodecToken: x => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ''),
+            privateResumeHlsBindingForSession: () => binding, privateStartupHlsCache: { hasCandidate: () => true },
+            sessions: { set: () => calls.push('register') },
+            tryStartPrivateResumeWindow: async () => { calls.push('fresh-check'); session.privateStartupInput = true; return scenario === 'hit'; },
+            closeFiniteMkvSeekBroker: async () => calls.push('drain'),
+        });
+        assert.equal(await run(session), scenario === 'hit', scenario);
+        if (scenario === 'hit') assert.deepEqual(calls, ['register', 'fresh-check']);
+        else if (scenario === 'miss') {
+            assert.deepEqual(calls, ['register', 'fresh-check', 'drain']);
+            assert.equal(session.privateStartupInput, false);
+        } else assert.deepEqual(calls, [], scenario);
+        assert.equal(session.codecProfile.metadataComplete, false);
+    }
+});
+
 test('startup continuation and rejected-prefix fallback retain the zero-position range broker', async () => {
     const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8');
     const uses = source.slice(source.indexOf('function usesFiniteMkvSeekBroker('), source.indexOf('function applyFiniteMkvSeekProviderIdentity('));
