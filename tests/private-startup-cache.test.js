@@ -13,6 +13,29 @@ const playlist = (seconds = 64) => '#EXTM3U\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X
 const args = extra => ({ binding, observed, actualStartOffset: 0, playlist: playlist(),
     readAsset: async () => Buffer.alloc(188, 0x47), ...extra });
 
+test('matching zero prefix is validated before cold source opening; misses drain before fallback', async () => {
+    const source=fs.readFileSync(path.join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
+    const start=source.indexOf('async function tryStartPrivateStartupBeforePreopen('),end=source.indexOf('\nasync function capturePrivateStartupWindow',start);
+    for(const scenario of ['hit','miss','no-candidate','expired','nonzero','subtitle','multi-audio','incomplete','background','disabled']) {
+        const calls=[],session={id:'test',ownerKey:'owner',seekOffset:scenario==='nonzero'?20:0,startupTimings:{},
+            startupCacheJob:scenario==='background'?{}:null,codecProfile:{audioTracks:[{index:1}],subtitles:[]}};
+        if(scenario==='subtitle')session.codecProfile.subtitles=[{index:2}];
+        if(scenario==='multi-audio')session.codecProfile.audioTracks.push({index:3});
+        const run=vm.runInNewContext('('+source.slice(start,end)+')', {Number,Array,
+            asRecord:x=>x||{},canUseStartupCache:()=>scenario!=='disabled',isFiniteMkvVodSession:()=>true,
+            hasCompleteMkvPlaybackProfile:()=>scenario!=='incomplete',privateResumeHlsBindingForSession:()=>binding,
+            privateStartupHlsCache:{hasCandidate:()=>scenario!=='no-candidate'},sessions:{set:()=>calls.push('register')},
+            tryStartPrivateResumeWindow:async()=>{calls.push('fresh-check');session.privateStartupInput=true;return scenario==='hit';},
+            closeFiniteMkvSeekBroker:async()=>calls.push('drain'),});
+        assert.equal(await run(session),scenario==='hit');
+        if(scenario==='hit') assert.deepEqual(calls,['register','fresh-check']);
+        else if(['miss','expired'].includes(scenario)) {
+            assert.deepEqual(calls,['register','fresh-check','drain']);
+            assert.equal(session.privateStartupInput,false);assert.equal(session.freshResumeHandoff,null);
+        } else assert.deepEqual(calls,[]);
+    }
+});
+
 test('startup continuation and rejected-prefix fallback retain the zero-position range broker', async () => {
     const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8');
     const uses = source.slice(source.indexOf('function usesFiniteMkvSeekBroker('), source.indexOf('function applyFiniteMkvSeekProviderIdentity('));

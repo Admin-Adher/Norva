@@ -12862,6 +12862,19 @@ app.post('/sessions', requireGatewayAuth, startupCachePreparation.bindSessionCre
             return res.status(201).json(gatewayCreatedSessionPayload(req, session));
         }
 
+        // A complete private prefix already owns its rendition/profile binding.
+        // Revalidate it before opening a cold body that would be discarded by
+        // the cache check. The cache still performs the four fresh reads and
+        // drains their transport before exposing bytes or starting continuation.
+        createdSession = session;
+        if (await tryStartPrivateStartupBeforePreopen(session, sessionRequestAbortController.signal)) {
+            session.startupTimings.totalMs = Math.max(0, Date.now() - sessionCreateStartedAt);
+            sessionStartupStats.successes += 1;
+            sessionStartupStats.totalMs += session.startupTimings.totalMs;
+            sessionStartupStats.last = { ...session.startupTimings, seek: false, at: new Date().toISOString() };
+            return res.status(201).json(gatewayCreatedSessionPayload(req, session));
+        }
+
         // This panel accepts only bounded ranges (`bytes=N-M`). Resolve the exact
         // terminal byte before the single-socket input pump is allowed to feed
         // FFmpeg. FFmpeg itself never sees the provider URL on this lane.
@@ -16070,6 +16083,36 @@ async function capturePrivateResumeWindow(session, playlistClock = null) {
         playlist: playlist.replace(/^#EXT-X-ENDLIST\s*$/gm, ''),
         sourcePesClock: retainedSubtitleClock(session),
         readAsset: (name, remainingBytes) => readPrivateResumeAsset(session, name, remainingBytes) });
+}
+
+async function tryStartPrivateStartupBeforePreopen(session, signal) {
+    // The early path only uses a complete single-audio Matroska graph without
+    // subtitles. Other graphs still receive normal enrichment/topology freezing
+    // first; a historical profile must never silently omit a rendition.
+    const profile = asRecord(session?.codecProfile);
+    if (session.startupCacheJob || Number(session.seekOffset) !== 0
+        || !canUseStartupCache(session.ownerKey) || !isFiniteMkvVodSession(session)
+        || !hasCompleteMkvPlaybackProfile(profile)
+        || !Array.isArray(profile.audioTracks) || profile.audioTracks.length !== 1
+        || !Array.isArray(profile.subtitles) || profile.subtitles.length !== 0) return false;
+    const binding = privateResumeHlsBindingForSession(session);
+    if (!binding || !privateStartupHlsCache.hasCandidate(binding, 0)) return false;
+    sessions.set(session.id, session);
+    let started = false;
+    try {
+        started = await tryStartPrivateResumeWindow(session, signal);
+        session.startupTimings.privateStartupBeforePreopen = started;
+        return started;
+    } finally {
+        if (!started) {
+            // Expiry, changed bytes or an unavailable fresh check must fall back
+            // to the normal cold preparation, with no second source reader left
+            // alive and no frozen historical topology.
+            await closeFiniteMkvSeekBroker(session);
+            session.privateStartupInput = false;
+            session.freshResumeHandoff = null;
+        }
+    }
 }
 
 async function capturePrivateStartupWindow(session) {

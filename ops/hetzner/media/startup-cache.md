@@ -12,6 +12,8 @@ Il couvre les fichiers Xtream actuellement détenus, avec profil exact complet,
 taille connue et pistes identifiées. Un épisode doit posséder sa propre ligne,
 son parent et son profil : un profil de série ne suffit pas. Les autres fichiers
 sont reportés. Pas de parcours automatique de tout le catalogue.
+Les graphes de sous-titres doivent être exacts et entièrement cacheables dans la
+limite configurée ; un bootstrap vide ne certifie jamais leur couverture.
 
 ## Admission et priorité
 
@@ -46,6 +48,12 @@ au fichier et aux pistes. Aucune redistribution entre comptes.
 Au démarrage à zéro, la lecture utilise les contrôles de revalidation et de
 raccord existants, puis poursuit la réception. À une autre position, elle utilise
 le cache de reprise habituel. Une identité différente invalide la réutilisation.
+Après validation d'un préfixe MKV à zéro, le même broker sérialisé sert le raccord
+ou le repli : la lecture ne crée pas une seconde adresse de livraison.
+Pour un profil Matroska complet à une piste audio sans sous-titres, le préfixe
+est vérifié avant l'ouverture d'une réponse de démarrage froide. Les autres
+graphes gardent l'enrichissement ordinaire ; un refus d'identité ferme le broker
+de validation avant le repli. Les MP4 natifs ont une voie distincte du cache HLS.
 TTL existant : 30 min avec identité forte, 10 min avec échantillons récents.
 Le runner évite de télécharger à nouveau un préfixe encore valable.
 

@@ -73,6 +73,18 @@ test('four sequential fresh reads and drain precede successful return', async ()
             return { status:206, arrayBuffer:async () => { active--; return Buffer.alloc(N); } }; } });
     assert.equal(result.length,4); assert.equal(requests,4); assert.equal(maxActive,1); assert.equal(closed,true);
 });
+
+test('validation failure diagnostics retain fixed codes without transport messages or URLs', async () => {
+    for (const code of ['VOD_CHANGED', 'https://private.invalid/secret', 'secret query=one']) {
+        let observation,closed=false;
+        const result=await validateRecentResume({plan:{kind:'sampled-recent-v1',ranges:samples().map(s=>({start:s.start,length:N}))},
+            createBroker:async()=>({inputUrl:'http://fixture.invalid',terminalError:{code,message:'private transport message'},close:async()=>{closed=true;}}),
+            fetchImpl:async()=>({status:502,body:{cancel:async()=>{}}}),onUnavailable:value=>{observation=value;}});
+        assert.equal(result,null);assert.equal(closed,true);
+        assert.deepEqual(observation,{kind:'response',status:502,completedSamples:0,...(code==='VOD_CHANGED'?{code}: {})});
+        assert.equal(JSON.stringify(observation).includes('private'),false);
+    }
+});
 test('timeout aborts the current read, drains, and never retries or starts another range', async () => {
     let requests=0, closed=false, active=false;
     const result=await validateRecentResume({ plan:{ kind:'sampled-recent-v1', ranges:samples().map(s => ({ start:s.start,length:N })) },budgetMs:10,
