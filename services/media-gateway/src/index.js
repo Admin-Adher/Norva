@@ -12882,7 +12882,10 @@ app.post('/sessions', requireGatewayAuth, startupCachePreparation.bindSessionCre
             await ensureBoundedMkvInputPump(session, sessionRequestAbortController.signal);
         } catch (err) {
             if (sessionRequestAbortController.signal.aborted) throw err;
-            await removeSessionDir(outputDir).catch(() => {});
+            // The early prefix check may already have registered this session.
+            // Drain its input and unregister it before every cold-input refusal;
+            // deleting only the output directory leaves an orphan in admission.
+            await stopSession(session, { reason: 'cold-input-preparation-failed' });
             if (err?.status === 458 || err?.code === 'PROVIDER_BUSY') {
                 return res.status(458).json({
                     error: 'This TV service is busy. Wait a few seconds, then try again.',
@@ -16275,6 +16278,10 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
     const position = Number(session.seekOffset);
     const startup = position === 0 && canUseStartupCache(session.ownerKey);
     const cache = startup ? privateStartupHlsCache : privateResumeHlsCache;
+    // One unavailable check per creation. Keep the untrusted prefix within its
+    // original TTL for a future attempt, but never lease it or retry validation
+    // again during this cold fallback.
+    if (startup && session.startupTimings.privateStartupValidationDeferred === true) return false;
     if (!binding || !(position > 0 || startup) || !cache.hasCandidate(binding, position)) return false;
     // A prefix at zero still needs the same serialized range broker for its
     // fresh identity check and continuation. Falling back to the linear input
@@ -16294,6 +16301,12 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
         if (!canUseRecentResumeSamples(session.ownerKey)) return false;
         observed = await revalidateRecentResumeSession(session, plan, requestSignal);
         if (requestSignal?.aborted || session.stoppingPromise) throw abortedVodInputPumpError();
+        if (startup && !observed && session.startupTimings.recentResumeValidationUnavailable
+            && session.startupTimings.recentResumeValidationOutcome !== 'target-changed') {
+            session.startupTimings.privateStartupValidationDeferred = true;
+            session.startupTimings.privateResumeValidationMs = Date.now() - startedAt;
+            return false;
+        }
         if (observed) applyFiniteMkvSeekProviderIdentity(session, observed);
         // Validation drained the preparation broker. Both a cache hit's
         // continuation and a miss's normal startup still need indexed input.

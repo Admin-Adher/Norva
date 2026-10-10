@@ -71,6 +71,65 @@ test('early TS prefix needs a finite server probe and the unchanged single-track
     }
 });
 
+test('a cold-input refusal after a prefix miss drains and unregisters before responding', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8').replace(/\r\n/g, '\n');
+    const start = source.indexOf('        try {\n            await ensureBoundedMkvInputPump(session,');
+    const end = source.indexOf('        // Cold playback owns a retained provider body', start);
+    assert.ok(start > 0 && end > start);
+    for (const [error, status] of [
+        [{ code: 'PROVIDER_BUSY', status: 458 }, 458],
+        [{ code: 'PROXY_AUTH_FAILED' }, 502],
+        [{ code: 'SOURCE_CONTAINER_MISMATCH', details: { protocol: 1 } }, 409],
+        [{ code: 'PROVIDER_REQUEST_FAILED', upstreamStatus: 404 }, 404],
+        [{ code: 'VOD_SIZE_UNAVAILABLE' }, 502],
+    ]) {
+        const session = { id: 'registered-prefix-miss', input: { active: true } };
+        const registry = new Map([[session.id, session]]), events = [];
+        const res = { status(value) { assert.equal(value, status); return this; },
+            json(value) { assert.equal(registry.size, 0); assert.equal(session.input.active, false); events.push('response'); return value; } };
+        const run = vm.runInNewContext('(async () => {' + source.slice(start, end) + '})', {
+            session, res, sessionRequestAbortController: { signal: { aborted: false } },
+            ensureBoundedMkvInputPump: async () => { throw error; },
+            stopSession: async (value) => { assert.equal(value, session); await Promise.resolve();
+                session.input.active = false; registry.delete(session.id); events.push('drained'); },
+            removeSessionDir: () => { throw Error('directory deletion cannot attest drainage'); },
+            providerFileRefusalResponse: () => null, sanitizeLog: () => 'safe', sourceUrl: 'https://provider.invalid/1',
+            console: { warn() {} },
+        });
+        await run();
+        assert.deepEqual(events, ['drained', 'response']);
+    }
+});
+
+test('an unavailable fresh startup check keeps the prefix unleased without another check in the same creation', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8');
+    const start = source.indexOf('async function tryStartPrivateResumeWindow(');
+    const end = source.indexOf('\nfunction usesFiniteMkvSeekBroker', start);
+    for (const changedTarget of [false, true]) {
+        const calls = [], session = { seekOffset: 0, ownerKey: binding.ownerKey, startupTimings: {} };
+        const run = vm.runInNewContext('(' + source.slice(start, end) + ')', {
+            Date, Number, canUseStartupCache: () => true, canUseRecentResumeSamples: () => true,
+            privateResumeHlsBindingForSession: () => binding, privateResumeFormat: () => 'mkv',
+            privateStartupHlsCache: { hasCandidate: () => true, revalidationPlan: () => ({ kind: 'sampled-recent-v1' }),
+                acquire: () => { calls.push('invalidate'); return null; } },
+            revalidateRecentResumeSession: async () => { calls.push('fresh-drained');
+                session.startupTimings.recentResumeValidationUnavailable = { kind: 'transport' };
+                if (changedTarget) session.startupTimings.recentResumeValidationOutcome = 'target-changed';
+                return null; },
+            prepareFiniteMkvSeekBroker: async () => { calls.push('prepare-input'); return {}; },
+        });
+        assert.equal(await run(session), false);
+        assert.equal(session.privateResumeLease, undefined);
+        if (changedTarget) assert.deepEqual(calls, ['fresh-drained', 'prepare-input', 'invalidate']);
+        else {
+            assert.deepEqual(calls, ['fresh-drained']);
+            assert.equal(session.startupTimings.privateStartupValidationDeferred, true);
+            assert.equal(await run(session), false);
+            assert.deepEqual(calls, ['fresh-drained']);
+        }
+    }
+});
+
 test('startup continuation and rejected-prefix fallback retain the zero-position range broker', async () => {
     const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8');
     const uses = source.slice(source.indexOf('function usesFiniteMkvSeekBroker('), source.indexOf('function applyFiniteMkvSeekProviderIdentity('));
