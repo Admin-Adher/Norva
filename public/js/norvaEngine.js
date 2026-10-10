@@ -280,7 +280,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 48;
+  const ENGINE_VERSION = 49;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -354,6 +354,11 @@
       this.copyAudio = false;
       this._lastReadError = null; // precise reason a byte-range fetch failed
       this._raCache = [];         // read-ahead windows (filled before _openInput)
+      // Candidate opt-in: expose contiguous bytes from the one active response
+      // to libav. Only a fully validated response enters the read-ahead cache.
+      this._progressiveRanges = opts.progressiveRanges === true;
+      this._liveRange = null;
+      this._cueHeader = null;
       this.timings = {};          // per-stage startup timings (ms)
       this._fetchCount = 0; this._fetchBytes = 0; this._fetchMs = 0;
       this._fetchAttemptCount = 0;
@@ -440,6 +445,7 @@
     // ---- public ------------------------------------------------------------
     async load(url, { startTime = 0, audioStreamIndex = null } = {}) {
       this.url = url;
+      this._cueHeader = null;
       this._wantAudioIndex = Number.isInteger(audioStreamIndex) ? audioStreamIndex : null;
       const t0 = performance.now();
       this.loadStartedAt = t0;
@@ -911,6 +917,116 @@
       return size;
     }
 
+    async _readDemuxStreams(fmtCtx) {
+      const lib = this.lib, streams = [];
+      const count = await lib.AVFormatContext_nb_streams(fmtCtx);
+      for (let index = 0; index < count; index++) {
+        const ptr = await lib.AVFormatContext_streams_a(fmtCtx, index);
+        const codecpar = await lib.AVStream_codecpar(ptr);
+        const parameters = await lib.ff_copyout_codecpar(codecpar);
+        const time_base_num = await lib.AVStream_time_base_num(ptr);
+        const time_base_den = await lib.AVStream_time_base_den(ptr);
+        const duration_time_base = to64(await lib.AVStream_duration(ptr), await lib.AVStream_durationhi(ptr));
+        streams.push({ ptr, index, codecpar, codec_type: parameters.codec_type, codec_id: parameters.codec_id,
+          time_base_num, time_base_den, duration_time_base,
+          duration: duration_time_base * time_base_num / time_base_den, parameters });
+      }
+      return streams;
+    }
+
+    async _canBoundMatroskaProbe(streams, probed = false) {
+      if (!streams.length || streams.length > 64) return false;
+      let videos = 0, audios = 0;
+      for (const stream of streams) {
+        const cp = stream.parameters, ed = cp.extradata;
+        if (!(stream.time_base_num > 0 && stream.time_base_den > 0)) return false;
+        if (stream.codec_type === 0) {
+          videos++;
+          if (cp.codec_id !== 27 || !(cp.width > 0 && cp.height > 0) || !ed || ed.length < 8 || ed[0] !== 1) return false;
+          // Require complete AVC SPS/PPS arrays, not just an avcC signature.
+          let offset = 6;
+          const spsCount = ed[5] & 31;
+          if (!spsCount) return false;
+          for (let group = 0; group < 2; group++) {
+            if (group === 1 && offset >= ed.length) return false;
+            const count = group === 0 ? spsCount : ed[offset++];
+            if (!count) return false;
+            for (let i = 0; i < count; i++) {
+              if (offset + 2 > ed.length) return false;
+              const size = ed[offset] * 256 + ed[offset + 1]; offset += 2;
+              if (!size || offset + size > ed.length || (ed[offset] & 31) !== (group === 0 ? 7 : 8)) return false;
+              offset += size;
+            }
+          }
+          if (probed && !(cp.profile >= 0 && cp.level >= 0)) return false;
+        } else if (stream.codec_type === 1) {
+          audios++;
+          // Only self-described AAC-LC. HE-AAC, PCE layouts and audio requiring
+          // transcoding retain the full probe, including its decoder discovery.
+          if (cp.codec_id !== 86018 || !ed || ed.length < 2 || ed[0] >> 3 !== 2) return false;
+          const rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+          const rate = rates[((ed[0] & 7) << 1) | (ed[1] >> 7)];
+          const layout = (ed[1] >> 3) & 15;
+          if (!rate || layout < 1 || layout > 7 || cp.sample_rate !== rate || cp.channels !== (layout === 7 ? 8 : layout)) return false;
+          if (probed && !(cp.format >= 0 && cp.profile === 1 && cp.channel_layoutmask > 0)) return false;
+        } else if (stream.codec_type === 3) {
+          if (!TEXT_SUB_CODECS.has(await this.lib.avcodec_get_name(cp.codec_id))) return false;
+        } else return false;
+      }
+      return videos === 1 && audios > 0;
+    }
+
+    _demuxHeadersMatch(before, after) {
+      if (before.length !== after.length) return false;
+      return before.every((old, i) => {
+        const current = after[i];
+        if (old.index !== current.index || old.time_base_num !== current.time_base_num || old.time_base_den !== current.time_base_den) return false;
+        for (const key of ['codec_type', 'codec_id', 'width', 'height', 'sample_rate', 'channels']) {
+          if (old.parameters[key] !== current.parameters[key]) return false;
+        }
+        const a = old.parameters.extradata || [], b = current.parameters.extradata || [];
+        return a.length === b.length && a.every((value, n) => value === b[n]);
+      });
+    }
+
+    async _initDemuxer() {
+      const lib = this.lib, head = this._raCache.find(w => w.start === 0)?.buf;
+      // Other containers retain the vendored helper unchanged. In Matroska,
+      // complete H.264/AAC headers can avoid the default multi-second packet
+      // analysis. We still run FFmpeg's parsers/decoder discovery; never skip it.
+      if (!head || head[0] !== 0x1a || head[1] !== 0x45 || head[2] !== 0xdf || head[3] !== 0xa3) {
+        this.timings.demuxProbeMode = 'full';
+        return lib.ff_init_demuxer_file('input');
+      }
+      const started = performance.now();
+      const fmtCtx = await lib.avformat_open_input_js('input', null, null);
+      if (!fmtCtx) throw new Error('Could not open source file');
+      this.fmtCtx = fmtCtx; // destroy() owns it even if the probe later fails.
+      this.timings.demuxHeaderMs = Math.round(performance.now() - started);
+      const before = await this._readDemuxStreams(fmtCtx);
+      const bounded = await this._canBoundMatroskaProbe(before);
+      this.timings.demuxProbeMode = bounded ? 'bounded-header' : 'full';
+      if (bounded && await lib.av_opt_set(fmtCtx, 'probesize', '65536', 0) !== 0) throw new Error('DEMUX_PROBE_OPTION_FAILED');
+      const probeStarted = performance.now();
+      const result = await lib.avformat_find_stream_info(fmtCtx, 0);
+      if (this._lastReadError) throw this._lastReadError;
+      let streams = await this._readDemuxStreams(fmtCtx);
+      if (bounded) {
+        // Restore the vendored FFmpeg default before any fallback. Both calls
+        // keep FFmpeg's packet buffer; no packet, subtitle or audio is discarded.
+        if (await lib.av_opt_set(fmtCtx, 'probesize', '5000000', 0) !== 0) throw new Error('DEMUX_PROBE_RESTORE_FAILED');
+        if (result < 0 || !this._demuxHeadersMatch(before, streams) || !await this._canBoundMatroskaProbe(streams, true)) {
+          this.timings.demuxProbeMode = 'full-fallback';
+          await lib.avformat_find_stream_info(fmtCtx, 0);
+          if (this._lastReadError) throw this._lastReadError;
+          streams = await this._readDemuxStreams(fmtCtx);
+        }
+      }
+      this.timings.demuxStreamInfoMs = Math.round(performance.now() - probeStarted);
+      for (const stream of streams) delete stream.parameters;
+      return [fmtCtx, streams];
+    }
+
     async _openInput() {
       const lib = this.lib, url = this.url, size = this.size;
       await lib.mkblockreaderdev('input', size);
@@ -929,6 +1045,7 @@
       // be diagnosed: a real container header vs a provider/proxy error document (HTML/JSON) served
       // with a faked 206 — the usual reason a fully-fetched, authenticated source still "can't be
       // opened" with no read error. Cheap, cache-only, no extra connection.
+      this._rememberCueHeader();
       this._captureSourceHead();
       // MPEG-TS is now demuxable in-browser (this libav build carries the mpegts demuxer + the
       // h264/hevc/aac parsers it needs), so we no longer bail on a TS head — libav opens it and we
@@ -937,7 +1054,7 @@
       // existing fallback re-routes it to the gateway transcode.
       let fmtCtx, streams;
       try {
-        [fmtCtx, streams] = await lib.ff_init_demuxer_file('input');
+        [fmtCtx, streams] = await this._initDemuxer();
       } catch (e) {
         // A real read error (RANGE_UNSUPPORTED / BLOCK_HTTP_xxx) wins — surface it verbatim.
         if (this._lastReadError) throw new Error(String(this._lastReadError.message || this._lastReadError));
@@ -998,11 +1115,30 @@
       } catch (_) { /* diagnostic only — never throws */ }
     }
 
+    _rememberCueHeader() {
+      if (!this._progressiveRanges || this._cueHeader) return;
+      const head = this._raCache.find(w => w.start === 0)?.buf;
+      if (!head) return;
+      const segStart = this._findSegmentDataStart(head);
+      if (segStart < 0) return;
+      const hint = this._scanSegmentHead(head, segStart);
+      // Retain only parsed numbers from a complete Info/SeekHead, scoped to this
+      // source session. This avoids re-fetching megabytes after header eviction.
+      if (hint.indexHintComplete && hint.cuesPos >= 0 && hint.cuesPos < this.size) {
+        this._cueHeader = { segStart, scaleNs: hint.scaleNs, cuesPos: hint.cuesPos, size: this.size, source: this.url };
+      }
+    }
+
     // Serve [pos, pos+len) from a cached window, fetching a fresh RA_WINDOW-sized
     // window from the origin when needed. Collapses libav's many small block
     // reads into a few large upstream requests (key for single-slot providers).
     async _readRange(pos, len) {
+      if (this._progressiveRanges) {
+        if (this.destroyed || this._ac.signal.aborted) throw new Error('ENGINE_READ_ABORTED');
+        if (this._rangeTerminalError) throw this._rangeTerminalError;
+      }
       const end = pos + len; // exclusive
+      if (len === 0) return new Uint8Array(0);
       for (const w of this._raCache) {
         if (pos >= w.start && end <= w.end) { this._raTouch(w); return w.buf.subarray(pos - w.start, end - w.start); }
       }
@@ -1010,7 +1146,7 @@
       // cache. Its block reader accepts a short positive read, so consume those
       // bytes first; the next call continues at the cache boundary instead of
       // reopening the same provider range from byte zero.
-      if (this._startupActive) {
+      if (this._startupActive || this._progressiveRanges) {
         for (const w of this._raCache) {
           if (pos >= w.start && pos < w.end) {
             this._raTouch(w);
@@ -1026,9 +1162,76 @@
       // remainder without one multi-megabyte request monopolising the provider.
       if (this._startupActive) windowLen = Math.min(windowLen, RA_STARTUP_WINDOW_MAX);
       const winEnd = Math.min(pos + windowLen, this.size);
+      if (this._progressiveRanges && winEnd > pos) return this._readLiveRange(pos, len, winEnd);
       const w = await this._cacheWindow(pos, winEnd - pos);
       const sliceEnd = Math.min(end, w.end);
       return w.buf.subarray(pos - w.start, Math.max(pos - w.start, sliceEnd - w.start));
+    }
+
+    async _readLiveRange(pos, len, winEnd) {
+      let live = this._liveRange;
+      if (live && (pos < live.start || pos >= live.end)) {
+        // A seek or prefetch outside this response waits for its transport to
+        // close before another can open. Never overlap provider connections.
+        await live.done;
+        return this._readRange(pos, len);
+      }
+      if (!live) {
+        live = { start: pos, end: winEnd, buf: null, received: 0, consumed: 0, waiters: new Set(), error: null, complete: false };
+        const notify = () => { for (const wake of live.waiters) wake(); live.waiters.clear(); };
+        const progress = { received: 0, onChunk: buf => {
+          if (this.destroyed || this._ac.signal.aborted) return;
+          live.buf = buf; live.received = buf.length; notify();
+        } };
+        this._liveRange = live;
+        live.done = this._cacheWindow(pos, winEnd - pos, progress).then(w => {
+          live.buf = w.buf; live.received = w.buf.length; live.complete = true;
+          notify();
+        }, error => {
+          live.error = error;
+          notify();
+          // Bytes already consumed cannot be replayed after a retry. Stop this
+          // mux generation and let the existing recovery path handle the error.
+          if (live.consumed && !this.destroyed && !this._ac.signal.aborted) this._failLiveRange(error);
+          throw error;
+        }).finally(() => { if (this._liveRange === live) this._liveRange = null; });
+        // The response can fail while libav is processing an earlier slice.
+        // Keep that background rejection observed until its next awaited read.
+        live.done.catch(() => {});
+      }
+      const offset = pos - live.start;
+      const minimum = Math.min(len, 64 * 1024, live.end - pos);
+      while (!live.error && !live.complete && live.received - offset < minimum) {
+        await new Promise(resolve => live.waiters.add(resolve));
+      }
+      if (live.error) throw live.error;
+      if (this.destroyed || this._ac.signal.aborted) throw new Error('ENGINE_READ_ABORTED');
+      const count = Math.min(len, live.received - offset);
+      if (count <= 0) throw new Error('BLOCK_SHORT_READ:live');
+      live.consumed += count;
+      if (!live.complete) {
+        this.timings.progressiveReads = (this.timings.progressiveReads || 0) + 1;
+        this.timings.progressiveBytes = (this.timings.progressiveBytes || 0) + count;
+      }
+      return live.buf.subarray(offset, offset + count);
+    }
+
+    _failLiveRange(error) {
+      this._lastReadError = error;
+      this._rangeTerminalError = error;
+      this._stopRequested = true;
+      this.queue.length = 0;
+      if (this._gate) { this._gate(); this._gate = null; }
+      try { this._ac.abort(); } catch (_) {}
+      if (this._startupActive && this._settleStartupOutcome(error)) {
+        this._clearStartupDeadlineTimer();
+        return;
+      }
+      if (!this._fatalSignaled) {
+        this._fatalSignaled = true;
+        const failure = new Error('ENGINE_READ_FAILED:progressive:' + errStr(error));
+        queueMicrotask(() => { if (!this.destroyed) { try { this.onFatal(failure); } catch (_) {} } });
+      }
     }
 
     // Fetch [start, start+len) and insert it as a read-ahead window (LRU).
@@ -1036,7 +1239,7 @@
     // retry here with a bounded budget. HTTP 458 is deliberately excluded: it
     // is an authoritative single-slot conflict that WatchPage must report and
     // use to open the per-account circuit before any second connection exists.
-    async _cacheWindow(start, len) {
+    async _cacheWindow(start, len, progress = null) {
       // Playback, cue discovery and scrub prefetch share one provider transport.
       // Recheck the cache after the preceding read; concurrent consumers may
       // need the same bytes. Failed/aborted requests never enter this cache.
@@ -1050,7 +1253,7 @@
         if (this._rangeTerminalError) throw this._rangeTerminalError;
         const cached = this._raCache.find(w => start >= w.start && start + len <= w.end);
         if (cached) { this._raTouch(cached); return cached; }
-        try { return await this._cacheWindowSerial(start, len); }
+        try { return await this._cacheWindowSerial(start, len, progress); }
         catch (error) {
           // A queued consumer must not turn a slot/auth refusal into another
           // request before WatchPage has torn the engine down.
@@ -1060,13 +1263,13 @@
       } finally { release(); }
     }
 
-    async _cacheWindowSerial(start, len) {
+    async _cacheWindowSerial(start, len, progress = null) {
       let lastErr = null;
       const maxAttempts = this._startupActive ? 2 : 3;
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         this._assertStartupDeadline('cache-fetch');
         try {
-          const buf = await this._fetchRange(start, start + len);
+          const buf = await this._fetchRange(start, start + len, progress);
           if (this.destroyed || this._ac.signal.aborted) throw new Error('ENGINE_READ_ABORTED');
           const w = { start, end: start + buf.length, buf };
           this._raCache.push(w);
@@ -1074,6 +1277,7 @@
           return w;
         } catch (e) {
           lastErr = e;
+          if (progress && progress.received) throw e;
           if (this._ac.signal.aborted) throw e;
           const msg = String((e && e.message) || e);
           if (e && e.code === 'ENGINE_STARTUP_TIMEOUT') throw e;
@@ -1111,15 +1315,35 @@
       try {
         if (!this.size || this._cueIndex) return;
         const read = async (pos, len) => {
-          if (!cacheOnly) return this._readRange(pos, len);
+          if (!cacheOnly) {
+            // libav accepts a short positive read; the EBML index parser needs
+            // its whole element. Assemble it from the same active response.
+            const parts = []; let count = 0;
+            while (count < len) {
+              const part = await this._readRange(pos + count, len - count);
+              if (!part || !part.length) return null;
+              parts.push(part); count += part.length;
+            }
+            if (parts.length === 1) return parts[0];
+            const out = new Uint8Array(len); let offset = 0;
+            for (const part of parts) { out.set(part, offset); offset += part.length; }
+            return out;
+          }
           const w = this._raCache.find(w => pos >= w.start && pos + len <= w.end);
           return w ? w.buf.subarray(pos - w.start, pos - w.start + len) : null;
         };
-        const head = await read(0, Math.min(RA_SEEK_WINDOW, this.size));
-        if (!head) return;
-        const segStart = this._findSegmentDataStart(head);
-        if (segStart < 0) return;
-        const { scaleNs, cuesPos } = this._scanSegmentHead(head, segStart);
+        const saved = this._progressiveRanges && this._cueHeader;
+        let segStart, scaleNs, cuesPos;
+        if (saved && saved.size === this.size && saved.source === this.url) {
+          ({ segStart, scaleNs, cuesPos } = saved);
+          this.timings.cueHeaderReused = true;
+        } else {
+          const head = await read(0, Math.min(RA_SEEK_WINDOW, this.size));
+          if (!head) return;
+          segStart = this._findSegmentDataStart(head);
+          if (segStart < 0) return;
+          ({ scaleNs, cuesPos } = this._scanSegmentHead(head, segStart));
+        }
         if (cuesPos < 0 || cuesPos >= this.size) return;
         const hdr = await read(cuesPos, Math.min(16, this.size - cuesPos));
         if (!hdr) return;
@@ -1152,19 +1376,19 @@
     // Scan Segment children present in `b` for TimestampScale (Info) and the
     // Cues byte position (via SeekHead, or an inline Cues element).
     _scanSegmentHead(b, segStart) {
-      let p = segStart, scaleNs = 1e6, cuesPos = -1;
+      let p = segStart, scaleNs = 1e6, cuesPos = -1, infoComplete = false, cuePointerComplete = false;
       while (p < b.length) {
         const idr = ebmlId(b, p); if (!idr) break;
         const szr = ebmlSize(b, p + idr.len); if (!szr) break;
         const ds = p + idr.len + szr.len;
         const de = szr.unknown ? b.length : ds + szr.val;
-        if (idr.id === MKV.Info) { const v = this._findChildUint(b, ds, Math.min(de, b.length), MKV.TimestampScale); if (v) scaleNs = v; }
-        else if (idr.id === MKV.SeekHead) { const c = this._findCuesInSeekHead(b, ds, Math.min(de, b.length), segStart); if (c >= 0) cuesPos = c; }
-        else if (idr.id === MKV.Cues) { cuesPos = p; }
+        if (idr.id === MKV.Info) { const v = this._findChildUint(b, ds, Math.min(de, b.length), MKV.TimestampScale); if (v) scaleNs = v; infoComplete = !szr.unknown && de <= b.length; }
+        else if (idr.id === MKV.SeekHead) { const c = this._findCuesInSeekHead(b, ds, Math.min(de, b.length), segStart); if (c >= 0) { cuesPos = c; cuePointerComplete = !szr.unknown && de <= b.length; } }
+        else if (idr.id === MKV.Cues) { cuesPos = p; cuePointerComplete = true; }
         if (de > b.length) break; // element runs past our buffer
         p = de;
       }
-      return { scaleNs, cuesPos };
+      return { scaleNs, cuesPos, indexHintComplete: infoComplete && cuePointerComplete };
     }
 
     _findCuesInSeekHead(b, start, end, segStart) {
@@ -1249,7 +1473,7 @@
     }
 
     // Fetch [start, end) (exclusive) as one ranged request, bounded by a timeout.
-    async _fetchRange(start, end) {
+    async _fetchRange(start, end, progress = null) {
       this._assertStartupDeadline('fetch');
       const ac = new AbortController();
       const onAbort = () => { try { ac.abort(); } catch (_) {} };
@@ -1259,8 +1483,17 @@
       const timeoutMs = Math.max(1, Math.min(FETCH_TIMEOUT_MS,
         Number.isFinite(remaining) ? Math.ceil(remaining) : FETCH_TIMEOUT_MS));
       let timedOut = false;
-      const to = setTimeout(() => { timedOut = true; onAbort(); }, timeoutMs);
       const ft0 = performance.now();
+      const expireFetch = () => {
+        // A streamed startup response may still be draining after the first
+        // usable append. Its budget then becomes the existing 60 s request cap;
+        // the independent 15 s watchdog still applies until that append.
+        const left = FETCH_TIMEOUT_MS - (performance.now() - ft0);
+        if (progress && startup && !this._startupActive && !this._ac.signal.aborted && left > 0) {
+          to = setTimeout(() => { timedOut = true; onAbort(); }, left);
+        } else { timedOut = true; onAbort(); }
+      };
+      let to = setTimeout(expireFetch, timeoutMs);
       const fetchWindow = this._beginFetchWindow(start, end, startup);
       try {
         const r = await fetch(this.url, { headers: { Range: `bytes=${start}-${end - 1}` }, signal: ac.signal });
@@ -1269,6 +1502,20 @@
         const cr = r.headers.get('content-range');
         if (r.status === 200 && !cr) { try { ac.abort(); } catch (_) {} throw new Error('RANGE_UNSUPPORTED'); }
         if (r.status !== 206 && r.status !== 200) throw new Error('BLOCK_HTTP_' + r.status);
+        if (progress) {
+          // Streaming requires an exact declaration before any byte is exposed.
+          // Unknown/malformed totals and a changed source fail closed.
+          const m = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(cr || '');
+          if (!m || !m.slice(1).every(x => Number.isSafeInteger(Number(x))) || Number(m[1]) !== start ||
+              Number(m[3]) <= start || (this.size && Number(m[3]) !== this.size)) {
+            throw new Error('BLOCK_RANGE_MISMATCH:stream-header');
+          }
+          if (Number(m[2]) !== Math.min(end, Number(m[3])) - 1) throw new Error('BLOCK_SHORT_READ:stream-header');
+          const contentLength = r.headers.get('content-length');
+          if (contentLength !== null && (!/^\d+$/.test(contentLength) || Number(contentLength) !== Number(m[2]) - start + 1)) {
+            throw new Error('BLOCK_RANGE_MISMATCH:content-length');
+          }
+        }
         // The declared range must MATCH the requested offset. After a slot churn some panels
         // answer 206 but re-serve from the wrong position (often 0): length-correct bytes at the
         // wrong offset poison the cache, libav demuxes shifted data and the muxer emits garbage
@@ -1286,12 +1533,36 @@
           const total = parseInt(cr.split('/')[1], 10);
           if (Number.isFinite(total) && total > 0) this.size = total;
         }
-        const out = new Uint8Array(await r.arrayBuffer());
+        let out;
+        if (progress && r.body && typeof r.body.getReader === 'function') {
+          const expected = Math.min(end, this.size) - start;
+          out = new Uint8Array(expected);
+          const reader = r.body.getReader();
+          let received = 0, complete = false;
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (this.destroyed || this._ac.signal.aborted) throw new Error('ENGINE_READ_ABORTED');
+              if (done) break;
+              if (!value || !value.length) continue;
+              if (received + value.length > expected) throw new Error('BLOCK_RANGE_MISMATCH:body-overrun');
+              out.set(value, received); received += value.length;
+              progress.received = received;
+              progress.onChunk(out.subarray(0, received));
+            }
+            if (received !== expected) throw new Error('BLOCK_SHORT_READ:' + received + '/' + expected);
+            complete = true;
+          } finally {
+            if (!complete) { try { ac.abort(); } catch (_) {} try { await reader.cancel(); } catch (_) {} }
+            try { reader.releaseLock(); } catch (_) {}
+          }
+        } else out = new Uint8Array(await r.arrayBuffer());
         // A truncated-but-"clean" body (provider reset mid-range that still ends the socket
         // without a fetch error) must NEVER pass as complete: libav would demux around a hole
         // and the muxer emits garbage ("bad box" → CHUNK_DEMUXER_ERROR_APPEND → lane failover).
         // Short is only legal when the range genuinely reaches the end of the file.
         const expected = end - start;
+        if (progress && out.length > expected) throw new Error('BLOCK_RANGE_MISMATCH:body-overrun');
         if (out.length < expected && (!this.size || start + out.length < this.size)) {
           throw new Error('BLOCK_SHORT_READ:' + out.length + '/' + expected);
         }
@@ -1300,7 +1571,8 @@
         this._finishFetchWindow(fetchWindow, out.length, elapsedMs);
         return out;
       } catch (e) {
-        const error = timedOut && startup ? this._startupTimeoutError('fetch') : e;
+        try { ac.abort(); } catch (_) {}
+        const error = timedOut && startup && (!progress || this._startupActive) ? this._startupTimeoutError('fetch') : e;
         this._finishFetchWindow(fetchWindow, 0, performance.now() - ft0, error);
         throw error;
       } finally {
@@ -2085,7 +2357,7 @@
     _startPump() {
       if (this._pumpRunning || this._fatalSignaled) return;
       this._pumpRunning = true; this._stopRequested = false; this.ended = false;
-      this._pump().catch((e) => {
+      this._pumpPromise = this._pump().catch((e) => {
         if (this.destroyed) return;
         const code = e && typeof e.code === 'string' ? e.code : '';
         const isAudioTimelineFailure = code.startsWith('AUDIO_');
@@ -2117,14 +2389,17 @@
           try { this._ac.abort(); } catch (_) {}
           try { this.onFatal(e); } catch (_) {}
         }
-      }).finally(() => { this._pumpRunning = false; });
+      }).finally(() => { this._pumpRunning = false; this._pumpPromise = null; });
     }
 
     async _stopPump() {
       this._stopRequested = true;
       if (this._gate) { this._gate(); this._gate = null; }
-      let guard = 0;
-      while (this._pumpRunning && guard++ < 2000) await new Promise((r) => setTimeout(r, 5));
+      // A network read can outlast the former 10 s polling guard. Resetting the
+      // muxer/demuxer while that worker call is still pending mixes two seek
+      // generations. The existing fetch deadline/abort bounds the read; its
+      // actual completion is the barrier before reusing the decoder context.
+      if (this._pumpPromise) await this._pumpPromise;
     }
 
     async _pump() {
@@ -2136,6 +2411,7 @@
         if (this._bufferedAhead() > BUFFER_AHEAD_MAX) { await this._waitForDrain(); continue; }
         let packets;
         [res, packets] = await lib.ff_read_frame_multi(this.fmtCtx, this.pkt, { limit: 512 * 1024 });
+        if (this._stopRequested || this.destroyed) return;
         const writeList = [];
         // Process the video stream FIRST in each batch, so its keyframe gate anchors vBase before any
         // audio in the same batch is evaluated (keeps fresh-start audio while letting a mid-GOP resume
