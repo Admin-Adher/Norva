@@ -1,6 +1,8 @@
 'use strict';
 const CLOUD_HOME = 'https://norva.tv/app#home';
-const LANDING_PATHS = new Set(['/', '/index.html']);
+const LANDING_PATHS = new Set(['/', '/index', '/index.html']);
+const LOGIN_PATHS = new Set(['/login', '/login.html']);
+const ACCOUNT_PATHS = new Set(['/account', '/account.html']);
 
 function isSameAppOrigin(target, application) {
     try {
@@ -24,18 +26,18 @@ function desktopNavigationTarget(target, application) {
     const url = new URL(target);
     // Explicit self-hosted deployments retain their separate hub authentication.
     if (!/^(?:www\.)?norva\.tv$/i.test(url.hostname) || url.protocol !== 'https:') return null;
-    if (LANDING_PATHS.has(url.pathname) || url.pathname === '/login.html') {
+    if (LANDING_PATHS.has(url.pathname) || LOGIN_PATHS.has(url.pathname)) {
         return new URL('/account.html?returnTo=%2Fapp%23home', url.origin).href;
     }
-    if (url.pathname !== '/account.html') return null;
+    if (!ACCOUNT_PATHS.has(url.pathname)) return null;
     const requested = url.searchParams.get('returnTo');
     let valid = false;
     try {
         const returnUrl = new URL(requested, url.origin);
         valid = typeof requested === 'string' && requested.startsWith('/') && !requested.startsWith('//')
             && !requested.includes('\\') && returnUrl.origin === url.origin
-            && !LANDING_PATHS.has(returnUrl.pathname) && returnUrl.pathname !== '/login.html'
-            && returnUrl.pathname !== '/account.html';
+            && !LANDING_PATHS.has(returnUrl.pathname) && !LOGIN_PATHS.has(returnUrl.pathname)
+            && !ACCOUNT_PATHS.has(returnUrl.pathname);
     } catch { }
     if (valid) return null;
     // Preserve recovery/OTP/OAuth parameters and fragments. Only the post-login
@@ -50,7 +52,8 @@ function wireDesktopNavigation(webContents, { application, isAuthNavigation, ope
             if (!webContents.isDestroyed()) void webContents.loadURL(target).catch(() => {});
         });
     };
-    const navigate = (event, target) => {
+    const navigate = (event, target = event.url) => {
+        if (typeof target !== 'string') return;
         const replacement = desktopNavigationTarget(target, application);
         if (replacement) { event.preventDefault(); redirect(replacement); return; }
         if (isSameAppOrigin(target, application) || isAuthNavigation(target)) return;

@@ -26,6 +26,8 @@ Le processus Windows impose maintenant `NORVA_SERVER_HOST=127.0.0.1` avant de ch
 
 ## Vérification
 
-**48 tests ciblés réussis**, zéro échec : démarrage cloud à profil vierge, reproduction de la barrière hébergée réelle avant la landing, retour à Home sans boucle, session hydratée expirée avec refresh conservée, callbacks, navigation externe, fermeture pendant une redirection, adresse serveur et contrôles natifs de transport/IPC/drainage.
+**49 tests ciblés réussis**, zéro échec : démarrage cloud à profil vierge, reproduction de la barrière hébergée réelle avant la landing, retour à Home sans boucle, session hydratée expirée avec refresh conservée, callbacks, navigation externe, fermeture pendant une redirection, adresse serveur et contrôles natifs de transport/IPC/drainage. Les événements modernes Electron portant l'URL dans leurs détails et les anciens arguments séparés sont couverts. Les chemins sans extension `/account`, `/login` et `/index` sont aussi normalisés, puisque le serveur publié redirige les chemins `.html` vers ces chemins.
 
-Le contrôle runtime à profil isolé, la construction CI et l'inspection du portable sont en cours. Aucun login utilisateur n'est automatisé. La version native.3 n'est pas encore publiée à ce relevé.
+Le wrapper de contrôle fixe explicitement `userData` et `sessionData` dans un répertoire isolé. Le reçu constate `/app#home`, puis `/account`, puis `/app#home` entre 10:35:02 et 10:35:21 UTC. Aucun identifiant n'est saisi par l'agent et ces routes seules ne démontrent pas un parcours complet d'authentification automatisé. Le banc de développement signale une dépendance SQLite native absente et un nom mDNS déjà utilisé ; sa validation ne remplace pas le contrôle du portable construit en CI.
+
+Les quatre tâches CI du commit intermédiaire c9d0746 sont réussies (contrats, Phone, TV et Windows). Le paquet final doit inclure le dernier traitement des événements Electron et des chemins sans extension. Sa construction et son inspection restent à terminer ; native.3 n'est pas encore publiée à ce relevé.

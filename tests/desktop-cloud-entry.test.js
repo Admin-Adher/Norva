@@ -28,7 +28,7 @@ test('clean desktop install opens the cloud catalogue without a local administra
 });
 
 test('desktop corrects landing and legacy-login entry points without changing the origin', () => {
-    for (const route of ['/', '/index.html', '/login.html?returnTo=%2F']) {
+    for (const route of ['/', '/index', '/index.html', '/login', '/login.html?returnTo=%2F']) {
         assert.equal(desktopApplicationUrl('https://norva.tv' + route), account);
         assert.equal(desktopNavigationTarget('https://norva.tv' + route, home), account);
     }
@@ -37,13 +37,15 @@ test('desktop corrects landing and legacy-login entry points without changing th
 });
 
 test('account returns to Home rather than a landing, itself, or an unsafe target', () => {
-    for (const value of ['', '/', '/index.html', '/login.html', '/account.html', '//evil.example', '/\\evil.example', 'https://evil.example']) {
+    for (const value of ['', '/', '/index', '/index.html', '/login', '/login.html', '/account', '/account.html', '//evil.example', '/\\evil.example', 'https://evil.example']) {
         const url = new URL('https://norva.tv/account.html');
         if (value) url.searchParams.set('returnTo', value);
         const fixed = new URL(desktopNavigationTarget(url.href, home));
         assert.equal(fixed.searchParams.get('returnTo'), '/app#home');
     }
     assert.equal(desktopNavigationTarget(account, home), null);
+    assert.equal(new URL(desktopNavigationTarget('https://norva.tv/account', home)).searchParams.get('returnTo'), '/app#home');
+    assert.equal(desktopNavigationTarget(account.replace('/account.html', '/account'), home), null);
 });
 
 test('desktop retains intentional app, subscription and pairing destinations', () => {
@@ -123,6 +125,18 @@ test('a closing window does not receive a delayed login redirect', async () => {
     h.contents.isDestroyed = () => true;
     await Promise.resolve();
     assert.deepEqual(h.loaded, []);
+});
+
+test('current Electron navigation details are supported alongside the deprecated URL argument', async () => {
+    const h = harness();
+    const event = Object.assign(h.event(), { url: 'https://norva.tv/' });
+    h.contents.emit('will-navigate', event);
+    await Promise.resolve();
+    assert.equal(event.prevented, true);
+    assert.deepEqual(h.loaded, [account]);
+    const subframe = Object.assign(h.event(), { url: 'https://norva.tv/', isMainFrame: false });
+    h.contents.emit('will-redirect', subframe);
+    assert.equal(subframe.prevented, false);
 });
 
 test('desktop startup binds the transport to the exact address used by its availability probe', async () => {
