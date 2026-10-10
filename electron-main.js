@@ -3,7 +3,7 @@ const fs = require('fs');
 const http = require('http');
 const net = require('net');
 const path = require('path');
-const { isSameAppOrigin } = require('./desktop/navigation');
+const { desktopApplicationUrl, wireDesktopNavigation } = require('./desktop/navigation');
 
 const APP_NAME = 'Norva';
 const PORT_START = 3002;
@@ -137,22 +137,10 @@ function createWindow(url, transcoderUrl) {
         }
     });
 
-    window.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
-        if (isSameAppOrigin(targetUrl, url) || isAuthNavigation(targetUrl)) {
-            return { action: 'allow' };
-        }
-
-        shell.openExternal(targetUrl);
-        return { action: 'deny' };
-    });
-
-    window.webContents.on('will-navigate', (event, targetUrl) => {
-        if (isSameAppOrigin(targetUrl, url) || isAuthNavigation(targetUrl)) {
-            return;
-        }
-
-        event.preventDefault();
-        shell.openExternal(targetUrl);
+    wireDesktopNavigation(window.webContents, {
+        application: url,
+        isAuthNavigation,
+        openExternal: target => shell.openExternal(target)
     });
 
     window.loadURL(url);
@@ -165,11 +153,10 @@ async function startDesktopApp() {
     const port = await findFreePort();
     const serverUrl = `http://127.0.0.1:${port}`;
 
-    // The window can load the bundled local UI (default, offline-capable) or the
-    // cloud app for full cloud sync. Either way the in-app server runs as the
-    // residential transcoder. Override with NORVA_DESKTOP_URL, e.g.
-    // https://norva.tv/app.html for the pure cloud experience.
-    const appUrl = process.env.NORVA_DESKTOP_URL || `${serverUrl}/app`;
+    // Norva Cloud is the consumer entry point. Starting at the bundled hub on a
+    // clean installation instead exposed first-administrator registration.
+    // A self-hosted hub remains an explicit NORVA_DESKTOP_URL override.
+    const appUrl = desktopApplicationUrl(process.env.NORVA_DESKTOP_URL);
 
     // If we load a remote (cloud) origin, let the in-app server accept its
     // cross-origin playback calls so the page can use the local transcoder.
@@ -186,6 +173,9 @@ async function startDesktopApp() {
 
     process.env.NODE_ENV = 'production';
     process.env.PORT = String(port);
+    // Match the IPv4 loopback address tested by findFreePort. A dual-stack/IPv6
+    // listener can otherwise collide with a port that was free on 127.0.0.1.
+    process.env.NORVA_SERVER_HOST = '127.0.0.1';
     process.env.NODECAST_DATA_DIR = path.join(userData, 'data');
     process.env.NODECAST_CACHE_DIR = path.join(userData, 'cache');
     process.env.NODECAST_TRANSCODE_CACHE_DIR = path.join(userData, 'transcode-cache');

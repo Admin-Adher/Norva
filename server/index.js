@@ -234,7 +234,7 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, async () => {
+app.listen(PORT, process.env.NORVA_SERVER_HOST || undefined, async () => {
     console.log(`Norva server running on http://localhost:${PORT}`);
 
     // Load plugins
