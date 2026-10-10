@@ -824,12 +824,118 @@ Les claims sont expirés normalement ; le helper, son tunnel et les services
 isolés sont arrêtés après drainage. Les deux Gateways de production sont sains
 et inactifs : `indexed-final-health.safe.json`, `indexed-closure.safe.json`.
 
+## Raccordement au cache réel et reprises sur quatre copies — 10 octobre, soirée
+
+Le pilote conserve maintenant les plages MP4 complètes d'une lecture ordinaire
+dans la vraie classe de cache privé, après fermeture du transport. Jusqu'à
+32 Mio sont réinjectés après quatre échantillons frais, avec taille, cible,
+propriétaire, source et révision vérifiés. Le budget existant et le TTL récent
+de dix minutes restent applicables. Cela ne constitue pas une préparation
+anticipée de la première minute MP4.
+
+Deux défauts ont été trouvés et corrigés pendant ce raccordement : le nettoyage
+des pompes précédait la distinction entre fermeture ordinaire et révocation,
+et la nouvelle ouverture ne réutilisait pas l'indication opaque de livraison.
+La fermeture photographie maintenant les seules plages complètes avant l'abort,
+puis attend le drainage. Une révocation globale ne publie pas de nouveau cache.
+Chaque vérification utilise un jeton de livraison à usage unique, sans prolonger
+son expiration. Une lecture fraîche indisponible autorise seulement le repli
+normal ; elle ne supprime pas un candidat encore dans son TTL.
+
+La route authentifiée `native-coverage` consulte les plages encore présentes
+dans le broker, sans ouverture fournisseur supplémentaire. L'index terminal
+peut être partagé entre plusieurs réponses Range : seules leurs parties
+complètes et adjacentes sont assemblées, sans trou ni réponse interrompue.
+Les limites de l'analyse précédente restent applicables. La couverture DTS
+ne constitue toujours pas une preuve de décodage ou de débit futur.
+
+### Reprises réelles après fermeture
+
+Quatre films de **trois sources**, avec WatchPage inchangé et claims ordinaires
+sur Edge/Gateway isolés. Les chiffres mesurent `playing` depuis le clic de
+réouverture, à la position effectivement conservée. Le banc transmet désormais
+la position globale dans l'expiration, comme le lecteur Norva. Un ancien essai
+MKV omettait cette position et repartait sans cache ; il est exclu des résultats
+de réutilisation ci-dessous.
+
+| Copie | Conteneur | Départ à froid | Reprise avec cache | Continuation |
+| --- | --- | --- | --- | --- |
+| Jolt | MP4 | 19,613 s | 8,419 s | 139,5 s, sans attente ni grande coupure après la première seconde |
+| Vermines | MP4 | 17,200 s | 12,599 s | plus de 138 s de progression, avec un saut arrière ; deux attentes de 0,261 et 0,380 s |
+| Lost | MKV | 9,747 s | 3,536 s | 142 s, sans attente ni image perdue |
+| Minnal Murali | MPEG-TS | 12,326 s | 5,262 s | plus de 136 s, sans attente ni image perdue |
+
+Les deux MP4 réinjectent réellement **22 889 562 et 10 747 904 octets**.
+Les deux parcours HLS retrouvent environ **49 secondes de cache**, après
+validation fraîche en **1,608 et 3,317 secondes**. Tous les contrôles de
+continuation dépassent les octets/segments initialement réutilisés et reçoivent
+de nouvelles données. Aucun nouvel événement d'erreur vidéo/HLS n'est signalé
+après démarrage sur ces reprises. Les erreurs vidéo initiales précèdent le
+chargement du nouveau média ; elles ne sont pas comptées comme succès ou échec
+de lecture. Vermines perd 32 images sur 3 400 dans son essai ; sa fluidité n'est
+donc pas déclarée parfaite.
+
+Le départ froid de Vermines présente deux pauses de 2,915 et 1,546 secondes.
+Les reprises ne sont pas réalisées aux mêmes positions que l'ancien saut Jolt
+de 54,615 secondes : **aucun ratio de gain entre ces essais n'est revendiqué**.
+Une tentative de préparation en fond a été différée par la présence récente
+du compte ; aucune activité ni réservation n'a été effacée pour la forcer.
+
+Un contrôle final de Jolt avec le code du raccordement d'index démarre à froid
+en **15,384 secondes**, puis rouvre successivement en **6,621 et 5,894 secondes**.
+La lecture de couverture authentifiée situe 24,037 secondes de paquets au-delà
+de la cible de 20 secondes dans les seules plages complètes conservées. Une
+autre consultation renvoie zéro lorsque les paquets nécessaires ne sont pas
+entièrement présents : des octets annoncés par le navigateur ne deviennent pas
+automatiquement une preuve de cache.
+
+Ce contrôle final n'est toutefois **pas fluide sur les sauts**. Après presque
+deux minutes de progression, le saut arrière de dix secondes provoque une
+attente de **11,715 s**, puis 3,443 s ; le saut avant provoque **10,778 s**,
+puis 1,999 s. La trace montre des relectures des plages à 48 594 944 et
+61 571 072 octets : la fenêtre active de 32 Mio avait déjà évincé ces données
+alors que le navigateur les annonçait encore chargées. Les réouvertures rapides
+ne démontrent donc pas à elles seules des sauts rapides.
+
+Un essai isolé avec une fenêtre active de 64 Mio reste **inconclusif** : Jolt
+démarre en **70,577 s**, avec des attentes de 13,623 et 13,962 s, puis rouvre en
+**28,527 s** avec de nouvelles attentes. Le premier parcours reçoit seulement
+10 033 770 octets ; le second réinjecte réellement 6 407 258 octets. Aucune
+éviction n'est mesurée dans ces deux parcours, qui n'atteignent pas les mêmes
+positions que le témoin 32 Mio. Le banc comporte encore sa protection
+expérimentale de réserve après saut ; cette attente n'est pas une mesure du
+lecteur public seul. Il n'est donc pas possible d'attribuer un gain ou une
+régression à la capacité doublée. Le réglage 64 Mio et son instrumentation
+temporaire sont retirés du code à conserver ; limite active et capture privée
+restent à 32 Mio. Production inchangée.
+
+Preuves privées expurgées : `native-cache-accepted-{browser,transport,create}-6-*.safe.json`,
+`broker-indexed-path-{browser,transport,create}-8-*.safe.json`,
+`real-cache-lost-{browser,transport,create}-5-*.safe.json`,
+`real-cache-ts-{browser,transport,create}-9-*.safe.json`,
+`native-cache-transports*.safe.json`, `lost-stop-capture.safe.json`,
+`native-cache-vermines-health.safe.json`, `native-cache-final-coverage.safe.json`,
+`native-cache-second-coverage.safe.json`, `native-cache-final32-*-6-*.safe.json`,
+`native-cache-probe64-*-6-*.safe.json`, `native64-transports-final.safe.json`
+et `closure.safe.json`.
+
+**253 tests ciblés réussis, cinq ignorés.** Les contrats CI du code `2df08fdc9`
+réussissent : **6 368 tests, 35 ignorés**, avec région et syntaxe réussies
+(run 38081043868). Les constructions Android Phone, TV et Windows réussissent.
+Les contrôles supplémentaires passent : 29 tests d'index/réutilisation/accès,
+puis 156 tests du broker, cinq ignorés. Aucun changement de WatchPage ni de
+client Android n'est introduit par ce raccordement backend.
+
 ## État et critères d'activation
 
-**Non activé en production. Le module WatchPage réutilise le préfixe sur les
-copies MKV et MPEG-TS, mais l'ancien gel de Lost reste inexpliqué. Le démarrage
-MP4 est accéléré sur Jolt ; il n'a toujours pas de préfixe réutilisable et ses
-sauts restent non satisfaisants.**
+**Non activé en production. La réutilisation du vrai cache après fermeture est
+démontrée sur deux MP4, un MKV et un MPEG-TS. Des reprises inférieures à dix
+secondes sont mesurées, avec continuation au-delà du cache. Vermines conserve
+de brèves attentes ; l'ancien gel de Lost reste inexpliqué. La première minute
+MP4 préparée en fond et les sauts, y compris certaines positions annoncées
+comme chargées par le navigateur, restent ouverts. Un dernier essai Jolt
+réouvre en 28,527 s avec des interruptions : la fiabilité globale n'est pas
+validée.**
 PR760 conservée en brouillon. Les essais sont arrêtés par expiration ordinaire
 de leurs claims ; sessions, transports natifs, pompes et encodeurs du canary
 reviennent à zéro. Les deux Gateways de production restent sains et inactifs.

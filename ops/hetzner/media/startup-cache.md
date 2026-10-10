@@ -75,6 +75,31 @@ ne finissant pas à EOF gardent le découpage ordinaire. Une seule connexion
 fournisseur et la validation intégrale avant mise en cache restent obligatoires.
 Ce réglage est expérimental : les sauts MP4 réels restent irréguliers, et il ne
 crée pas de minute MP4 préchargée.
+
+Dans le même pilote, une fermeture ordinaire de `native-browser-mp4` conserve
+désormais jusqu'à 32 Mio de plages complètes dans le cache privé de reprise
+existant, avec en-têtes et index terminal bornés. Le transport est fermé avant
+publication. Le nettoyage distingue la fermeture du lecteur d'une révocation
+globale ; cette dernière ne publie aucun nouvel élément. L'époque du cache
+empêche aussi une publication tardive après invalidation.
+
+Une réouverture obtient son claim ordinaire et vérifie quatre plages fraîches,
+la taille, la cible et la liaison propriétaire/source/révision avant de réinjecter
+les octets. L'indication opaque de livraison produit une copie à usage unique
+pour chaque vérification, sans prolonger son âge. Une vérification indisponible
+n'autorise aucune réutilisation et conserve seulement le candidat jusqu'à son
+expiration initiale. Ce chemin partage le budget existant de 256 Mio et le TTL
+récent de 10 minutes. Il ne prépare pas de préfixe MP4 en arrière-plan.
+
+`GET /sessions/:id/native-coverage` exige la capacité opaque de la session active
+et le périmètre du pilote. La route consulte seulement les plages complètes
+encore présentes dans le broker ; elle n'ouvre pas de connexion fournisseur.
+L'index MP4 peut être assemblé à partir de plages adjacentes complètes, jamais
+d'une réponse partielle ou d'un trou. Son analyse est bornée à 8 Mio d'index et
+un million de paquets au total. Cette preuve situe des octets DTS, sans garantir
+leur décodage ni le débit futur. WatchPage n'utilise pas encore cette preuve
+pour une politique générale de reprise ; le seuil de 24 secondes reste limité
+au banc de comparaison.
 Une vérification fraîche indisponible refuse la lecture du préfixe et conserve
 seulement les données privées jusqu'à leur expiration initiale. La même création
 ne retente pas la vérification pendant son repli ; le prochain essai doit réussir
