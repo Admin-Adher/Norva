@@ -1,5 +1,6 @@
 'use strict';
 const crypto = require('node:crypto');
+const { forkRecentDeliveryTarget } = require('./recent-delivery-target');
 
 // Uses the existing cache's memory reservations, eviction, ownership, TTL,
 // revalidation and subtitle coverage. A separate binding prevents a prefix
@@ -32,7 +33,11 @@ function createPrivateStartupCache(cache) {
             return Math.max(0, Math.floor((entry.expiresAt - cache.now()) / 1000));
         },
         hasCandidate: (binding, position) => position === 0 && cache.hasCandidate(startupBinding(binding), 0),
-        revalidationPlan: (binding, position) => position === 0 ? cache.revalidationPlan(startupBinding(binding), 0) : null,
+        revalidationPlan(binding, position) {
+            const plan = position === 0 ? cache.revalidationPlan(startupBinding(binding), 0) : null;
+            return plan ? { ...plan, deliveryTarget: forkRecentDeliveryTarget(plan.deliveryTarget,
+                { ownerKey: binding.ownerKey, now: cache.now() }) } : null;
+        },
         acquire(binding, position, observed) {
             const lease = position === 0 ? cache.acquire(startupBinding(binding), 0, observed) : null;
             if (lease) stats.hits++;

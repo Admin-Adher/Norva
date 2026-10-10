@@ -36,4 +36,16 @@ function consumeRecentDeliveryTarget(token, request) {
             .some(key => request[key] !== value[key])) return null;
     return { targetUrl: value.targetUrl, targetHash: value.targetHash, targetIdentity: value.targetIdentity };
 }
-module.exports = { retainRecentDeliveryTarget, consumeRecentDeliveryTarget };
+// A startup prefix can outlive several ordinary playback claims. Keep its
+// private routing template intact and issue a one-use hint for each check.
+// A fork never refreshes its age or exposes its URL; consume still checks the
+// full owner/source/size/user-agent/route binding. Forks cannot fork again.
+function forkRecentDeliveryTarget(token, { ownerKey, now = Date.now() } = {}) {
+    const value = token && targets.get(token);
+    if (!value || value.forkable === false || ownerKey !== value.ownerKey
+        || !Number.isFinite(now) || now < value.at || now - value.at >= RECENT_TTL_MS) return null;
+    const fork = Object.freeze({});
+    targets.set(fork, { ...value, forkable: false });
+    return fork;
+}
+module.exports = { retainRecentDeliveryTarget, consumeRecentDeliveryTarget, forkRecentDeliveryTarget };

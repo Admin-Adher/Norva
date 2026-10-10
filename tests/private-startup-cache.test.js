@@ -186,6 +186,39 @@ test('startup and resume coexist under the original budget, with no false end of
     resume.release(); prefix.release();
 });
 
+test('reopening a startup prefix retains its route but requires fresh matching bytes every time', async () => {
+    const crypto = require('node:crypto');
+    const { retainRecentDeliveryTarget, consumeRecentDeliveryTarget } = require('../services/media-gateway/src/recent-delivery-target');
+    const { SAMPLE_BYTES: N, RECENT_TTL_MS } = require('../services/media-gateway/src/recent-resume-samples');
+    let now = 100;
+    const facts = { ownerKey: binding.ownerKey, sourceUrl: 'https://provider.invalid/movie/x/y/1.mkv',
+        userAgent: 'Norva/Test', routeKey: 'unchanged-route', fileSizeBytes: observed.fileSizeBytes,
+        targetUrl: 'https://delivery.invalid/private', targetIdentity: observed.effectiveUrlIdentitySha256, now };
+    facts.targetHash = crypto.createHash('sha256').update(facts.targetUrl).digest('hex');
+    const current = { ...observed, validator: null,
+        samples: [0, 2 * N, 4 * N, 6 * N].map(start => ({ start, payload: Buffer.alloc(N, 7) })) };
+    const cache = new PrivateResumeHlsCache({ recentRevalidation: true, now: () => now });
+    const startup = createPrivateStartupCache(cache);
+    assert.equal(await startup.capture(args({ observed: { ...current, deliveryTarget: retainRecentDeliveryTarget(facts) } })), true);
+    const plans = [];
+    for (let i = 0; i < 3; i++) {
+        now += 100;
+        const plan = startup.revalidationPlan(binding, 0); plans.push(plan);
+        assert.equal(consumeRecentDeliveryTarget(plan.deliveryTarget, { ...facts, now })?.targetUrl, facts.targetUrl);
+        assert.equal(consumeRecentDeliveryTarget(plan.deliveryTarget, { ...facts, now }), null);
+        const lease = startup.acquire(binding, 0, current); assert.ok(lease); lease.release();
+    }
+    assert.notEqual(plans[0].deliveryTarget, plans[1].deliveryTarget);
+    assert.equal(startup.revalidationPlan({ ...binding, ownerKey: 'f'.repeat(64) }, 0), null);
+    assert.equal(startup.acquire(binding, 0, { ...current, samples: [] }), null);
+    assert.equal(startup.hasCandidate(binding, 0), false);
+    assert.equal(await startup.capture(args({ observed: { ...current, deliveryTarget: retainRecentDeliveryTarget(facts) } })), true);
+    now = 100 + RECENT_TTL_MS;
+    assert.equal(startup.revalidationPlan(binding, 0).deliveryTarget, null); // A new capture cannot refresh the old route's TTL.
+    cache.revokeOwner(binding.ownerKey);
+    assert.equal(startup.revalidationPlan(binding, 0), null);
+});
+
 for (const [name, extra] of [
     ['short prefix', { playlist: playlist(56) }],
     ['slid prefix', { playlist: playlist().replace('SEQUENCE:0', 'SEQUENCE:1') }],
