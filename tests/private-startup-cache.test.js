@@ -21,7 +21,7 @@ test('matching zero prefix is validated before cold source opening; misses drain
             startupCacheJob:scenario==='background'?{}:null,codecProfile:{audioTracks:[{index:1}],subtitles:[]}};
         if(scenario==='subtitle')session.codecProfile.subtitles=[{index:2}];
         if(scenario==='multi-audio')session.codecProfile.audioTracks.push({index:3});
-        const run=vm.runInNewContext('('+source.slice(start,end)+')', {Number,Array,
+        const run=vm.runInNewContext('('+source.slice(start,end)+')', {Number,Array,sessionStartupStats:{},
             asRecord:x=>x||{},canUseStartupCache:()=>scenario!=='disabled',isFiniteMkvVodSession:()=>true,
             hasCompleteMkvPlaybackProfile:()=>scenario!=='incomplete',privateResumeHlsBindingForSession:()=>binding,
             privateStartupHlsCache:{hasCandidate:()=>scenario!=='no-candidate'},sessions:{set:()=>calls.push('register')},
@@ -53,7 +53,7 @@ test('early TS prefix needs a finite server probe and the unchanged single-track
         if (scenario === 'multi-audio') session.codecProfile.audioTracks.push({ index: 3, codec: 'aac' });
         if (scenario === 'unknown-audio') session.codecProfile.audioTracks[0].codec = 'unknown';
         const run = vm.runInNewContext('(' + source.slice(start, end) + ')', {
-            Number, Array, asRecord: x => x || {}, canUseStartupCache: () => true,
+            Number, Array, sessionStartupStats: {}, asRecord: x => x || {}, canUseStartupCache: () => true,
             isFiniteMkvVodSession: () => false, finiteTsProfileEligible,
             normalizeCodecToken: x => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ''),
             privateResumeHlsBindingForSession: () => binding, privateStartupHlsCache: { hasCandidate: () => true },
@@ -98,6 +98,33 @@ test('a cold-input refusal after a prefix miss drains and unregisters before res
         });
         await run();
         assert.deepEqual(events, ['drained', 'response']);
+    }
+});
+
+test('a rejected startup check retains a safe reason independently of the destroyed session', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8');
+    const start = source.indexOf('async function tryStartPrivateStartupBeforePreopen(');
+    const end = source.indexOf('\nasync function capturePrivateStartupWindow', start);
+    for (const outcome of ['hit', 'target-changed', 'deferred-unavailable', 'miss', 'aborted']) {
+        const stats = {}, session = { id: 'private-session', ownerKey: 'private-owner', seekOffset: 0,
+            sourceUrl: 'https://secret.invalid/credentials', codecProfile: { audioTracks: [{}], subtitles: [] },
+            startupTimings: { recentResumeSampleTimings: [{ elapsedMs: 20 }] } };
+        const run = vm.runInNewContext('(' + source.slice(start, end) + ')', {
+            sessionStartupStats: stats, asRecord: x => x, canUseStartupCache: () => true,
+            isFiniteMkvVodSession: () => true, hasCompleteMkvPlaybackProfile: () => true,
+            privateResumeHlsBindingForSession: () => binding, privateStartupHlsCache: { hasCandidate: () => true },
+            sessions: { set() {} }, closeFiniteMkvSeekBroker: async () => {},
+            tryStartPrivateResumeWindow: async () => {
+                if (outcome === 'target-changed') session.startupTimings.recentResumeValidationOutcome = outcome;
+                if (outcome === 'deferred-unavailable') session.startupTimings.privateStartupValidationDeferred = true;
+                return outcome === 'hit';
+            },
+        });
+        await run(session, { aborted: outcome === 'aborted' });
+        assert.equal(stats.lastStartupCacheCheck.outcome, outcome);
+        assert.equal(stats.lastStartupCacheCheck.completedSamples, 1);
+        assert.deepEqual(Object.keys(stats.lastStartupCacheCheck).sort(), ['at', 'completedSamples', 'outcome']);
+        assert.doesNotMatch(JSON.stringify(stats), /private-|secret|credential/);
     }
 });
 

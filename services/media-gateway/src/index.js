@@ -16111,6 +16111,17 @@ async function tryStartPrivateStartupBeforePreopen(session, signal) {
         session.startupTimings.privateStartupBeforePreopen = started;
         return started;
     } finally {
+        // Keep the result even if cold fallback subsequently fails and removes
+        // the session. A null sampled identity alone cannot distinguish a
+        // changed delivery target from an unavailable fresh read.
+        const timings = session.startupTimings;
+        sessionStartupStats.lastStartupCacheCheck = {
+            outcome: started ? 'hit' : signal?.aborted ? 'aborted'
+                : timings.recentResumeValidationOutcome === 'target-changed' ? 'target-changed'
+                    : timings.privateStartupValidationDeferred === true ? 'deferred-unavailable' : 'miss',
+            completedSamples: Math.min(4, timings.recentResumeSampleTimings?.length || 0),
+            at: new Date().toISOString(),
+        };
         if (!started) {
             // Expiry, changed bytes or an unavailable fresh check must fall back
             // to the normal cold preparation, with no second source reader left
