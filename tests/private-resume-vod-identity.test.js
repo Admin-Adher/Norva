@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { stripTypeScriptTypes } = require('node:module');
 const { privateResumeBinding } = require('../services/media-gateway/src/private-resume-binding');
 const { FinitePlaybackRangeReuse } = require('../services/media-gateway/src/finitePlaybackRangeReuse');
 const { PrivateResumeHlsCache } = require('../services/media-gateway/src/private-resume-hls-cache');
@@ -19,9 +20,12 @@ const id = '1'.repeat(64), otherId = '2'.repeat(64);
 
 test('restored Edge identity is stable across editorial metadata and changes with file authority', async () => {
     const expression = edge.match(/const identityForTarget = ([\s\S]*?);/)[1].replace(': string', '');
+    const helper = stripTypeScriptTypes(edge.slice(edge.indexOf('async function vodPlaybackIdentityKey('),
+        edge.indexOf('async function startupCacheTarget(')), { mode: 'transform' });
+    const vodPlaybackIdentityKey = vm.runInNewContext(helper + '\nvodPlaybackIdentityKey', { sha256Hex });
     const identity = { sourceId: 'source', itemType: 'movie', itemId: 'item', variantId: 'variant' };
     const calculate = (playbackIdentity, url = base.sourceUrl) => vm.runInNewContext(
-        '(' + expression + ')', { playbackIdentity, sha256Hex })(url);
+        '(' + expression + ')', { playbackIdentity, sha256Hex, vodPlaybackIdentityKey })(url);
     const first = await calculate(identity);
     assert.equal(first, await calculate({ ...identity, title: 'New title', poster: 'new.jpg' }));
     for (const change of [{ sourceId: 'other' }, { itemType: 'episode' }, { itemId: 'other' }, { variantId: 'other' }]) {
