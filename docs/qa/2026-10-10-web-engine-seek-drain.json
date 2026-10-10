@@ -158,14 +158,559 @@
     "remainingMedia": []
   },
   "productionChanged": false,
-  "providerMediaCalls": 0,
   "progressiveRangesEnabledByDefault": false,
   "realVodGainValidated": false,
   "limitations": [
-    "Fixtures, not new provider playback trials.",
     "Initial browser frame gaps of approximately 0.74-0.76 s remain in these cases.",
     "One seek was inside the existing full buffer; only the ASS case exercises a decoder seek beyond available data.",
     "No acceptance by listening.",
-    "A pending read may still take its existing network deadline to settle."
-  ]
+    "A pending read may still take its existing network deadline to settle.",
+    "Original controlled proofs use fixtures; latest real trials do not validate a Gateway replacement or audible quality."
+  ],
+  "initialControlledStageProviderMediaCalls": 0,
+  "candidateCi": {
+    "head": "ff27db9a4946ab53944377468b72840d43d530d2",
+    "run": 38042065160,
+    "job": 114184119253,
+    "passed": 6327,
+    "skipped": 34,
+    "failed": 0,
+    "checksPassed": 5,
+    "groupsOverlapTargetedTests": true
+  },
+  "realVodFollowup": {
+    "atUtc": "2026-10-10T10:11:27.263385+00:00",
+    "candidateHead": "ff27db9a4946ab53944377468b72840d43d530d2",
+    "productionChanged": false,
+    "audibleAccepted": false,
+    "gatewayReplacementValidated": false,
+    "results": [
+      {
+        "case": 0,
+        "copy": 1,
+        "forcedExperimentalEngine": true,
+        "sessionReadyMs": 781.2000000476837,
+        "firstFrameMs": null,
+        "profile": {
+          "container": "mov,mp4,m4a,3gp,3g2,mj2",
+          "videoCodec": "h264",
+          "audio": [
+            {
+              "codec": "aac",
+              "channels": 2
+            }
+          ]
+        },
+        "events": [
+          {
+            "name": "error",
+            "ms": 809.4000000953674,
+            "time": 0,
+            "error": 4
+          },
+          {
+            "name": "error",
+            "ms": 15821.700000047684,
+            "time": 0,
+            "error": 4
+          }
+        ],
+        "gaps": [],
+        "engineFailures": [
+          {
+            "stage": "startup:global",
+            "message": "ENGINE_STARTUP_TIMEOUT:global:15000"
+          },
+          {
+            "stage": "load",
+            "message": "ENGINE_STARTUP_TIMEOUT:global:15000"
+          }
+        ],
+        "timings": {
+          "startupDeadlineMs": 15000,
+          "initialWindowKB": 512,
+          "startupWindowMaxKB": 1024,
+          "fetchWindows": [
+            {
+              "start": 0,
+              "requestedBytes": 524288,
+              "bytes": 524288,
+              "ms": 8057,
+              "outcome": "ok"
+            },
+            {
+              "start": 524288,
+              "requestedBytes": 1048576,
+              "bytes": 1048576,
+              "ms": 4291,
+              "outcome": "ok"
+            },
+            {
+              "start": 1572864,
+              "requestedBytes": 1048576,
+              "bytes": 0,
+              "ms": 2630,
+              "outcome": "network_error"
+            }
+          ],
+          "fetchAttempts": 3,
+          "startupFetchWindows": [
+            {
+              "start": 0,
+              "requestedBytes": 524288,
+              "bytes": 524288,
+              "ms": 8057,
+              "outcome": "ok"
+            },
+            {
+              "start": 524288,
+              "requestedBytes": 1048576,
+              "bytes": 1048576,
+              "ms": 4291,
+              "outcome": "ok"
+            },
+            {
+              "start": 1572864,
+              "requestedBytes": 1048576,
+              "bytes": 0,
+              "ms": 2630,
+              "outcome": "network_error"
+            }
+          ],
+          "wasmMs": 57,
+          "probeMs": 8001,
+          "demuxProbeMode": "full",
+          "progressiveReads": 43,
+          "progressiveBytes": 1703936
+        },
+        "seek": null,
+        "snapshot": {
+          "vName": null,
+          "aName": null,
+          "audioTag": null,
+          "audioCfg": null,
+          "copyAudio": null,
+          "appendCount": null,
+          "appendErrors": null,
+          "muxPacketWriteErrors": null,
+          "writeDiscontinuities": null,
+          "videoDtsRuntimeRepairs": null,
+          "audioTimelineFailures": null,
+          "destroyed": null,
+          "pumpRunning": null,
+          "seeking": null,
+          "lastReadError": null
+        },
+        "validComparison": true,
+        "comparisonExclusionReason": null,
+        "samplesSummary": {
+          "count": 16,
+          "first": {
+            "ms": 606.2999999523163,
+            "time": 0,
+            "paused": true,
+            "ready": 0,
+            "hidden": false,
+            "buffer": []
+          },
+          "last": {
+            "ms": 15603.299999952316,
+            "time": 0,
+            "paused": true,
+            "ready": 0,
+            "error": 4,
+            "hidden": false,
+            "buffer": []
+          },
+          "maximumPositionBeforeSeek": 0,
+          "postSeekPlayingEventObserved": false
+        }
+      },
+      {
+        "case": 1,
+        "copy": 4,
+        "forcedExperimentalEngine": true,
+        "sessionReadyMs": 55509.200000047684,
+        "firstFrameMs": null,
+        "profile": {
+          "container": "matroska,webm",
+          "videoCodec": "h264",
+          "audio": [
+            {
+              "codec": "aac",
+              "channels": 2
+            }
+          ]
+        },
+        "events": [
+          {
+            "name": "error",
+            "ms": 45365.39999985695,
+            "time": 0,
+            "error": 4
+          },
+          {
+            "name": "error",
+            "ms": 55520.700000047684,
+            "time": 0,
+            "error": 4
+          }
+        ],
+        "gaps": [],
+        "engineFailures": [],
+        "timings": {},
+        "seek": null,
+        "snapshot": {
+          "vName": null,
+          "aName": null,
+          "audioTag": null,
+          "audioCfg": null,
+          "copyAudio": null,
+          "appendCount": null,
+          "appendErrors": null,
+          "muxPacketWriteErrors": null,
+          "writeDiscontinuities": null,
+          "videoDtsRuntimeRepairs": null,
+          "audioTimelineFailures": null,
+          "destroyed": null,
+          "pumpRunning": null,
+          "seeking": null,
+          "lastReadError": null
+        },
+        "validComparison": false,
+        "comparisonExclusionReason": "Banc timeout expired session before late creation response was used",
+        "samplesSummary": {
+          "count": 46,
+          "first": {
+            "ms": 366.39999985694885,
+            "time": 0,
+            "paused": true,
+            "ready": 0,
+            "error": 4,
+            "hidden": false,
+            "buffer": []
+          },
+          "last": {
+            "ms": 45362.700000047684,
+            "time": 0,
+            "paused": true,
+            "ready": 0,
+            "error": 4,
+            "hidden": false,
+            "buffer": []
+          },
+          "maximumPositionBeforeSeek": 0,
+          "postSeekPlayingEventObserved": false
+        }
+      },
+      {
+        "case": 2,
+        "copy": 4,
+        "forcedExperimentalEngine": true,
+        "sessionReadyMs": 825.4000000953674,
+        "firstFrameMs": 10979.200000190734,
+        "profile": {
+          "container": "matroska,webm",
+          "videoCodec": "h264",
+          "audio": [
+            {
+              "codec": "aac",
+              "channels": 2
+            }
+          ]
+        },
+        "events": [
+          {
+            "name": "error",
+            "ms": 838.5,
+            "time": 0,
+            "error": 4
+          },
+          {
+            "name": "waiting",
+            "ms": 10971.400000095367,
+            "time": 0
+          },
+          {
+            "name": "playing",
+            "ms": 10978.600000143051,
+            "time": 0.001117
+          },
+          {
+            "name": "waiting",
+            "ms": 11319.400000095367,
+            "time": 0.300061
+          },
+          {
+            "name": "requested-seek",
+            "ms": 40344.800000190735,
+            "time": 0.300061,
+            "target": 300,
+            "buffer": [
+              [
+                0,
+                0.997
+              ]
+            ]
+          },
+          {
+            "name": "seeking",
+            "ms": 40350.60000014305,
+            "time": 300
+          },
+          {
+            "name": "waiting",
+            "ms": 40351,
+            "time": 300
+          },
+          {
+            "name": "error",
+            "ms": 137663.40000009537,
+            "time": 0,
+            "error": 4
+          }
+        ],
+        "gaps": [],
+        "engineFailures": [],
+        "timings": {
+          "startupDeadlineMs": 15000,
+          "initialWindowKB": 512,
+          "startupWindowMaxKB": 1024,
+          "fetchWindows": [
+            {
+              "start": 0,
+              "requestedBytes": 524288,
+              "bytes": 524288,
+              "ms": 4478,
+              "outcome": "ok"
+            },
+            {
+              "start": 3093965715,
+              "requestedBytes": 1304,
+              "bytes": 1304,
+              "ms": 802,
+              "outcome": "ok"
+            },
+            {
+              "start": 524288,
+              "requestedBytes": 1048576,
+              "bytes": 1048576,
+              "ms": 21424,
+              "outcome": "ok"
+            },
+            {
+              "start": 1572864,
+              "requestedBytes": 4194304,
+              "bytes": 4194304,
+              "ms": 59167,
+              "outcome": "ok"
+            },
+            {
+              "start": 3093893333,
+              "requestedBytes": 73686,
+              "bytes": 73686,
+              "ms": 1674,
+              "outcome": "ok"
+            },
+            {
+              "start": 125837346,
+              "requestedBytes": 4194304,
+              "bytes": 0,
+              "ms": 49214,
+              "outcome": "network_error"
+            }
+          ],
+          "fetchAttempts": 6,
+          "startupFetchWindows": [
+            {
+              "start": 0,
+              "requestedBytes": 524288,
+              "bytes": 524288,
+              "ms": 4478,
+              "outcome": "ok"
+            },
+            {
+              "start": 3093965715,
+              "requestedBytes": 1304,
+              "bytes": 1304,
+              "ms": 802,
+              "outcome": "ok"
+            },
+            {
+              "start": 524288,
+              "requestedBytes": 1048576,
+              "bytes": 1048576,
+              "ms": 21424,
+              "outcome": "ok"
+            }
+          ],
+          "wasmMs": 46,
+          "probeMs": 4433,
+          "progressiveReads": 111,
+          "progressiveBytes": 4180077,
+          "demuxHeaderMs": 812,
+          "demuxProbeMode": "bounded-header",
+          "demuxStreamInfoMs": 20,
+          "openInputMs": 837,
+          "detectMimeMs": 1,
+          "mediaSourceMs": 2,
+          "encoderMs": 0,
+          "firstAppendMs": 5321,
+          "muxerMs": 8,
+          "seekMs": 0,
+          "loadTotalMs": 5327,
+          "fetches": 2,
+          "fetchMB": 0.5,
+          "fetchMs": 5280,
+          "audio": "copy",
+          "video": "h264",
+          "engineVersion": 49,
+          "firstUsableAppendMs": 10137,
+          "firstMediaAppendMs": 10137,
+          "firstMediaAppendFetches": 3,
+          "firstMediaAppendSuccessfulFetches": 2,
+          "firstMediaAppendFetchKB": 513,
+          "cueHeaderReused": true
+        },
+        "seek": {
+          "warm": false,
+          "setupMs": 48092,
+          "fetches": 2,
+          "fetchKB": 4168
+        },
+        "snapshot": {
+          "vName": "h264",
+          "aName": "aac",
+          "audioTag": "mp4a.40.2",
+          "audioCfg": null,
+          "copyAudio": true,
+          "appendCount": 5,
+          "appendErrors": [],
+          "muxPacketWriteErrors": 0,
+          "writeDiscontinuities": 0,
+          "videoDtsRuntimeRepairs": null,
+          "audioTimelineFailures": 0,
+          "destroyed": false,
+          "pumpRunning": true,
+          "seeking": false,
+          "lastReadError": null
+        },
+        "validComparison": true,
+        "comparisonExclusionReason": null,
+        "samplesSummary": {
+          "count": 138,
+          "first": {
+            "ms": 373.40000009536743,
+            "time": 0,
+            "paused": true,
+            "ready": 0,
+            "hidden": false,
+            "buffer": []
+          },
+          "last": {
+            "ms": 137373.30000019073,
+            "time": 300,
+            "paused": false,
+            "ready": 1,
+            "hidden": false,
+            "buffer": []
+          },
+          "maximumPositionBeforeSeek": 0.300061,
+          "postSeekPlayingEventObserved": false
+        }
+      }
+    ],
+    "cleanup": {
+      "controllerStopped": true,
+      "testSessionsExpired": 3,
+      "active": [
+        {
+          "copy": "FR| Vice-versa 2",
+          "remainingProviderSessions": 0
+        },
+        {
+          "copy": "FR - Conclave (2024)",
+          "remainingProviderSessions": 0
+        }
+      ],
+      "health": [
+        {
+          "container": "norva-media-gateway",
+          "running": true,
+          "health": "healthy"
+        },
+        {
+          "container": "norva-edge-functions",
+          "running": true,
+          "health": "healthy"
+        },
+        {
+          "container": "norva-edge-functions-2",
+          "running": true,
+          "health": "healthy"
+        },
+        {
+          "container": "norva-language-campaign",
+          "running": true,
+          "health": "healthy"
+        }
+      ],
+      "forcedLeases": 0,
+      "productionChanged": false,
+      "atUtc": "2026-10-10T10:11:27.263385+00:00"
+    },
+    "fullTraceReceipt": ".codex-artifacts/web-engine-seek-real-20261010/comparison.safe.json",
+    "sessionsCreated": 3,
+    "bancCreationTimeoutCorrected": true,
+    "excludedInitialConclaveTrial": true,
+    "mediaFilesWritten": 0,
+    "localServerStopped": true,
+    "tunnelStopped": true,
+    "temporaryTabClosed": true
+  },
+  "windowsPublication": {
+    "atUtc": "2026-10-10T09:59:57.671861+00:00",
+    "releaseId": 408840971,
+    "draft": false,
+    "prerelease": true,
+    "publishedAt": "2026-10-10T09:59:56Z",
+    "publicReleaseUrl": "https://github.com/Admin-Adher/Norva/releases/tag/v2.1.5-native.2",
+    "exeUrl": "https://github.com/Admin-Adher/Norva/releases/download/v2.1.5-native.2/Norva-Windows-2.1.5-native.2-x64.exe",
+    "httpStatus": 200,
+    "exeBytes": 239558491,
+    "exeSha256": "bbcb0d10eaed6c6f668777893239d9d633c100de89f4477d33091b90b05a95e3",
+    "assets": [
+      {
+        "name": "libvlcsharp-3.10.1.tar.gz",
+        "bytes": 4440040,
+        "digest": "sha256:a54f537652091e8e8be2cf5abf114dfe205ec0cfb0a51f4e3fe1e03be972b03f"
+      },
+      {
+        "name": "Norva-Windows-2.1.5-native.2-x64.exe",
+        "bytes": 239558491,
+        "digest": "sha256:bbcb0d10eaed6c6f668777893239d9d633c100de89f4477d33091b90b05a95e3"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "bytes": 282,
+        "digest": "sha256:1df6b5b079d8fbec556e18ae922b6f526e6fa7e391e04f51f047355271d660f8"
+      },
+      {
+        "name": "vlc-3.0.24.tar.xz",
+        "bytes": 27620304,
+        "digest": "sha256:e7cab503d1d7d5849b89d2cf0e1ee60d0ef6d012407791b644b9cfc0cc225fdf"
+      }
+    ],
+    "mergedPr": 757,
+    "mergeSha": "35ba5704af2cdd0f9a3ad0f73b94f3d7b168febe"
+  },
+  "nodeMaven": {
+    "lastRequestedLocation": "United States",
+    "differentRouteRequested": true,
+    "requestSeen": true,
+    "replyReceived": false,
+    "provisioned": false,
+    "chargesAuthorized": false,
+    "currentProxyChanged": false
+  }
 }

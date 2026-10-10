@@ -37,4 +37,29 @@ Les deux sorties identiques du contrôle LibAV sont redécodées : AAC-LC stér�
 
 Les six fichiers médias/sous-titres synthétiques sont supprimés uniquement du répertoire d'essai, avec tailles et hashes conservés. Onglet et serveur temporaires arrêtés. Aucun média fournisseur sauvegardé dans cette étape. Le manifeste i18n est actualisé uniquement pour l'empreinte du moteur ; les références générées accidentellement sur les pages sans rapport sont annulées avant commit.
 
-Le code reste dans le brouillon PR756. **Aucun gain supplémentaire sur Normal, Conclave ou une autre VOD réelle n'est revendiqué.** Il reste à valider les sauts sous réception irrégulière sur des copies réelles et la qualité à l'écoute avant de modifier le routage public. Contrôle CI de la nouvelle tête à consigner après le push.
+Le code reste dans le brouillon PR756. **Aucun gain supplémentaire sur Normal, Conclave ou une autre VOD réelle n'est revendiqué.** Il reste à valider les sauts sous réception irrégulière sur des copies réelles et la qualité à l'écoute avant de modifier le routage public.
+
+## CI et suite sur copies réelles, 10 octobre à 12:11 Paris
+
+Les **cinq contrôles de `ff27db9a4946ab53944377468b72840d43d530d2` réussissent**, paquets Android et Windows compris. Run `38042065160`, job contrats `114184119253` : **6 327 tests réussis, 34 ignorés, zéro échec**. Ce groupe recoupe les 139 tests ciblés ; les nombres ne sont pas additionnés.
+
+Le propriétaire a autorisé les essais de lecture et confirmé l'arrêt des lectures concurrentes. Deux copies sont relues via sessions Edge ordinaires, avec visibilité, génération de source, profil exact et occupation du compte vérifiés avant ouverture. Le moteur candidat de PR756 est chargé dans un banc temporaire avec WatchPage. `progressiveRanges` est activé uniquement dans ce banc. **Le MP4 est volontairement forcé dans le moteur expérimental pour cette comparaison : son résultat ne caractérise pas le chemin MP4 habituel de Norva.** Aucune route publique n'est modifiée.
+
+| Copie | Session prête | Première image depuis le clic | Suite observée |
+| --- | ---: | ---: | --- |
+| Vice-versa 2, MP4 H.264/AAC | 0,781 s | Aucune | Limite moteur de 15 s atteinte ; premier 512 Kio en 8,057 s, puis 1 Mio en 4,291 s. Les en-têtes MP4 annoncent un bloc `moov` d'environ 5 Mio ; le moteur n'a pas terminé son ouverture. |
+| Conclave, MKV H.264/AAC, essai corrigé | 0,825 s | 10,979 s | Interruption dès 0,300 s de vidéo ; tampon jusqu'à 0,997 s. Saut à 300 s demandé à 40,345 s : pas de reprise visible avant l'arrêt volontaire vers 137,7 s. |
+
+La réception progressive est réellement utilisée sur Vice-versa 2, avec 1 703 936 octets servis avant complétion des réponses. Elle ne suffit pas à faire terminer l'ouverture dans cet essai. Sur Conclave, les plages terminées de 1 Mio et 4 Mio prennent respectivement **21,424 et 59,167 s**. Le setup du saut prend **48,092 s**, puis une plage de 4 Mio vers sa cible reste en attente et est annulée lors de l'arrêt. Son entrée `network_error` après 49,214 s décrit cette annulation : elle n'est pas attribuée à un refus du fournisseur. Aucun accès simultané supplémentaire ou changement de seuil n'est introduit.
+
+Un premier essai Conclave est **exclu de la comparaison** : la création de session a répondu en 55,509 s, après la limite totale de 45 s du banc. Le banc avait déjà demandé sa fermeture avant d'utiliser cette réponse tardive. Ce défaut de synchronisation du banc est corrigé avant le seul rejeu supplémentaire : budget séparé pour la création, refus de charger une réponse arrivée après arrêt. La limite de démarrage du moteur reste 15 s. Les reçus du premier essai sont conservés ; aucun échec de production n'en est déduit. Le mauvais décodage UTF-8 des sélecteurs locaux et le type MIME CSS du banc sont également corrigés **avant toute lecture**.
+
+Ces lectures ne valident ni les sauts fluides, ni le remplacement du Gateway, ni la qualité à l'écoute. Les onglets sont muets. La première erreur HTML `Empty src attribute` des observations précède le chargement du moteur ; elle ne prouve pas une erreur de décodage AAC. Aucune nouvelle certification audio n'est ajoutée.
+
+Trois sessions d'essai sont expirées normalement ; les deux comptes fournisseur ciblés ont **zéro session restante** au contrôle final. Contrôleurs, serveur local, tunnel et onglet temporaire sont arrêtés. Aucun média fournisseur n'a été écrit par le banc ; seuls les reçus restent. Gateway principal, deux Edge et dispatcher de langues sains. Aucun bail forcé, déploiement Gateway/Edge, changement du relais ou des gardes. Les nouveaux reçus sont sous `.codex-artifacts/web-engine-seek-real-20261010/`.
+
+## Windows et trajet réseau
+
+PR757 est intégrée par `35ba5704af2cdd0f9a3ad0f73b94f3d7b168febe`. Le portable natif intégré, distinct du lecteur web, a été vérifié après ouverture manuelle. **Windows `2.1.5-native.2` est publié à 11:59:56 Paris**, en préversion non signée. API publique et téléchargement HTTP 200 vérifiés ; EXE 239 558 491 octets, SHA256 `bbcb0d10eaed6c6f668777893239d9d633c100de89f4477d33091b90b05a95e3`. Les cinq checks de la tête documentaire `7900deb65` passent aussi. [Release et sources correspondantes](https://github.com/Admin-Adher/Norva/releases/tag/v2.1.5-native.2).
+
+La dernière demande NodeMaven — essai isolé aux États-Unis sur un autre ISP/trajet, gratuité/durée/limites/IP à confirmer, relais courant préservé — reste lue sans réponse lors du contrôle. Aucun provisionnement, frais ou modification de production. **PR756 reste en brouillon ; aucun nouveau gain de fluidité web n'est revendiqué.**
