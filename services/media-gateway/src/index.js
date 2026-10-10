@@ -5742,7 +5742,7 @@ async function closeStrictLidBrokerProviderFetch(context, attempt, reason = 'com
     deadline?.close?.();
     attempt.controller.signal.removeEventListener?.('abort', onAttemptAbort);
     const preserveFiniteProviderConnection = completedExactRange
-        && context.pathPrefix === 'finite-mkv-seek';
+        && (context.pathPrefix === 'finite-mkv-seek' || context.recentValidationKeepAlive === true);
     if (preserveFiniteProviderConnection || upstreamBodySettled) {
         // The declared Content-Length has been consumed exactly, so Undici can
         // return this authenticated tunnel to its pool. The same rule applies to
@@ -6493,9 +6493,10 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     'User-Agent': context.userAgent,
                 };
                 // Playback windows are serialized on one pinned proxy slot and
-                // reuse its transport. Strict validation remains one-shot and
-                // explicitly closes its provider connection.
-                if (!finiteSeek) headers.Connection = 'close';
+                // reuse its transport. Strict language acquisitions remain
+                // one-shot; the private playback check drains all four reads
+                // on its own pinned connection before closing its broker.
+                if (!finiteSeek && context.recentValidationKeepAlive !== true) headers.Connection = 'close';
                 if (context.validator) headers[context.validator.header] = context.validator.value;
                 attempt.fetchStarted = true;
                 context.providerFetches++;
@@ -7266,6 +7267,13 @@ async function createStrictLidBroker(options = {}) {
     const controller = new AbortController();
     const context = {
         sourceUrl,
+        // Only the private, uncached four-sample playback check can retain its
+        // pinned transport between fully consumed exact ranges. The broker
+        // still destroys that transport before admitting the decoder; strict
+        // language acquisitions keep their existing one-shot connection rule.
+        recentValidationKeepAlive: pathPrefix === 'strict-lid' && !rangeReuse
+            && ownsDispatcher && Boolean(options.freshResumeScope)
+            && options.recentValidationKeepAlive === true,
         captureRecentSamples: pathPrefix === 'finite-mkv-seek' && options.captureRecentSamples === true,
         recentHeaderSample: null,
         rangeReuse,
@@ -16164,6 +16172,12 @@ async function revalidateRecentResumeSession(session, plan, requestSignal) {
         if (hadPreopen && !await waitForVodInputRetry(PROVIDER_SLOT_RELEASE_DELAY_MS, controller.signal)) return null;
         let identity = null;
         const samples = await validateRecentResume({ plan, signal: controller.signal,
+            onSample: sample => {
+                (session.startupTimings.recentResumeSampleTimings ??= []).push(sample);
+            },
+            onUnavailable: observation => {
+                session.startupTimings.recentResumeValidationUnavailable = observation;
+            },
             acceptIdentity: () => !plan.target || identity?.effectiveUrlIdentitySha256 === plan.target,
             onIdentityRejected: () => {
                 session.startupTimings.recentResumeValidationOutcome = 'target-changed';
@@ -16189,6 +16203,7 @@ async function revalidateRecentResumeSession(session, plan, requestSignal) {
                     dispatcherFactory: pinnedProxyAgentFactoryForRoute(providerNodeRouteForSession(session)),
                     onProviderIdentity: current => { identity = current; },
                     freshResumeScope: session,
+                    recentValidationKeepAlive: true,
                     completedReleaseDelayMs: 0, supersededReleaseDelayMs: PROVIDER_SLOT_RELEASE_DELAY_MS,
                     abortSignal: signal,
                 });

@@ -40,6 +40,36 @@ test('MP4 copied header filter preserves decoded frames and timestamps', { skip:
 });
 const { StrictLidRangeReuse, createStrictRangeCollector } = require('../services/media-gateway/src/strict-lid-range-reuse');
 
+for (const scoped of [false, true]) test(`recent playback sample transport ${scoped ? 'reuses one socket and closes before return' : 'cannot change unscoped strict probes'}`, async t => {
+  const { validateRecentResume } = require('../services/media-gateway/src/recent-resume-validation');
+  const { Agent } = require('undici');
+  const N=65536,size=8*N,sockets=new Set(),headers=[];let active=0,maxActive=0,open=0,drained=false;
+  const server=http.createServer((req,res)=>{
+    sockets.add(req.socket.remotePort);headers.push(req.headers.connection);active++;maxActive=Math.max(active,maxActive);
+    const [start,end]=req.headers.range.slice(6).split('-').map(Number);
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${size}`,'Content-Length':end-start+1});
+    res.once('finish',()=>active--);res.end(Buffer.alloc(end-start+1,7));
+  });
+  server.on('connection',socket=>{open++;socket.once('close',()=>open--);});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+  const h=brokerHarness();
+  const result=await validateRecentResume({
+    plan:{kind:'sampled-recent-v1',ranges:[0,N,2*N,3*N].map(start=>({start,length:N}))},
+    createBroker:signal=>h.createStrictLidBroker({
+      sourceUrl:`http://127.0.0.1:${server.address().port}/file`,fileSizeBytes:size,
+      dispatcherFactory:()=>new Agent({connections:1,pipelining:1}),
+      recentValidationKeepAlive:true,...(scoped?{freshResumeScope:{id:'private-playback'}}:{}),
+      abortSignal:signal,completedReleaseDelayMs:0,
+    }),
+    onFreshValidatedHeader:()=>{drained=true;assert.equal(active,0);},
+  });
+  assert.equal(result.length,4);assert.equal(headers.length,4);assert.equal(maxActive,1);
+  assert.equal(sockets.size,scoped?1:4);assert.equal(headers.every(x=>x==='close'),!scoped);
+  assert.equal(drained,true);assert.equal(h.strictLidBrokers.size,0);
+  await new Promise(resolve=>setTimeout(resolve,20));assert.equal(open,0);
+});
+
 test('recent target rejection drains one real range and preserves the changed-target fence', async()=>{
   const {validateRecentResume}=require('../services/media-gateway/src/recent-resume-validation');
   const N=65536,size=8*N; let ranges=0,active=0,maxActive=0,identity=null,rejected=0;
