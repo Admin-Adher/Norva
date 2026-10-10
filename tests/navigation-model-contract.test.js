@@ -20,7 +20,7 @@ test('one navigation model owns routes, actions and platform projection order', 
     'home', 'live', 'movies', 'series', 'downloads',
   ]);
   assert.deepEqual(model.keysFor('phone'), [
-    'home', 'live', 'movies', 'series', 'search', 'downloads', 'account',
+    'home', 'live', 'movies', 'series', 'downloads', 'account',
   ]);
   assert.deepEqual(model.keysFor('tv'), [
     'home', 'live', 'movies', 'series', 'settings', 'logout',
@@ -122,9 +122,10 @@ test('the model renders accessible web, phone and TV projections without markup 
   }
 
   assert.equal((web.match(/class="nav-link/g) || []).length, 5);
-  assert.equal((phone.match(/class="nav-link/g) || []).length, 7);
+  assert.equal((phone.match(/class="nav-link/g) || []).length, 6);
   assert.equal((tv.match(/class="nav-link/g) || []).length, 6);
-  assert.match(phone, /id="nav-search-bottom"[^>]*data-action="search"[^>]*data-nav-gate="vod-catalog"[^>]*hidden/);
+  assert.doesNotMatch(phone, /data-action="search"|id="nav-search-bottom"/);
+  assert.match(read('public/app.html'), /id="nav-search"/);
   assert.match(phone, /id="nav-downloads-bottom"[^>]*data-action="downloads"[^>]*data-nav-gate="vod-catalog-or-local"[^>]*hidden/);
   assert.match(phone, /id="nav-account"[^>]*aria-label="Account and settings"/);
   assert.doesNotMatch(web, /data-nav-key="admin"|data-nav-key="settings"|data-nav-key="logout"/);

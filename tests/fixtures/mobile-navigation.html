@@ -1,0 +1,18 @@
+<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/css/main.css"><body>
+<main class="main-content"><h1>Navigation mobile Norva</h1><label>Recherche<input id="qa-search" type="search"></label><output id="qa-result" role="status">Chargement</output></main>
+<script src="/js/navigation/NavigationModel.js"></script><script src="/js/navigation/NavigationAdapters.js"></script>
+<script>
+// Exercise the release header, model, adapter and CSS, with no account/network I/O.
+fetch('/app.html').then(r=>r.text()).then(html=>{
+    const source=new DOMParser().parseFromString(html,'text/html');
+    for(const selector of ['.navbar','#bottom-nav']) document.body.prepend(source.querySelector(selector));
+    const model=NorvaNavigationModel.createDefaultNavigationModel();
+    const adapter=new NorvaNavigationAdapters.PhoneNavigationAdapter(document.getElementById('bottom-nav'),model).mount({currentPage:'home'});
+    for(const key of ['live','movies','series','downloads']) adapter.setVisible(key,key!=='downloads'||new URLSearchParams(location.search).get('native')==='1');
+    const search=document.getElementById('nav-search');search.hidden=false;search.setAttribute('aria-hidden','false');search.tabIndex=0;
+    search.addEventListener('click',()=>document.getElementById('qa-search').focus());
+    adapter.bind(intent=>{if(intent.kind==='route')adapter.syncCurrent(intent.target);});
+    document.getElementById('qa-result').textContent='Prêt';
+}).catch(error=>document.getElementById('qa-result').textContent=String(error));
+</script></body></html>

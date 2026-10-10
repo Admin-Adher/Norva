@@ -169,7 +169,6 @@
             'live',
             'movies',
             'series',
-            Object.freeze({ key: 'search', id: 'nav-search-bottom' }),
             Object.freeze({ key: 'downloads', id: 'nav-downloads-bottom' }),
             Object.freeze({
                 key: 'account',

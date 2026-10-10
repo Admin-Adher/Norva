@@ -101,6 +101,7 @@ def copyI18nTestBundle = tasks.register("copyI18nTestBundle", Copy) {
         include "js/components/RetentionOffer.js"
         include "js/components/PlayRetentionCard.js"
         include "app.html", "js/app.js", "js/utils/GenreTaxonomy.js", "js/components/TitleRatingControl.js"
+        include "js/navigation/NavigationModel.js", "js/navigation/NavigationAdapters.js"
         include "js/components/MultiSelect.js", "js/pages/MoviesPage.js", "js/pages/SeriesPage.js"
         include "js/utils/GenreRails.js", "js/utils/CatalogQueryParams.js", "js/pages/HomePage.js", "js/icons.js"
         include "js/i18n.js", "js/consent-banner.js", "js/plan-selection-ui.js", "js/promo-ui.js", "js/navigation-safety.js"
@@ -111,6 +112,7 @@ def copyI18nTestBundle = tasks.register("copyI18nTestBundle", Copy) {
     from("../../../tests/fixtures") { include "mobile-live-audit.html", "mobile-live-audit.js" }
     from("../../../tests/fixtures") { include "mobile-live-search.html", "mobile-live-search.js" }
     from("../../../tests/fixtures") { include "play-retention.html", "continue-watching.html", "continue-watching.js" }
+    from("../../../tests/fixtures") { include "mobile-navigation.html" }
 }
 tasks.configureEach { task ->
     if (task.name.contains("AndroidTest") && (task.name.startsWith("merge") || task.name.contains("Lint") || task.name.startsWith("lint"))) task.dependsOn(copyI18nTestBundle)
