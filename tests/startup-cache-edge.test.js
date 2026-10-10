@@ -12,7 +12,11 @@ function harness(options = {}) {
     revision: 'revision', profileFingerprint: 'profile', resolved: { playbackHint: {} },
     profile: { audioTracks: [{ index: 1, codec: 'aac', default: true }], fileSizeBytes: 10000 } };
   const context = vm.createContext({ HttpError, crypto: require('node:crypto').webcrypto, Request, URL, Date, AbortSignal,
+    ...require('../supabase/functions/_shared/native-mp4-gateway-policy.mjs'),
+    resolvedVodContainerAuthority: hint => hint?.codecProfile?.container === 'mov,mp4,m4a,3gp,3g2,mj2' ? 'mp4' : 'mkv',
+    canonicalVodContainer: value => value === 'mp4' ? 'mp4' : null,
     Deno: { env: { get: key => ({ PRIVATE_STARTUP_CACHE_ENABLED: 'true', PRIVATE_STARTUP_CACHE_OWNER_HASHES: owner,
+      NORVA_NATIVE_MP4_GATEWAY_ENABLED: options.nativeDisabled ? 'false' : 'true',
       NORVA_BACKFILL_TOKEN: 'operator-token' })[key] } },
     PLAYBACK_SESSION_UUID_PATTERN: /^[a-f0-9-]{36}$/, recordOrEmpty: value => value || {}, stringOr: (value, fallback) => typeof value === 'string' ? value : fallback,
     sha256Hex: async value => value === userId ? owner : 'hash:' + value,
@@ -65,6 +69,26 @@ test('startup Edge requires both leases and current authority, then releases onl
   assert.ok(h.events.indexOf('claim_provider_file_probe') < h.events.indexOf('gateway'));
   assert.ok(h.events.indexOf('gateway') < h.events.indexOf('release-file'));
   assert.equal(h.events.at(-1), 'release_provider_account_language_validation');
+});
+test('native MP4 cannot occupy an idle provider slot for an HLS prefix its playback route does not read', async () => {
+  const profile = { container: 'mov,mp4,m4a,3gp,3g2,mj2', videoCodec: 'h264', videoPixelFormat: 'yuv420p',
+    probeSource: 'gateway_probe', probedAt: new Date().toISOString(), fileSizeBytes: 10000,
+    audioTracks: [{ index: 1, codec: 'aac', profile: 'LC', channels: 2, default: true }], subtitles: [] };
+  const h = harness(); h.target.resolved.playbackHint = { codecProfile: profile };
+  const result = await h.context.runStartupCachePreparation(h.request, h.db);
+  assert.equal(result.prepared, false);
+  assert.equal(result.reason, 'native-mp4-prefix-unavailable');
+  assert.deepEqual(h.events, ['target']);
+  // The guard must not disable files that still require the HLS route.
+  for (const scenario of ['nativeDisabled', 'incompatible', 'observedCorrection', 'selectionDelivery']) {
+    const g = harness({ nativeDisabled: scenario === 'nativeDisabled' });
+    g.target.resolved.playbackHint = { codecProfile: { ...profile,
+      videoCodec: scenario === 'incompatible' ? 'hevc' : 'h264' } };
+    if (scenario === 'observedCorrection') g.target.resolved.containerObservation = { container: 'mp4' };
+    if (scenario === 'selectionDelivery') g.target.resolved.selectionVodDelivery = { mode: 'relay' };
+    assert.equal((await g.context.runStartupCachePreparation(g.request, g.db)).prepared, true, scenario);
+    assert.equal(g.events.includes('gateway'), true, scenario);
+  }
 });
 for (const scenario of ['uncertainDrain', 'transportFailure']) test(`startup Edge preserves exclusion on ${scenario}`, async () => {
   const h = harness({ [scenario]: true });

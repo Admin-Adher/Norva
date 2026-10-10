@@ -16126,6 +16126,20 @@ async function runStartupCachePreparation(req: Request, db: SupabaseClient): Pro
       return { protocol: 1, prepared: false, reason: "exact-file-evidence-unavailable" };
     throw error;
   }
+  // This pilot produces HLS assets. Browser-native MP4 sessions never consult
+  // that store, so preparing their first minute would occupy the provider slot
+  // without accelerating automatic playback. Use the owned resolver's same
+  // container/codec authority before taking either lease or opening media.
+  const observation = "containerObservation" in target.resolved
+    ? recordOrEmpty(target.resolved.containerObservation) : {};
+  const nativeContainer = resolvedVodContainerAuthority(target.resolved.playbackHint, observation, itemType === "movie");
+  if (!("selectionVodDelivery" in target.resolved && target.resolved.selectionVodDelivery)
+    && canonicalVodContainer(observation.container) !== "mp4"
+    && useNativeMp4Gateway({ sourceId, itemType, container: nativeContainer,
+      enabled: Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_ENABLED") !== "false" })
+    && browserNativeMp4Proof(target.resolved.playbackHint)) {
+    return { protocol: 1, prepared: false, reason: "native-mp4-prefix-unavailable" };
+  }
   if (!target.accountKey) return { protocol: 1, prepared: false, reason: "account-unidentified" };
   await assertProviderCircuitClosed(target.accountHash, db);
   const identityKey = (await resolveSourceIdentity(sourceId, userId, db)).key;

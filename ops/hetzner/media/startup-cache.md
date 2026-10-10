@@ -56,7 +56,12 @@ s'applique à un MPEG-TS fini dont le profil serveur daté atteste la taille,
 la durée, H.264 et une unique piste audio connue, sans sous-titres. Un profil TS
 partiel `gateway_inband` reste exclu. Les autres graphes gardent l'enrichissement
 ordinaire ; un refus d'identité ferme le broker de validation avant le repli.
-Les MP4 natifs ont une voie distincte du cache HLS.
+Les MP4 natifs ont une voie distincte du cache HLS. Quand la résolution serveur
+sélectionne cette voie pour la lecture automatique, la préparation répond
+`native-mp4-prefix-unavailable` avant réservation ou ouverture fournisseur.
+Elle ne prépare plus une minute HLS que cette lecture ne pourrait pas utiliser.
+Cela ne constitue pas un cache MP4 natif ; les MP4 qui exigent encore une
+adaptation HLS conservent leur admission ordinaire.
 Une vérification fraîche indisponible refuse la lecture du préfixe et conserve
 seulement les données privées jusqu'à leur expiration initiale. La même création
 ne retente pas la vérification pendant son repli ; le prochain essai doit réussir
