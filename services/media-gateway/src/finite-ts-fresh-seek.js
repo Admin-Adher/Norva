@@ -84,7 +84,7 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
     // The tail must confirm that the dated duration and fresh origin describe
     // this response's clock. No timestamp wrap or unrelated delivery timeline
     // may turn a byte estimate into an authorized seek.
-    const tail = await acquire(align(fileSizeBytes - 65536), 65536 + PACKET);
+    const tail = await acquire(align(fileSizeBytes - HEADER), HEADER + PACKET);
     const last = tail?.video.at(-1);
     if (!last || last.pid !== origin.videoPid || last.signature !== signature
         || Math.abs(last.pts / 90000 - origin.startSeconds - durationSeconds) > 2)
