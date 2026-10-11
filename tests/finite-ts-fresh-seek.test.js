@@ -52,6 +52,16 @@ test('a misleading historical hint is corrected from fresh clocks, never accepte
     assert.equal(ranges.length, 4); assert.equal(result.reason, 'fresh-point');
     assert.ok(result.point.pts / 90000 > 60);
 });
+test('a short sample without a complete program header is retried at the same position', async () => {
+    const data = fixture(), ranges = [];
+    const { result } = await seek(data, { read: async (a, b) => {
+        ranges.push([a, b]);
+        return ranges.length === 3 ? Buffer.alloc(b - a + 1) : data.subarray(a, b + 1);
+    } });
+    assert.equal(result.reason, 'fresh-point');
+    assert.equal(ranges[2][0], ranges[3][0]);
+    assert.ok(ranges[3][1] - ranges[3][0] > ranges[2][1] - ranges[2][0]);
+});
 test('one-second preroll is limited to freshly identified AAC with clean A/V around the IDR', async () => {
     const data = fixture();
     const run = codec => seek(data, { seconds: 81.3, hints: { estimate: () => Math.floor(data.length * 79 / 120 / 188) * 188 },

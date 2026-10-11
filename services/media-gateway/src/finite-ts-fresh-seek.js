@@ -118,6 +118,10 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
         const length = attempt === 0 ? 512 * 1024 : WINDOW;
         const start = align(Math.min(fileSizeBytes - length, Math.max(HEADER, predicted)));
         const scan = await acquire(start, length, true);
+        // A short window can end before the next complete program/PES header.
+        // Retry the same position once with the normal window; missing clocks
+        // do not authorize a point or trigger a speculative byte correction.
+        if (!scan && attempt === 0) { predicted = start; continue; }
         if (!scan || scan.video.some(c => c.pid !== origin.videoPid || c.signature !== signature)
             || scan.audio.some(c => c.pid !== origin.audioPid || c.signature !== signature))
             return { ...result, reason: 'graph-or-clock-unverified' };
