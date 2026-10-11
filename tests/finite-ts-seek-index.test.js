@@ -150,7 +150,8 @@ test('real Gateway preparation admits disabled frozen topologies but rejects act
         await prepare(session, new AbortController().signal);
         assert.equal(typeof brokerOptions.onFiniteWindow, 'function');
         assert.equal(brokerOptions.finiteInitialContinuationGraceMs, scenario === 'pilot' ? 500 : 0);
-        assert.equal(brokerOptions.finiteFirstWindowBytes, scenario === 'pilot' ? 256 * 1024 : 0);
+        assert.equal(brokerOptions.finiteFirstWindowBytes, scenario === 'pilot' ? 64 * 1024 : 0);
+        assert.equal(brokerOptions.finiteSeekLookbehindBytes, (scenario === 'pilot' ? 64 : 256) * 1024);
         const eligible = ['absent', 'disabled', 'pilot'].includes(scenario);
         assert.equal(session.startupTimings.finiteTsIndexUsed, eligible, scenario);
         assert.equal(fetches, eligible || scenario === 'unproven' ? 1 : 0, scenario);
