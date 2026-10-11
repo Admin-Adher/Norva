@@ -307,3 +307,31 @@ La préparation reste désactivée en production. Le portable final, les comptes
 réels, l'entrée authentifiée publique et la validation à l'écoute restent des
 contrôles distincts avant activation ; les lectures natives directes restent
 hors du périmètre de stockage serveur.
+
+### Clôture des contrôles du code natif préparé
+
+Le commit de code `88f6dbd0a4da497fe81edc33be7ce9e615a94185` réussit
+[Build Norva 38173429309](https://github.com/Admin-Adher/Norva/actions/runs/38173429309) :
+**6 540 tests réussis, 39 ignorés**, SQL imposé **50/50**, Worker/SQLite/R2 local
+imposé **15/15**, et les trois constructions Android téléphone, TV et Windows.
+
+La [matrice Android 38173429334](https://github.com/Admin-Adher/Norva/actions/runs/38173429334)
+termine avec **cinq configurations réussies sur six** : les deux TV, téléphone
+gestes aux deux tailles de police, et trois boutons/police 1,3. Trois boutons/
+police 1,0 échoue dans `ownedHttp460RecoversWithoutRepeatingTheRefusedRequest` :
+arrivée au resolver en **1 718 ms**, pour un seuil existant strict de **1 500 ms**.
+Le seuil et la politique de lecture ne sont pas assouplis. Les nouvelles
+assertions de position rendue ne sont pas en échec dans cette matrice.
+
+Le passage précédent, sur des sources Android identiques
+(`1866ede730b448e63bd5c7cdfd80cf6acd2c67d8`, matrice 38172756139), réussissait
+sur trois boutons/police 1,0 mais échouait sur police 1,3 au refus HTML
+(2 219 ms). Ce rejeu contraire ne transforme pas le dernier échec en réussite
+et ne suffit pas à attribuer sa cause : la qualification du délai de récupération
+reste ouverte. Les contrats, constructions et tests de cache ne certifient pas
+à eux seuls une lecture native publique fluide.
+
+Ces résultats clôturent la préparation locale, sans activation. La PR786 reste
+en brouillon, R2 payant désactivé, sans déploiement, migration ou nouveaux essais
+sur les connexions fournisseur. Les derniers changements de rapport et les
+commentaires de l'exemple d'environnement ne modifient pas le code testé.
