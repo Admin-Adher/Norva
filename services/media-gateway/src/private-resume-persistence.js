@@ -39,9 +39,32 @@ class PrivateResumePersistence {
             entry.durableOrigin=true;return entry;
         });
     }
+    async restoreInput(binding, duration, signal) {
+        if (!this.enabled(binding) || signal?.aborted || !Number.isFinite(duration) || duration<=0)return false;
+        const key=scopeFor(binding),fence=this.fences.get(key),cached=this.cache.inputCandidate(binding);
+        if(cached?.format==='native-mp4-input-v1' && (cached.durationSeconds!==duration
+            || resumeWindowDisposition(cached.resumePosition,duration)!=='resume')) {
+            this.retire(binding,cached.createdAt);return false;
+        }
+        if(cached?.durableOrigin && !await this.store.current(binding,cached.createdAt,signal))this.cache.retire(binding);
+        return this.cache.restoreWindow(binding,0,async()=>{
+            const entry=await this.store.get(binding,signal);
+            if(signal?.aborted || this.fences.get(key)!==fence || !entry || entry.createdAt<=(fence ?? -1)
+                || entry.format!=='native-mp4-input-v1' || entry.durationSeconds!==duration
+                || resumeWindowDisposition(entry.resumePosition,duration)!=='resume')return null;
+            entry.durableOrigin=true;return entry;
+        },'resume',true);
+    }
     acquire(binding, position, observed) {
-        const candidate = this.cache.candidate(binding,position);
-        const lease = this.cache.acquire(binding,position,observed);
+        return this.acquireVerified(binding,this.cache.candidate(binding,position),observed,
+            ()=>this.cache.acquire(binding,position,observed));
+    }
+    acquireInput(binding, observed) {
+        return this.acquireVerified(binding,this.cache.inputCandidate(binding),observed,
+            ()=>this.cache.acquireInput(binding,observed));
+    }
+    acquireVerified(binding,candidate,observed,acquire) {
+        const lease = acquire();
         if (!lease && candidate && this.enabled(binding) && (strongResumeIdentity(observed,binding.fileSizeBytes)
             || sampleProof(observed?.samples,observed?.fileSizeBytes,observed?.effectiveUrlIdentitySha256)
             || (Number.isSafeInteger(observed?.fileSizeBytes) && observed.fileSizeBytes !== binding.fileSizeBytes)))
@@ -74,7 +97,16 @@ class PrivateResumePersistence {
     }
     queueWindow(binding, position, duration) {
         if (!this.enabled(binding) || resumeWindowDisposition(position,duration) !== 'resume') return false;
-        const entry = this.cache.candidate(binding,position), key = keyFor(binding), scope=scopeFor(binding);
+        return this.queueSnapshot(binding,this.cache.candidate(binding,position));
+    }
+    queueInput(binding, position, duration) {
+        if (!this.enabled(binding) || resumeWindowDisposition(position,duration)!=='resume')return false;
+        const entry=this.cache.inputCandidate(binding);
+        if(entry?.format!=='native-mp4-input-v1' || entry.resumePosition!==position || entry.durationSeconds!==duration)return false;
+        return this.queueSnapshot(binding,entry);
+    }
+    queueSnapshot(binding, entry) {
+        const key = keyFor(binding), scope=scopeFor(binding);
         if (!entry || entry.capturePurpose !== 'resume' || entry.ended || entry.createdAt <= (this.fences.get(scope) ?? -1)
             || this.tasks.has(key) || this.tasks.size >= this.maxJobs
             || this.cache.bytes+this.cache.reservedBytes+entry.bytes > this.cache.maxBytes) { this.stats.skipped++; return false; }

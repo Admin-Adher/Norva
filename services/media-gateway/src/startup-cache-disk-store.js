@@ -68,31 +68,37 @@ class StartupCacheDiskStore {
         await this.trim(); this.initialized = true;
     }
     validManifest(m) {
+        const native = m?.format==='native-mp4-input-v1';
         if (m?.protocol !== 1 || !validBinding(m.binding)
+            || (m.format!==undefined && !native)
             || !hex(m.preparationKey) || !Number.isSafeInteger(m.createdAt) || m.createdAt > this.now()
             || m.createdAt <= (this.revoked.get(m.binding.ownerKey) ?? -1)
             || !Number.isSafeInteger(m.expiresAt) || m.expiresAt <= m.createdAt
-            || m.expiresAt > m.createdAt + (m.recentProof ? 600_000 : 1_800_000)
+            || m.expiresAt > m.createdAt + (m.recentProof && !m.identity ? 600_000 : 1_800_000)
             || !Number.isSafeInteger(m.retainedUntil ?? m.expiresAt)
             || (m.retainedUntil ?? m.expiresAt) < m.expiresAt
-            || (m.retainedUntil ?? m.expiresAt) > m.createdAt + Math.max(this.retentionMs, m.recentProof ? 600_000 : 1_800_000)
+            || (m.retainedUntil ?? m.expiresAt) > m.createdAt + Math.max(this.retentionMs, m.recentProof && !m.identity ? 600_000 : 1_800_000)
             || (m.retainedUntil ?? m.expiresAt) <= this.now()
             || (m.purpose || 'startup') !== this.purpose || !Number.isFinite(m.start) || m.start<0
             || !Number.isFinite(m.end) || m.ended !== false
-            || (this.purpose==='startup' ? m.start!==0 || !(m.end>=60 && m.end<=90)
-                : !(m.end>m.start && m.end-m.start<=150))
+            || (native ? this.purpose!=='resume' || m.inputOnly!==true
+                || !Number.isFinite(m.durationSeconds) || m.durationSeconds<=0 || m.durationSeconds>86400
+                || !Number.isFinite(m.resumePosition) || m.resumePosition<=0 || m.resumePosition>=m.durationSeconds*0.9
+                || m.start!==m.resumePosition || m.end!==m.resumePosition
+                : this.purpose==='startup' ? m.start!==0 || !(m.end>=60 && m.end<=90)
+                    : !(m.end>m.start && m.end-m.start<=150))
             || !(hex(m.identity) || m.recentProof?.kind === 'sampled-recent-v1')
-            || !Number.isSafeInteger(m.bandwidth) || m.bandwidth <= 0
+            || (!native && (!Number.isSafeInteger(m.bandwidth) || m.bandwidth <= 0))
             || !Number.isSafeInteger(m.bytes) || m.bytes < 1 || m.bytes > this.perFileBytes
-            || !Array.isArray(m.assets) || !m.assets.length || m.assets.length > 512
+            || !Array.isArray(m.assets) || (!native && !m.assets.length) || m.assets.length > 512
             || !Array.isArray(m.inputWindows) || m.inputWindows.length > 512
-            || !Array.isArray(m.segments) || !m.segments.length || m.segments.length > 128
+            || !Array.isArray(m.segments) || (!native && !m.segments.length) || m.segments.length > 128
             || !Array.isArray(m.subtitlePlaylists) || m.subtitlePlaylists.length > 32) return false;
         if (m.storage && (!['plain', 'gzip'].includes(m.storage.codec)
             || !Number.isSafeInteger(m.storage.bytes) || m.storage.bytes < 1 || m.storage.bytes > m.bytes)) return false;
         if (m.recentProof) {
             const proof = m.recentProof;
-            if (m.identity || proof.kind !== 'sampled-recent-v1' || !hex(proof.target)
+            if ((!native && m.identity) || proof.kind !== 'sampled-recent-v1' || !hex(proof.target)
                 || proof.fileSizeBytes !== m.binding.fileSizeBytes || !Array.isArray(proof.ranges)
                 || proof.ranges.length !== 4 || proof.ranges[0]?.start !== 0) return false;
             let end = -1;
@@ -103,6 +109,10 @@ class StartupCacheDiskStore {
                 end = range.start + range.length - 1;
             }
         }
+        // Native MP4 retains exact original ranges, not a fabricated HLS
+        // timeline. The complete header and four samples remain mandatory.
+        if (native && (!m.recentProof || m.assets.length || m.segments.length || m.subtitlePlaylists.length
+            || !m.inputWindows.length || m.inputWindows[0].start!==0 || m.inputWindows[0].length<65536))return false;
         if (m.targetParts && (!['protocol','host','path','queryKeys'].every(key => hex(m.targetParts[key]))
             || Object.keys(m.targetParts).length !== 4)) return false;
         let at = 0;
@@ -156,7 +166,7 @@ class StartupCacheDiskStore {
         const m = this.metadata(binding);
         // An aged sampled proof remains archived, but cannot become a lease.
         // Only a strong validator can be freshly matched after its short TTL.
-        if (!m || (m.recentProof && m.expiresAt <= this.now())) return null;
+        if (!m || (m.recentProof && !m.identity && m.expiresAt <= this.now())) return null;
         try {
             const stored = await this.readFile(path.join(this.root,m.directory,'payload.bin'), this.perFileBytes);
             if (stored.length !== (m.storage?.bytes ?? m.bytes)) throw Error('incomplete-storage');
@@ -172,7 +182,7 @@ class StartupCacheDiskStore {
     async decode(binding, m, stored) {
         if (!this.validManifest(m) || keyFor(m.binding) !== keyFor(binding)
             || !Buffer.isBuffer(stored) || stored.length !== (m.storage?.bytes ?? m.bytes)
-            || (m.recentProof && m.expiresAt <= this.now())) return null;
+            || (m.recentProof && !m.identity && m.expiresAt <= this.now())) return null;
         const payload = m.storage?.codec === 'gzip'
             ? await gunzip(stored, { maxOutputLength: m.bytes }) : stored;
         if (payload.length !== m.bytes) throw Error('incomplete-payload');
@@ -228,6 +238,8 @@ class StartupCacheDiskStore {
             segments:entry.segments,subtitlePlaylists:[...entry.subtitlePlaylists],
             assets:descriptors.slice(0,entry.assets.size),inputWindows:descriptors.slice(entry.assets.size)};
         if(this.purpose==='resume')manifest.purpose='resume';
+        if(entry.format==='native-mp4-input-v1')Object.assign(manifest,{format:entry.format,inputOnly:true,
+            resumePosition:entry.resumePosition,durationSeconds:entry.durationSeconds});
         if (this.retentionMs) manifest.retainedUntil = Math.max(entry.expiresAt, entry.createdAt+this.retentionMs);
         if (!this.validManifest(manifest)) return false;
         // Count the manifest as well as media against the disk quotas. The

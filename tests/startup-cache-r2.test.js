@@ -189,3 +189,32 @@ test('resume A is physically removed after progress, replaced by B, and absent i
  assert.equal(await h.makeStore(h.disk).get(startupBinding(binding))!==null,true);
  assert.equal(p.queueWindow(alternate,950,1000),false);
 });
+
+test('native MP4 A/B lifecycle survives the actual local R2/SQLite restart with exact compressed bytes',{skip:!Miniflare},async t=>{
+ const h=await fixture(t);assert.equal(await h.capture(),true);
+ const disk=new StartupCacheDiskStore({root:path.join(h.root,'native-staging'),purpose:'resume',maxBytes:8*1024**2,
+  perOwnerBytes:2*1024**2,perFileBytes:1024**2,reserveFreeBytes:1,retentionMs:7*86400_000,now:()=>h.now});await disk.initialize();
+ const N=65536,data=Buffer.alloc(8*N,7),b={...binding,fileSizeBytes:data.length,profileHash:'f'.repeat(64)};
+ const samples=[0,N,2*N,3*N].map(start=>({start,payload:data.subarray(start,start+N)}));
+ const proof={...observed,fileSizeBytes:data.length,samples};
+ const makeCache=()=>new PrivateResumeHlsCache({maxBytes:4*1024**2,perFileBytes:1024**2,recentRevalidation:true,now:()=>h.now});
+ const c=makeCache(),store=h.makeStore(disk),p=new PrivateResumePersistence({cache:c,store,allowsOwner:o=>o===owner});
+ const capture=position=>c.captureInput({binding:b,observed:proof,inputWindows:[{start:0,payload:data}],nativeResume:{position,duration:1000}});
+ assert.equal(capture(110),true);assert.equal(p.queueInput(b,110,1000),true);await p.drained();assert.equal(p.status().stored,1);
+ const record=[...store.index.values()][0];assert.equal(record.envelope.manifest.format,'native-mp4-input-v1');
+ assert.ok(record.envelope.payloadBytes<data.length);assert.equal(disk.status().entries,0);
+ await h.restart();const c2=makeCache(),s2=h.makeStore(disk),p2=new PrivateResumePersistence({cache:c2,store:s2,allowsOwner:()=>true});
+ assert.equal(await p2.restoreInput(b,1000),true);
+ const live=p2.acquireInput(b,proof);assert.ok(live);assert.deepEqual(live.inputSnapshot().windows[0].payload,data);
+ assert.equal(await s2.get({...b,ownerKey:'e'.repeat(64)}),null);
+ h.setNow(h.now+1);p.progress(b,111,110,1000);await p.drained();
+ assert.equal((await(await h.mf.getR2Bucket('STARTUP_PREFIX_BUCKET')).list()).objects.length,2,'only distinct startup objects remain');
+ assert.deepEqual(live.inputSnapshot().windows[0].payload,data,'A retirement does not interrupt current input');live.release();
+ assert.equal(await p2.restoreInput(b,1000),false,'another Gateway cannot resurrect its cached A');
+ h.setNow(h.now+1);assert.equal(capture(210),true);assert.equal(p.queueInput(b,210,1000),true);await p.drained();
+ await h.restart();const c3=makeCache(),s3=h.makeStore(disk),p3=new PrivateResumePersistence({cache:c3,store:s3,allowsOwner:()=>true});
+ assert.equal(await p3.restoreInput(b,1000),true);assert.equal(c3.inputCandidate(b).resumePosition,210);
+ h.setNow(h.now+1);p3.progress(b,900,210,1000);await p3.drained();
+ assert.equal(await s3.get(b),null);assert.equal(capture(900),false);assert.equal(p.queueInput(b,900,1000),false);
+ assert.ok(await h.store.get(startupBinding(binding)),'first minute remains independent');
+});

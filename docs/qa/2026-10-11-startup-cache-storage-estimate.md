@@ -183,7 +183,7 @@ Le plan de raccordement privé R2, les admissions, l'ordre de priorité et les
 conditions d'activation sont détaillés dans
 [`ops/hetzner/media/startup-cache-durable-plan.md`](../../ops/hetzner/media/startup-cache-durable-plan.md).
 Le transport R2 privé, son index transactionnel commun, la file globale et
-le raccord des reprises HLS sont désormais **implémentés dans la branche**, en
+le raccord des reprises HLS et MP4 natif web sont désormais **implémentés dans la branche**, en
 brouillon et désactivés. Les preuves et limites actuelles sont dans le
 [rapport d'intégration](2026-10-11-private-cache-r2-integration.md).
 
@@ -191,7 +191,8 @@ La rétention des objets peut atteindre sept jours ; elle est distincte de la
 preuve fraîche autorisant leur lecture. Une identité forte peut être vérifiée
 à nouveau avant utilisation d'une archive de plusieurs jours. La preuve par
 quatre échantillons reste limitée à **10 minutes**, et ne devient pas un hash
-du fichier entier. Les routes MP4 natives par plages restent à raccorder.
+du fichier entier. Pour l'archive MP4 native âgée, ETag fort et échantillons
+actuels doivent tous concorder avant réutilisation.
 
 ## Dimensionnement des fenêtres de reprise
 
@@ -218,6 +219,15 @@ en-têtes d'input (jusqu'à 8 Mio) et sous-titres (jusqu'à 4 Mio), manifestes,
 staging et opérations ajoutent du stockage ou du coût. Les Workers/Durable
 Objects facturent également leur travail et leurs métadonnées selon le plan.
 Ces montants ne sont pas un budget accepté et ne justifient aucune activation.
+
+Le MP4 natif web conserve les **octets originaux**, sans imposer une compression
+vidéo avec perte ni un débit de 2 Mbit/s. Son plafond actuel est **32 Mio** par
+fenêtre, plutôt qu'une durée garantie de 48 secondes. Avec le même scénario
+de 820 fenêtres, la borne de payload est donc **27,51 Go** avant compression,
+soit environ **0,41 $/mois** de stockage seul, hors manifestes et autres frais.
+Sur l'extrait réel remuxé en MP4, la compression sans perte économise 4,57 %
+(541 677 → 516 902 octets), avec restitution et décodage identiques. Ce taux
+n'est pas appliqué aux estimations globales.
 
 Sur un extrait réel conservé de 12 secondes, l'archive gzip passe de **599 908
 à 527 028 octets** : **12,15 %** économisés. Compression 9,59 ms, restauration

@@ -3827,6 +3827,16 @@ class WatchPage {
         this._cloudPlaybackHeartbeatInFlight = false;
     }
 
+    nativeResumeRenderedPosition(sessionId) {
+        const video=this.video;
+        if (!video || video.readyState<2 || video.seeking || !Number.isFinite(video.currentTime)
+            || video.currentTime<0 || video.currentTime>=86400)return undefined;
+        try {
+            const source=new URL(video.currentSrc || video.src,window.location?.href || 'https://norva.invalid/');
+            return source.pathname.endsWith(`/sessions/${sessionId}/native.mp4`) ? video.currentTime : undefined;
+        } catch (_) {return undefined;}
+    }
+
     startCloudPlaybackHeartbeat(sessionId) {
         this.stopCloudPlaybackHeartbeat();
         const id = String(sessionId || '').trim();
@@ -3845,7 +3855,7 @@ class WatchPage {
 
             this._cloudPlaybackHeartbeatInFlight = true;
             try {
-                await heartbeat(id);
+                await heartbeat(id,this.nativeResumeRenderedPosition(id));
                 if (generation === this._cloudPlaybackHeartbeatGeneration && this.currentCloudPlaybackSessionId === id) {
                     await window.NorvaDesktop?.nativePlayer?.authorize?.(id);
                 }

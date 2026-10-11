@@ -40,8 +40,15 @@ async function verifyEnvelope(envelope, env) {
         || !Number.isSafeInteger(b.fileSizeBytes) || b.fileSizeBytes<1 || !hex(m.preparationKey)
         || m.protocol!==1 || !['startup','resume'].includes(m.purpose || 'startup')
         || !Number.isFinite(m.start) || m.start<0 || !Number.isFinite(m.end) || m.ended!==false
-        || ((m.purpose || 'startup')==='startup' ? m.start!==0 || !(m.end>=60 && m.end<=90)
-            : !(m.end>m.start && m.end-m.start<=150))
+        || (m.format!==undefined && m.format!=='native-mp4-input-v1')
+        || (m.format==='native-mp4-input-v1' ? m.purpose!=='resume' || m.inputOnly!==true
+            || !Number.isFinite(m.durationSeconds) || m.durationSeconds<=0 || m.durationSeconds>86400
+            || !Number.isFinite(m.resumePosition) || m.resumePosition<=0 || m.resumePosition>=m.durationSeconds*0.9
+            || m.start!==m.resumePosition || m.end!==m.resumePosition
+            || m.assets?.length!==0 || m.segments?.length!==0 || m.subtitlePlaylists?.length!==0
+            || !m.recentProof || !Array.isArray(m.inputWindows) || !m.inputWindows.length
+            : (m.purpose || 'startup')==='startup' ? m.start!==0 || !(m.end>=60 && m.end<=90)
+                : !(m.end>m.start && m.end-m.start<=150))
         || !Number.isSafeInteger(m.createdAt) || m.createdAt>Date.now()+30_000
         || !Number.isSafeInteger(m.retainedUntil ?? m.expiresAt)
         || (m.retainedUntil ?? m.expiresAt)<=Date.now()

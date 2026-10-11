@@ -1290,12 +1290,12 @@
     // Playback takeover liveness is owned only by norva-playback. Falling back
     // to norva-cloud on 404/405 would hide a partial rollout and let an older
     // browser continue after another device has claimed the provider account.
-    function playbackHeartbeatRequest(id, options = {}) {
+    function playbackHeartbeatRequest(id, options = {}, renderedPosition) {
         return requestToBase(
             playbackBase(),
             'POST',
             `/playback/sessions/${encodeURIComponent(id)}/heartbeat`,
-            null,
+            Number.isFinite(renderedPosition) && renderedPosition>=0 && renderedPosition<86400 ? {renderedPosition} : null,
             options
         );
     }
@@ -5120,7 +5120,7 @@
             queueLanguageValidation: queuePlaybackLanguageValidation,
             validateLanguages: validatePlaybackLanguages,
             getSession: (id) => playbackSessionRequest('GET', `/playback/sessions/${encodeURIComponent(id)}`),
-            heartbeatSession: (id) => playbackHeartbeatRequest(id),
+            heartbeatSession: (id, position) => playbackHeartbeatRequest(id, {}, position),
             refreshMediaCacheTicket: (id, objectKey) => playbackMediaCacheTicketRequest(id, objectKey),
             expireSession: (id, options = {}) => playbackExpiryRequest(id, options),
             reportProviderFailure: (id, failure) => playbackSessionRequest(
@@ -5207,7 +5207,7 @@
                     session,
                     { ...options, token: getDeviceToken() }
                 ),
-                heartbeatSession: (id) => playbackHeartbeatRequest(id, { token: getDeviceToken() }),
+                heartbeatSession: (id, position) => playbackHeartbeatRequest(id, { token: getDeviceToken() }, position),
                 refreshMediaCacheTicket: (id, objectKey) => playbackMediaCacheTicketRequest(
                     id,
                     objectKey,

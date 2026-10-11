@@ -77,7 +77,7 @@ historique de visionnage n'est écrit.
 
 ## Reprises : A → B et fin de VOD
 
-`PrivateResumePersistence` raccorde les captures HLS ordinaires au même
+`PrivateResumePersistence` raccorde les captures HLS et les plages MP4 natif web au même
 stockage, dans un espace distinct, avec une option propre. Données déjà lues
 uniquement : aucune deuxième connexion fournisseur ni deuxième décodage complet.
 
@@ -96,6 +96,16 @@ uniquement : aucune deuxième connexion fournisseur ni deuxième décodage compl
   Le quota n'est libéré qu'après confirmation de la suppression physique.
 - Durée inconnue : pas de nouvel archivage long de reprise. Le cache mémoire
   ordinaire conserve ses règles lorsque ce raccord est désactivé.
+
+Pour `native-browser-mp4`, l'archive `native-mp4-input-v1` conserve les plages
+originales complètes (jusqu'à 32 Mio), avec en-tête et quatre échantillons.
+Le heartbeat authentifié de la session transmet la position réellement
+affichée, sans interpréter le prefetch du navigateur comme une progression.
+L'archive ne revendique pas une durée de buffer calculée à partir des octets.
+Une preuve faible reste limitée à dix minutes ; une archive âgée avec ETag fort
+exige l'ETag, la taille, la cible et quatre échantillons fraîchement concordants.
+La durée provient du profil signé serveur. Les autres caches d'input, les voies
+natives Android/Windows et les profils incomplets restent à traiter séparément.
 
 ## Configuration inactive
 
@@ -120,8 +130,9 @@ Ne pas les utiliser pour déployer maintenant.
    Miniflare/PGlite ne valident ni la configuration Cloudflare ni la charge réelle.
 3. MKV, MPEG-TS et MP4 sur route HLS : départ, reprise, sauts, pistes, continuation
    au-delà du cache, suppression à 90 %, redémarrage et révocation.
-4. La route **MP4 native par plages d'octets** et les caches conservant seulement
-   l'input ne sont pas raccordés à ces archives HLS : travail distinct nécessaire.
+4. MP4 natif web : reprise A/B, heartbeat/fermeture, 90 %, révocation entre
+   comptes, plusieurs instances, redémarrage et réception au-delà des plages
+   conservées. Le raccord est testé en isolation ; canary public reste requis.
 5. Invalidations de source et de compte, livraison changeante, durée absente et
    preuves échantillonnées à valider sur copies réelles.
 6. Écoute et sous-titres réels. L'égalité des octets prouve la transparence de gzip,

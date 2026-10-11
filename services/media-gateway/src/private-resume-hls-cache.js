@@ -113,9 +113,17 @@ class PrivateResumeHlsCache {
     }
     revokeOwner(ownerKey) {
         this.epoch++;
+        this.ownerRevocationEpochs ||= new Map();this.ownerRevocationFloor ||= 0;
+        if(!this.ownerRevocationEpochs.has(ownerKey) && this.ownerRevocationEpochs.size>=8192) {
+            this.ownerRevocationEpochs.clear();this.ownerRevocationFloor++;
+        }
+        this.ownerRevocationEpochs.set(ownerKey,(this.ownerRevocationEpochs.get(ownerKey) || 0)+1);
         for (const [key, entry] of this.entries) if (entry.binding.ownerKey === ownerKey) {
             this.drop(key, entry); this.stats.invalidations++;
         }
+    }
+    ownerRevocationStamp(ownerKey) {
+        return `${this.ownerRevocationFloor || 0}:${this.ownerRevocationEpochs?.get(ownerKey) || 0}`;
     }
     candidate(binding, position) {
         this.prune();
@@ -129,9 +137,10 @@ class PrivateResumeHlsCache {
     async restoreStartup(binding, load) {
         return this.restoreWindow(binding,0,load,'startup');
     }
-    async restoreWindow(binding, position, load, purpose = 'resume') {
+    async restoreWindow(binding, position, load, purpose = 'resume', inputOnly = false) {
         if (!['resume','startup'].includes(purpose) || !binding || !Number.isFinite(position) || position<0) return false;
-        if (this.hasCandidate(binding,position)) return true;
+        const candidate=()=>inputOnly ? this.inputCandidate(binding) : this.candidate(binding,position);
+        if (candidate()) return true;
         const epoch=this.epoch, reservation=2*this.perFileBytes;
         this.prune();
         while (this.entries.size>=this.maxEntries || this.bytes+this.reservedBytes+reservation>this.maxBytes) {
@@ -144,11 +153,12 @@ class PrivateResumeHlsCache {
             const entry=await load();
             if (!entry || epoch!==this.epoch || keyFor(entry.binding)!==keyFor(binding)
                 || entry.capturePurpose!==purpose || entry.retired || entry.bytes>this.perFileBytes || entry.expiresAt<=this.now()
-                || position<entry.start || position>=entry.end || (!entry.ended && entry.end-position<this.minimumAheadSeconds)
+                || (inputOnly ? !entry.inputOnly || entry.format!=='native-mp4-input-v1'
+                    : entry.inputOnly || position<entry.start || position>=entry.end || (!entry.ended && entry.end-position<this.minimumAheadSeconds))
                 || this.entries.size>=this.maxEntries
-                || this.entries.has(keyFor(binding))) return this.hasCandidate(binding,position);
+                || this.entries.has(keyFor(binding))) return Boolean(candidate());
             this.entries.set(keyFor(binding),entry);this.bytes+=entry.bytes;
-            return this.hasCandidate(binding,position);
+            return Boolean(candidate());
         } finally {this.reservedBytes-=reservation;}
     }
     inputCandidate(binding) {
@@ -177,7 +187,7 @@ class PrivateResumeHlsCache {
             && entry.recentProof.target !== observed?.effectiveUrlIdentitySha256
             && recentResumeTargetEligible({ target: entry.recentProof.target, targetParts: entry.targetParts,
                 allowDeliveryPathRenewal: true }, observed);
-        const matches = entry.recentProof ? this.recentRevalidation && samplesMatch(entry.recentProof,
+        const matches = entry.recentProof ? (!entry.identity || identity===entry.identity) && this.recentRevalidation && samplesMatch(entry.recentProof,
             observed?.samples, observed?.fileSizeBytes, observed?.effectiveUrlIdentitySha256, { allowPathRenewal: pathRenewal === true })
             : identity && identity === entry.identity;
         if (entry.recentProof) {
@@ -222,7 +232,10 @@ class PrivateResumeHlsCache {
             release: () => { if (!released) { released = true; entry.leases--; this.prune(); } },
         });
     }
-    captureInput({ binding, observed, inputWindows } = {}) {
+    captureInput({ binding, observed, inputWindows, nativeResume = null } = {}) {
+        if (nativeResume && (!Number.isFinite(nativeResume.position) || nativeResume.position<=0
+            || !Number.isFinite(nativeResume.duration) || nativeResume.duration<=0 || nativeResume.duration>86400
+            || nativeResume.position>=nativeResume.duration*0.9)) return this.rejectCapture('native-resume-ending-or-unknown');
         if (!this.recentRevalidation || !binding || observed?.fileSizeBytes !== binding.fileSizeBytes)
             return this.rejectCapture('input-ineligible');
         const recentProof = sampleProof(observed.samples, observed.fileSizeBytes, observed.effectiveUrlIdentitySha256);
@@ -246,9 +259,13 @@ class PrivateResumeHlsCache {
                 return this.rejectCapture('input-header-unavailable');
             const bytes = windows.reduce((n,w) => n + w.payload.length, 0);
             if (prior) this.drop(key, prior);
+            const identity=nativeResume ? strongResumeIdentity(observed,binding.fileSizeBytes) : null;
             this.entries.set(key, { binding, recentProof, targetParts: observed.targetParts, deliveryTarget: observed.deliveryTarget, inputOnly: true, inputWindows: windows,
                 assets: new Map(), subtitlePlaylists: new Map(), bytes, leases: 0, live: true,
-                expiresAt: this.now() + Math.min(this.ttlMs, RECENT_TTL_MS) });
+                ...(nativeResume ? {format:'native-mp4-input-v1',capturePurpose:'resume',createdAt:this.now(),
+                    resumePosition:nativeResume.position,durationSeconds:nativeResume.duration,
+                    start:nativeResume.position,end:nativeResume.position,ended:false,segments:[],identity} : {}),
+                expiresAt: this.now() + (identity ? this.ttlMs : Math.min(this.ttlMs, RECENT_TTL_MS)) });
             this.bytes += bytes; this.stats.inputStores++;
             return true;
         } finally { this.reservedBytes -= reservation; }

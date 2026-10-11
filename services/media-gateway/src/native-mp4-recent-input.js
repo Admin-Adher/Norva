@@ -1,7 +1,7 @@
 'use strict';
 const { validateRecentResume } = require('./recent-resume-validation');
 
-async function revalidateNativeRecentInput({ cache, binding, scope, signal, createBroker } = {}) {
+async function revalidateNativeRecentInput({ cache, persistence = null, binding, scope, signal, createBroker } = {}) {
     const plan = binding && cache.inputRevalidationPlan(binding);
     if (!plan) return null;
     let identity = null, handoff = null;
@@ -14,7 +14,7 @@ async function revalidateNativeRecentInput({ cache, binding, scope, signal, crea
     // private bytes merely because this attempt timed out. Their TTL remains
     // unchanged; another ordinary opening still needs all four fresh samples.
     if (signal?.aborted || !samples || !identity) return null;
-    const lease = cache.acquireInput(binding, { ...identity, samples, fileSizeBytes: binding.fileSizeBytes });
+    const lease = (persistence || cache).acquireInput(binding, { ...identity, samples, fileSizeBytes: binding.fileSizeBytes });
     if (!lease) return null;
     try { return { lease, snapshot: lease.inputSnapshot(), handoff }; }
     catch (error) { lease.release(); throw error; }

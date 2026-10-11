@@ -433,12 +433,12 @@
         }
     }
 
-    function playbackHeartbeatRequest(id, options = {}) {
+    function playbackHeartbeatRequest(id, options = {}, renderedPosition) {
         return requestToBase(
             playbackBase(),
             'POST',
             `/playback/sessions/${encodeURIComponent(id)}/heartbeat`,
-            null,
+            Number.isFinite(renderedPosition) && renderedPosition>=0 && renderedPosition<86400 ? {renderedPosition} : null,
             options
         );
     }
@@ -590,7 +590,7 @@
 
         playback: {
             createSession: (session) => playbackRequest(session),
-            heartbeatSession: (id) => playbackHeartbeatRequest(id),
+            heartbeatSession: (id, position) => playbackHeartbeatRequest(id, {}, position),
             getSession: (id) => playbackSessionRequest('GET', `/playback/sessions/${encodeURIComponent(id)}`),
             expireSession: (id) => playbackSessionRequest('POST', `/playback/sessions/${encodeURIComponent(id)}/expire`),
             event: (event) => playbackSessionRequest('POST', '/playback/events', event),
@@ -632,7 +632,7 @@
             },
             playback: {
                 createSession: (session) => playbackRequest(session, { token: getDeviceToken() }),
-                heartbeatSession: (id) => playbackHeartbeatRequest(id, { token: getDeviceToken() }),
+                heartbeatSession: (id, position) => playbackHeartbeatRequest(id, { token: getDeviceToken() }, position),
                 event: (event) => playbackSessionRequest('POST', '/playback/events', event, { token: getDeviceToken() }),
                 summary: (params = {}) => playbackSessionRequest('GET', `/telemetry/summary${query(params)}`, null, { token: getDeviceToken() })
             }

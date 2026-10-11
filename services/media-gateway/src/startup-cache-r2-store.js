@@ -111,7 +111,7 @@ class StartupCacheR2Store {
             if(!record)return null;
             this.verify(record,binding);this.remember(record);
             const m=record.envelope.manifest;
-            if(m.recentProof && m.expiresAt<=this.disk.now())return null;
+            if(m.recentProof && !m.identity && m.expiresAt<=this.disk.now())return null;
             const bytes=await this.request(record.id+'/payload',null,{binary:true,timeoutMs:3000,signal});
             if(bytes.length!==record.envelope.payloadBytes || hash(bytes)!==record.envelope.payloadDigest)throw Error('STARTUP_R2_CORRUPT');
             // A concurrent owner revocation during the download fences hydration.

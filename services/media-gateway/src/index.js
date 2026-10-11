@@ -4388,6 +4388,7 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 sourceId: claims.resumeSourceId, sourceRevision: claims.resumeSourceRevision,
                 fileSizeBytes: claims.fileSizeBytes, profile: 'native-browser-mp4-input-v1' }) : null;
         const nativeCacheEpoch = privateResumeHlsCache.epoch;
+        const nativeOwnerRevocationStamp=privateResumeHlsCache.ownerRevocationStamp(entry.ownerHash);
         const nativeFreshScope = { id: entry.sid };
         try {
             const reason = `native MP4 ${entry.sid.slice(0, 8)}`;
@@ -4418,7 +4419,9 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 fileSizeBytes: claims.fileSizeBytes, signal: entry.ac.signal,
             }));
             if (nativeCacheBinding) {
+                await privateResumePersistence.restoreInput(nativeCacheBinding,claims.durationSeconds,entry.ac.signal);
                 nativeRecent = await revalidateNativeRecentInput({ cache: privateResumeHlsCache,
+                    persistence:privateResumePersistence,
                     binding: nativeCacheBinding, scope: nativeFreshScope, signal: entry.ac.signal,
                     createBroker: (signal, onProviderIdentity, scope, plan) => createStrictLidBroker({
                         sourceUrl: claims.url, fileSizeBytes: claims.fileSizeBytes, userAgent: claims.ua,
@@ -4494,13 +4497,28 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 broker.seedRecentInput(nativeRecent.snapshot, 32 * 1024 * 1024);
             }
             let nativeStopSnapshot = null;
+            const nativeDurable=privateResumePersistence.enabled(nativeCacheBinding);
+            const initialPosition=privateResumeHlsCache.inputCandidate(nativeCacheBinding)?.resumePosition
+                ?? entry.initialRenderedPosition;
+            let initialRenderedPosition=initialPosition,retired=false,terminal=false;
+            const reportNativePosition=position=>{
+                if(!nativeDurable || !Number.isFinite(position) || position<0 || position>=86400)return;
+                initialRenderedPosition ??= position;
+                terminal=resumeWindowDisposition(position,claims.durationSeconds)==='finished';
+                if(!retired && privateResumePersistence.progress(nativeCacheBinding,position,initialRenderedPosition,claims.durationSeconds)) {
+                    retired=true;
+                }
+            };
             const prepareNativeClose = reason => {
+                reportNativePosition(entry.renderedPosition);
                 if (reason === 'viewer-stop' && nativeCacheBinding && !nativeStopSnapshot) {
+                    if(nativeDurable && (terminal || resumeWindowDisposition(entry.renderedPosition,claims.durationSeconds)!=='resume'))return;
                     nativeStopSnapshot = { samples: broker.snapshotRecentSamples(), windows: broker.snapshotNativeMp4Input() };
                 }
             };
             return { inputUrl: broker.inputUrl,
                 prepareClose: prepareNativeClose,
+                reportPosition:reportNativePosition,
                 cachedCoverage: target => broker.cachedMp4Coverage(target), close: async reason => {
                 prepareNativeClose(reason);
                 const samples = nativeStopSnapshot?.samples;
@@ -4509,11 +4527,14 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                     await broker.close(reason);
                     nativeRecent?.lease.release();
                     if (reason === 'viewer-stop' && nativeIdentity && samples && !broker.terminalError
-                        && nativeCacheEpoch === privateResumeHlsCache.epoch) {
-                        privateResumeHlsCache.captureInput({ binding: nativeCacheBinding,
+                        && (nativeDurable ? nativeOwnerRevocationStamp===privateResumeHlsCache.ownerRevocationStamp(entry.ownerHash)
+                            : nativeCacheEpoch===privateResumeHlsCache.epoch)) {
+                        const captured=privateResumeHlsCache.captureInput({ binding: nativeCacheBinding,
                             observed: { ...nativeIdentity, samples, fileSizeBytes: claims.fileSizeBytes,
                                 deliveryTarget: broker.retainDeliveryTarget({ ownerKey: entry.ownerHash,
-                                    routeKey: nativeRouteKey }) }, inputWindows: windows });
+                                    routeKey: nativeRouteKey }) }, inputWindows: windows,
+                            ...(nativeDurable ? {nativeResume:{position:entry.renderedPosition,duration:claims.durationSeconds}} : {}) });
+                        if(captured && nativeDurable)privateResumePersistence.queueInput(nativeCacheBinding,entry.renderedPosition,claims.durationSeconds);
                     }
                 }
                 finally {
@@ -4555,6 +4576,7 @@ app.post('/native-sessions', requireGatewayAuth, (req, res) => {
 app.post('/native-sessions/:id/heartbeat', requireGatewayAuth, (req, res) => {
     try {
         nativeMp4Sessions.heartbeat(req.params.id, req.body?.ownerKey);
+        if(typeof req.body?.renderedPosition==='number')nativeMp4Sessions.reportPosition(req.params.id,req.body.ownerKey,req.body.renderedPosition);
         res.json({ ok: true });
     } catch (error) { res.status(error.status || 503).json({ error: 'Native media session unavailable' }); }
 });
@@ -13515,7 +13537,9 @@ app.delete('/raw-pumps', requireGatewayAuth, async (req, res) => {
     }
     // Marks ordinary stop vs owner revocation and snapshots only complete
     // native input synchronously before the pump's abort drains its cache.
-    const nativeRevocation = nativeMp4Sessions.revoke(ownerKey, sid, globalCleanup);
+    const positionValue=req.query?.resumePosition;
+    const resumePosition=typeof positionValue==='string' && positionValue.trim()!=='' ? Number(positionValue) : null;
+    const nativeRevocation = nativeMp4Sessions.revoke(ownerKey, sid, globalCleanup,resumePosition);
     const aborted = abortRawPumps(
         (p) => p.ownerHash === ownerKey && (globalCleanup || p.sid === sid),
         null,

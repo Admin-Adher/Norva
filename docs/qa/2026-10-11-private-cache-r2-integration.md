@@ -4,7 +4,7 @@
 
 La branche `codex/global-startup-durable-20261011` / PR786 prépare le transport
 R2 privé et la file globale des premières minutes, avec compression sans perte.
-Elle raccorde aussi les captures **HLS de reprise** et la règle demandée A → B,
+Elle raccorde aussi les captures **HLS et MP4 natif web de reprise** et la règle demandée A → B,
 avec suppression à partir de 90 % de la durée connue.
 
 **Tout reste désactivé, sans activation R2 payante.** Aucun vrai bucket, secret,
@@ -12,9 +12,10 @@ migration de production, upload R2 ou changement de trajet fournisseur. Les
 tests de stockage utilisent Miniflare local ; la migration SQL tourne dans
 PGlite isolé. Aucun compte fournisseur n'est ouvert pour ces contrôles.
 
-Les routes MP4 natives par plages d'octets et les caches conservant seulement
-l'input ne sont pas des archives HLS : ils ne sont pas raccordés à cette
-persistance. Aucun gain public de démarrage ou de fluidité n'est annoncé ici.
+Le MP4 natif web utilise une archive de plages originales, distincte du graphe
+HLS. Les autres caches d'input seuls, les lectures natives Android/Windows et
+les profils incomplets restent hors de ce raccord. Aucun gain public de
+démarrage ou de fluidité n'est annoncé ici.
 
 ## Première minute et file globale
 
@@ -145,5 +146,67 @@ Le plan et les variables inactives sont dans
 [`ops/hetzner/media/startup-cache-durable-plan.md`](../../ops/hetzner/media/startup-cache-durable-plan.md).
 Le [chiffrage de stockage](2026-10-11-startup-cache-storage-estimate.md) ne vaut
 pas autorisation d'achat. Restent avant activation : budget accepté, vrai canary
-Cloudflare/claims/lecteur, routes MP4 natives, diversité des fichiers et des
+Cloudflare/claims/lecteur avec les routes MP4 natives, diversité des fichiers et des
 invalidations, écoute, débit durable, coûts d'opérations et charge du catalogue.
+
+## Suite : persistance MP4 natif web
+
+Le raccord prépare maintenant la persistance des fenêtres d'entrée utilisées
+par la route `native-browser-mp4`. Il réutilise les plafonds, la compression,
+la signature, les quotas et la barrière de retrait du même transport privé.
+Les options R2 et persistance restent toutes désactivées.
+
+- Format explicite `native-mp4-input-v1` : aucune playlist HLS ni durée de vidéo
+  disponible inventée à partir d'un nombre d'octets. En-tête complet et quatre
+  échantillons requis ; plages déjà complètes et reçues, avec budget actuel
+  jusqu'à 32 Mio. Aucun téléchargement complémentaire à la fermeture.
+- Le heartbeat de WatchPage rapporte le temps de la balise média, uniquement
+  pour son propre URL/session MP4, lorsque la vidéo est chargée et hors saut.
+  Le serveur vérifie utilisateur, session active et droits avant transmission.
+  Un heartbeat n'ouvre aucun média. La fermeture transmet aussi la position.
+- La progression supprime A du stockage et des reprises futures. La copie
+  locale déjà utilisée poursuit la lecture. B est capturé après drainage et
+  son upload ne retarde pas la libération du slot fournisseur.
+- À 90 %, fin, position absente/zéro ou durée inconnue : aucun nouvel archivage.
+  Le préfixe initial reste indépendant. Une révocation du propriétaire interdit
+  B ; une révocation d'un autre compte ne le supprime pas. La table de stamps
+  est bornée ; sa saturation provoque des refus, jamais une réutilisation indue.
+- Après redémarrage, une archive faible garde la limite de dix minutes. Une
+  archive native avec ETag fort peut être révalidée plus tard : identité forte
+  **et quatre échantillons frais** doivent tous concorder avant le lease. La
+  durée doit correspondre à celle du profil serveur signé actuel.
+
+Le test Miniflare rejoue A → suppression physique → B → redémarrage → 90 %
+avec le vrai Worker, SQLite et R2 locaux ; il vérifie les octets restitués,
+le quota partagé, le refus d'une ancienne A déjà hydratée sur un autre Gateway
+et la conservation distincte de la première minute. Le test du parcours de
+fermeture utilise le vrai code Gateway avec transport isolé : drainage,
+upload lent, position finale et révocations du même/autre compte.
+
+**270 tests ciblés réussis, aucun ignoré**, avec Miniflare et la migration SQL
+réellement chargés. **191 tests réussis, aucun ignoré**, dans l'image Gateway
+Node 20 déployée, réseau coupé, un CPU, 384 Mio et deux workers de test.
+Ces contrôles couvrent aussi les règles HLS et les chemins historiques.
+Le contrôle CI complet du commit exact reste distinct de ces suites ciblées.
+
+Un extrait réel déjà conservé a été remuxé en MP4 **sans réencodage**, hors réseau :
+H.264 High / AAC-LC, 12,075 secondes. La vraie classe de cache le conserve,
+le recharge après redémarrage, puis vérifie ses octets et sa sortie décodée.
+
+| Contrôle MP4 | Résultat |
+| --- | ---: |
+| Original | 541 677 octets |
+| Stockage gzip | 516 902 octets |
+| Économie sur cet extrait | **4,57 %** |
+| Octets après restauration | identiques |
+| Sorties vidéo et audio décodées | identiques, aucun échec ni erreur de décodage |
+
+Ce résultat ne prouve ni une reprise rapide dans le lecteur public, ni une
+économie de 4,57 % sur le catalogue entier, ni la qualité à l'écoute. Le cache
+ne garantit pas que les plages conservées couvrent une minute autour de tout
+saut. Les premiers préchargements MP4 natifs restent distincts du préfixe HLS.
+
+Preuves de cette suite sous `.codex-artifacts/startup-cache-20261010/` :
+`native-durable-regression.local.log`, `native-durable-linux.safe.json`,
+`native-resume-real.remote.py.safe.json`. PR786 reste en brouillon, sans
+migration ni déploiement de production, ni connexion fournisseur supplémentaire.

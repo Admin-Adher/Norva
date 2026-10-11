@@ -550,7 +550,10 @@ async function handleRequest(req: Request): Promise<Response> {
       !segments[4]
     ) {
       const identity = await requireIdentity(req, supabase);
-      return json(req, await heartbeatPlaybackSession(segments[2], identity.userId, supabase));
+      const body=await req.json().catch(()=>null);
+      const renderedPosition=typeof body?.renderedPosition==='number' && Number.isFinite(body.renderedPosition)
+        && body.renderedPosition>=0 && body.renderedPosition<86400 ? body.renderedPosition : null;
+      return json(req, await heartbeatPlaybackSession(segments[2], identity.userId, supabase, renderedPosition));
     }
     if (
       req.method === "POST" &&
@@ -6495,7 +6498,7 @@ async function getPlaybackSession(id: string, userId: string, db: SupabaseClient
   return { session: publicPlaybackSession(data) };
 }
 
-async function heartbeatPlaybackSession(id: string, userId: string, db: SupabaseClient) {
+async function heartbeatPlaybackSession(id: string, userId: string, db: SupabaseClient, renderedPosition: number | null = null) {
   if (!PLAYBACK_SESSION_UUID_PATTERN.test(id)) {
     throw new HttpError(400, "Invalid playback session id");
   }
@@ -6533,7 +6536,8 @@ async function heartbeatPlaybackSession(id: string, userId: string, db: Supabase
     if (!route) throw new HttpError(503, "Native media session route unavailable");
     const renewal = await fetch(`${route.url}/native-sessions/${id}/heartbeat`, {
       method: "POST", headers: { Authorization: `Bearer ${route.token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ ownerKey: await sha256Hex(userId) }), signal: AbortSignal.timeout(5_000),
+      body: JSON.stringify({ ownerKey: await sha256Hex(userId),
+        ...(renderedPosition!==null ? {renderedPosition} : {}) }), signal: AbortSignal.timeout(5_000),
     });
     if (!renewal.ok) throw new HttpError(renewal.status === 410 || renewal.status === 404 ? 410 : 503,
       "Native media session is not active");
@@ -6764,6 +6768,8 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
       const rawUrl = new URL(`${rawGatewayRoute.url}/raw-pumps`);
       rawUrl.searchParams.set("ownerKey", ownerKey);
       rawUrl.searchParams.set("sid", id);
+      if(typeof resumePosition==='number' && Number.isFinite(resumePosition) && resumePosition>0 && resumePosition<86400)
+        rawUrl.searchParams.set('resumePosition',String(resumePosition));
       const rawResponse = await fetch(rawUrl.toString(), {
         method: "DELETE",
         headers: { Authorization: `Bearer ${rawGatewayRoute.token}` },
