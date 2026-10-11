@@ -85,6 +85,19 @@ test('validation failure diagnostics retain fixed codes without transport messag
         assert.equal(JSON.stringify(observation).includes('private'),false);
     }
 });
+
+test('validation diagnostics distinguish bounded upstream statuses from the local gateway response', async () => {
+    for (const upstreamStatus of [100, 509, 599, 99, 600, 509.5, '509', 'https://private.invalid/secret', null]) {
+        let observation, reads = 0, closed = false;
+        const result = await validateRecentResume({plan:{kind:'sampled-recent-v1',ranges:samples().map(s=>({start:s.start,length:N}))},
+            createBroker:async()=>({inputUrl:'http://fixture.invalid',terminalError:{code:'PROVIDER_REQUEST_FAILED',upstreamStatus},close:async()=>{closed=true;}}),
+            fetchImpl:async()=>{reads++;return {status:502,body:{cancel:async()=>{}}};},onUnavailable:value=>{observation=value;}});
+        assert.equal(result,null); assert.equal(reads,1); assert.equal(closed,true);
+        assert.equal(observation.status,502);
+        assert.equal(observation.upstreamStatus,Number.isInteger(upstreamStatus)&&upstreamStatus>=100&&upstreamStatus<=599?upstreamStatus:undefined);
+        assert.equal(JSON.stringify(observation).includes('private'),false);
+    }
+});
 test('timeout aborts the current read, drains, and never retries or starts another range', async () => {
     let requests=0, closed=false, active=false;
     const result=await validateRecentResume({ plan:{ kind:'sampled-recent-v1', ranges:samples().map(s => ({ start:s.start,length:N })) },budgetMs:10,
@@ -165,13 +178,13 @@ for (const hit of [false,true]) test(`Gateway recreates indexed input after samp
                 inputSnapshot:()=>({windows:[]}),validationMode:'sampled-recent-v1'}:null;}},
         revalidateRecentResumeSession:async()=>{calls.push('validation-drained');return observed();},
         applyFiniteMkvSeekProviderIdentity:()=>{},
-        prepareFiniteMkvSeekBroker:async()=>{calls.push('indexed-input');session.finiteMkvSeekBroker={
+        prepareFiniteMkvSeekBroker:async(current,signal,options)=>{assert.equal(options.deferTsIndex,hit);calls.push('indexed-input');session.finiteMkvSeekBroker={
             seedRecentInput:()=>{calls.push('seed');return 100;}};return session.finiteMkvSeekBroker;},
         startSessionWithProviderRetry:async()=>{calls.push('encoder');return true;},
         observeSessionStartOffset:async()=>{},abortedVodInputPumpError:()=>Error('aborted'),
     });
     assert.equal(await run(session),hit);
-    assert.deepEqual(calls.slice(0,3),['validation-drained','indexed-input','acquire']);
+    assert.deepEqual(calls.slice(0,3),['validation-drained','acquire','indexed-input']);
     assert.equal(calls.includes('encoder'),hit);
     assert.equal(calls.includes('seed'),hit);
     if(hit) assert.ok(calls.indexOf('acquire')<calls.indexOf('seed') && calls.indexOf('seed')<calls.indexOf('encoder'));
@@ -199,6 +212,29 @@ test('retained input is bounded, detached, deduplicated and only exposed by a fr
     const changed=observed();changed.samples[1].payload[0]++;
     assert.equal(cache.acquire(binding,10,changed),null);
     assert.equal(cache.publicStatus().bytes,0);
+});
+
+test('early validated cache leases are released if input preparation fails or the owner is revoked', async () => {
+    const fs=require('node:fs'),vm=require('node:vm');
+    const source=fs.readFileSync(require('node:path').join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
+    const start=source.indexOf('async function tryStartPrivateResumeWindow('),end=source.indexOf('\nfunction usesFiniteMkvSeekBroker',start);
+    for(const failure of ['throw','missing','revoked']) {
+        let released=0,prepared=0;
+        const session={seekOffset:20,startupTimings:{}};
+        const lease={validationMode:'sampled-recent-v1',release:()=>released++,inputSnapshot:()=>{throw Error('RESUME_CACHE_REVOKED');}};
+        const run=vm.runInNewContext('('+source.slice(start,end)+')',{
+            Date,Number,Boolean,privateResumeHlsBindingForSession:()=>binding,privateResumeFormat:()=> 'mpegts',canUseRecentResumeSamples:()=>true,
+            privateResumeHlsCache:{hasCandidate:()=>true,revalidationPlan:()=>({kind:'sampled-recent-v1'}),acquire:()=>lease},
+            revalidateRecentResumeSession:async()=>observed(),applyFiniteMkvSeekProviderIdentity:()=>{},
+            prepareFiniteMkvSeekBroker:async(current,signal,options)=>{prepared++;assert.equal(options.deferTsIndex,true);
+                if(failure==='throw')throw Error('PREPARE_FAILED');
+                if(failure==='missing')return null;
+                session.finiteMkvSeekBroker={seedRecentInput:()=>assert.fail('revoked input cannot be seeded')};return session.finiteMkvSeekBroker;},
+        });
+        if(failure==='missing')assert.equal(await run(session),false);
+        else await assert.rejects(run(session),failure==='throw'?/PREPARE_FAILED/:/RESUME_CACHE_REVOKED/);
+        assert.equal(prepared,1);assert.equal(released,1);assert.equal(session.privateResumeLease,undefined);
+    }
 });
 
 test('retained input never escapes the existing aggregate memory reservation', async () => {

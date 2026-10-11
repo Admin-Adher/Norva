@@ -16458,7 +16458,7 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
     }
     const startedAt = Date.now();
     const plan = cache.revalidationPlan(binding, position);
-    let observed;
+    let observed, lease = null;
     if (plan) {
         if (!canUseRecentResumeSamples(session.ownerKey)) return false;
         observed = await revalidateRecentResumeSession(session, plan, requestSignal);
@@ -16470,10 +16470,19 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
             return false;
         }
         if (observed) applyFiniteMkvSeekProviderIdentity(session, observed);
+        // A successful check still has to match every retained sample before
+        // the cache can authorize playback. Acquire first: searching the TS
+        // position here would be discarded when the cached splice is chosen.
+        if (observed || session.startupTimings.recentResumeValidationOutcome === 'target-changed')
+            lease = cache.acquire(binding, position, observed);
         // Validation drained the preparation broker. Both a cache hit's
         // continuation and a miss's normal startup still need indexed input.
         // Never fall through to direct remote FFmpeg after closing that owner.
-        if (!await prepareFiniteMkvSeekBroker(session, requestSignal)) return false;
+        try {
+            if (!await prepareFiniteMkvSeekBroker(session, requestSignal, { deferTsIndex: Boolean(lease) })) {
+                lease?.release(); return false;
+            }
+        } catch (error) { lease?.release(); throw error; }
         // A failed fresh read is not evidence that the retained file changed.
         // Continue through the ordinary broker without leasing these bytes,
         // but preserve their original TTL for a later fully validated attempt.
@@ -16493,12 +16502,14 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
         if (response.status !== 206 || fresh.byteLength !== Math.min(size, 65536)) return false;
         observed = privateResumeObservedIdentity(session);
     }
-    const lease = cache.acquire(binding, position, observed);
+    if (!plan) lease = cache.acquire(binding, position, observed);
     session.startupTimings.privateResumeValidationMs = Date.now() - startedAt;
     if (!lease) return false;
     if (lease.validationMode === 'sampled-recent-v1') {
-        session.startupTimings.privateResumeInputSeededBytes = session.finiteMkvSeekBroker?.seedRecentInput(
-            lease.inputSnapshot()) || 0;
+        try {
+            session.startupTimings.privateResumeInputSeededBytes = session.finiteMkvSeekBroker?.seedRecentInput(
+                lease.inputSnapshot()) || 0;
+        } catch (error) { lease.release(); throw error; }
     }
     session.startupTimings.privateResumeValidationMode = lease.validationMode;
     session.privateResumeLease = lease;
@@ -16581,7 +16592,7 @@ function applyFiniteMkvSeekProviderIdentity(session, identity) {
     session.startupTimings.finiteMkvSeekProviderIdentityBound = true;
 }
 
-async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
+async function prepareFiniteMkvSeekBroker(session, parentSignal = null, { deferTsIndex = false } = {}) {
     const finiteMkv = isFiniteMkvVodSession(session);
     const finiteMp4 = session?.finiteMp4SeekBroker === true;
     const finiteTs = !finiteMkv && finiteTsProfileEligible(session)
@@ -16771,7 +16782,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     // proves the same strong validator, exact size and final target. This small
     // header read is retained by the same serialized broker for FFmpeg.
     session.finiteTsIndexPlan = null;
-    if (finiteTs && session.finiteTsResumeAligned === true && exactAudioTrackCount === 1
+    if (!deferTsIndex && finiteTs && session.finiteTsResumeAligned === true && exactAudioTrackCount === 1
         // Frozen plans exist even when disabled (for example not_finite_mkv).
         // Only active rendition graphs exclude this single-A/V shortcut.
         && session.multiAudioHls?.enabled !== true && session.exactSubtitleHls?.enabled !== true
@@ -16787,7 +16798,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
             if (indexedInputUrl) session.finiteTsIndexPlan = { ...point, inputUrl: indexedInputUrl };
         }
     }
-    if (finiteTs && session.finiteTsResumeAligned === true && exactAudioTrackCount === 1
+    if (!deferTsIndex && finiteTs && session.finiteTsResumeAligned === true && exactAudioTrackCount === 1
         && session.multiAudioHls?.enabled !== true && session.exactSubtitleHls?.enabled !== true
         && !session.forceFullInputProbe && !session.finiteTsIndexPlan && tsHints?.hasNearby(Number(session.seekOffset))) {
         const began = Date.now();
