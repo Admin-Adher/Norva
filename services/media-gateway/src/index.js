@@ -11635,7 +11635,7 @@ async function finishDurableStoryboard(job, payload) {
 }
 
 function runStoryboardProcess(job, args, timeoutMs, providerRead) {
-    if (job.cancelled || viewerPlaybackActiveLocally()) return Promise.resolve({ ok: false, preempted: true });
+    if (job.cancelled || backgroundJobBlockedByViewer(job)) return Promise.resolve({ ok: false, preempted: true });
     return new Promise((resolve) => {
         let child;
         try {
@@ -11645,7 +11645,9 @@ function runStoryboardProcess(job, args, timeoutMs, providerRead) {
         trackStoryboardChild(job, child);
         // Both provider reads AND local assembly yield CPU to a viewer. Registration
         // closes the race between the initial guard and spawning ffmpeg.
-        const reg = registerAccountExtraction(proxyKeyFromUrl(job.url), child, true, true);
+        // Local sprite assembly consumes CPU, but owns no provider transport.
+        // Keep its preemption registration without renewing account occupancy.
+        const reg = registerAccountExtraction(proxyKeyFromUrl(job.url), child, providerRead === true, true);
         let finished = false;
         const finish = (ok) => {
             if (finished) return;
@@ -11659,7 +11661,15 @@ function runStoryboardProcess(job, args, timeoutMs, providerRead) {
         child.stderr.resume(); // drain without retaining provider URLs or unbounded stderr
         // A live-child error is not proof that its provider socket is closed.
         child.once('error', () => { if (!child.pid) finish(false); });
-        child.once('close', (code) => finish(code === 0 && !timedOut));
+        child.once('close', (code) => {
+            // A checkpoint is a provider pass too. Previously only the final
+            // sprite marked this cooldown: sixty-second batch retries renewed
+            // the five-minute activity fence continuously, starving idle cache
+            // preparation. Apply the existing provider cooldown after each
+            // confirmed batch close, including interrupted reads.
+            if (providerRead === true) markStoryboardRun(job.url);
+            finish(code === 0 && !timedOut);
+        });
     });
 }
 
