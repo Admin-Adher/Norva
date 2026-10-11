@@ -147,7 +147,7 @@
 <p>Run the graph after loading completes, a filter changes results, a favorite toggles, an item becomes unavailable, progress updates, a row expands, or an error resolves. These mutations often invalidate cached rectangles or element references.</p>
 <p>The expected fallback should be deterministic: exact origin when it remains valid, otherwise the nearest meaningful sibling or stable region anchor. Never reset to the page's first target without a documented reason.</p>
 <h2 id="verify-back-as-layered-navigation">Verify Back as layered navigation</h2>
-<p>Back should normally close the current temporary layer, leave a detail level, or return to the previous page state in that order. It should preserve query, filters, scroll, row offset, and originating item when those states still apply. The focus restoration guide turns that expectation into an origin token and fallback rule.</p>
+<p>Back should normally close the current temporary layer, leave a detail level, or return to the previous page state in that order. It should preserve query, filters, scroll, row offset, and originating item when those states still apply. The <a href="/blog/preserve-focus-after-back/">focus restoration guide</a> turns that expectation into an origin token and fallback rule.</p>
 <p>Test Back from a focused variant, an episode, a scrolled recommendation row, a keyboard, and each dialog action. Also test repeated Back presses slowly so the first transition completes before the next begins.</p>
 <h2 id="test-disabled-empty-and-failure-states">Test disabled, empty, and failure states</h2>
 <p>Disabled controls must not become unexplained dead ends. Empty regions need a reachable message and valid next action. Errors must leave Back or recovery available. Loading surfaces must not steal focus, and completion must not reset a valid target.</p>
@@ -177,6 +177,12 @@
           <div class="card-title">How to Choose the Right Initial Focus on a TV Screen</div>
 
           <p>A state-based method for selecting a visible, safe, useful initial focus target and recovering predictably when that target is missing.</p>
+        </a>
+        <a class="card" href="/blog/preserve-focus-after-back/">
+          <span class="tag">Remote &amp; D-pad Navigation</span>
+          <div class="card-title">How to Preserve List Focus After Pressing Back</div>
+
+          <p>A semantic origin-token method that returns viewers from detail screens, variants, and episodes to the list position they actually left.</p>
         </a>
       </div>
     </section>

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr" data-norva-document-language="en">
+<head>
+  <meta charset="UTF-8">
+  <script defer src="/js/i18n.js?v=020561a6b5"></script>
+  <link rel="stylesheet" href="/css/i18n.css?v=9d49bdc112">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>Preserve List Focus After Pressing Back on TV | Norva Blog</title>
+  <meta name="description" content="Preserve TV list focus after Back by storing a semantic origin, restoring its state and scroll context, and using deterministic fallbacks when items change.">
+  <link rel="canonical" href="https://norva.tv/blog/preserve-focus-after-back/">
+
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=df298cf5d7">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Preserve List Focus After Pressing Back on TV | Norva Blog">
+  <meta property="og:description" content="Preserve TV list focus after Back by storing a semantic origin, restoring its state and scroll context, and using deterministic fallbacks when items change.">
+  <meta property="og:url" content="https://norva.tv/blog/preserve-focus-after-back/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Preserve List Focus After Pressing Back on TV | Norva Blog">
+  <meta name="twitter:description" content="Preserve TV list focus after Back by storing a semantic origin, restoring its state and scroll context, and using deterministic fallbacks when items change.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "How to Preserve List Focus After Pressing Back",
+  "description": "Preserve TV list focus after Back by storing a semantic origin, restoring its state and scroll context, and using deterministic fallbacks when items change.",
+  "inLanguage": "en",
+  "datePublished": "2026-10-11T20:00:00+02:00",
+  "dateModified": "2026-10-11T20:00:00+02:00",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/preserve-focus-after-back/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "How to Preserve List Focus After Pressing Back",
+      "item": "https://norva.tv/blog/preserve-focus-after-back/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=60a4e955bf"></script>
+  <script defer src="/js/consent-banner.js?v=d4e720e971"></script>
+  <script defer src="/js/blog-language.js?v=1ced86bfd2"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fapp%23home" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep" aria-hidden="true">›</span><a href="/blog/">Blog</a><span class="sep" aria-hidden="true">›</span><span aria-current="page">How to Preserve List Focus After Pressing Back</span></nav>
+
+    <article lang="en" dir="ltr" data-blog-article="preserve-focus-after-back" data-blog-language="en">
+      <div class="article-meta">
+        <span class="tag">Remote &amp; D-pad Navigation</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-10-11T20:00:00+02:00">11 October 2026</time>
+        <span class="dot">·</span>
+        <span>7 min read</span>
+      </div>
+      <h1>How to Preserve List Focus After Pressing Back</h1>
+      <p class="lede">A semantic origin-token method that returns viewers from detail screens, variants, and episodes to the list position they actually left.</p>
+
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#store-meaning-not-only-an-element-reference">Store meaning, not only an element reference</a></li><li><a href="#capture-the-origin-at-activation">Capture the origin at activation</a></li><li><a href="#restore-state-before-requesting-focus">Restore state before requesting focus</a></li><li><a href="#use-a-deterministic-fallback-ladder">Use a deterministic fallback ladder</a></li><li><a href="#separate-navigation-history-from-focus-history">Separate navigation history from focus history</a></li><li><a href="#test-mutations-and-boundary-positions">Test mutations and boundary positions</a></li><li><a href="#measure-the-restoration-outcome">Measure the restoration outcome</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Before leaving a list, store a semantic origin containing page, region, stable item identity, filters, sort, query, and row or scroll context. On Back, rebuild that state, reveal the item, and restore focus. If it disappeared, use a documented nearby fallback rather than jumping to Home or the first card.</blockquote>
+<p>Back is part of the current task, not merely a route to the previous URL. When a viewer opens a movie, series, episode, or variant and returns, the interface should remember where that decision began.</p>
+<h2 id="store-meaning-not-only-an-element-reference">Store meaning, not only an element reference</h2>
+<p>A DOM node, rendered index, or rectangle may disappear while the detail screen is open. Store a semantic origin token instead:</p>
+<div class="table-wrap" role="region" aria-label="Scrollable table" tabindex="0"><table>
+<thead><tr><th scope="col">Field</th><th scope="col">Example purpose</th></tr></thead>
+<tbody><tr><td>Page and region</td><td>Movies results, season episodes, variants</td></tr><tr><td>Stable item identity</td><td>Finds the same content after rerender</td></tr><tr><td>Query, filters, sort</td><td>Rebuilds the same result set</td></tr><tr><td>Row and item offset</td><td>Restores a horizontal collection</td></tr><tr><td>Scroll anchor</td><td>Reveals the target before focus</td></tr><tr><td>Fallback order</td><td>Handles removed or unavailable items</td></tr></tbody>
+</table></div>
+<p>Do not rely on a title as identity when duplicate versions can exist. Use the stable identifier already defined by the product's data contract.</p>
+<h2 id="capture-the-origin-at-activation">Capture the origin at activation</h2>
+<p>Create the token when the viewer activates the destination, not after the source unmounts. Capture the visible list state and the exact focused item. If a variant picker opens inside a detail screen, create a second, nested origin for that temporary layer.</p>
+<p>This layered model matches viewer expectation: Back from variants returns to the film or series detail context; another Back returns to the originating list card. It avoids the common failure where Back skips the intermediate layer and lands on Home.</p>
+<h2 id="restore-state-before-requesting-focus">Restore state before requesting focus</h2>
+<p>On return, apply query, filters, sort, and list data first. Then restore scroll or row offset, wait for the target to render, reveal it fully, and request focus. A request made before virtualization or asynchronous results complete can silently fail or land on a temporary target.</p>
+<p>While waiting, keep a stable page state. Do not focus a skeleton and move again later. The initial-focus principles in <a href="/blog/choose-initial-tv-focus/">choosing the right TV focus</a> also apply during restoration.</p>
+<h2 id="use-a-deterministic-fallback-ladder">Use a deterministic fallback ladder</h2>
+<p>The original item may be filtered out, deleted, unavailable, or moved. Define the fallback in advance:</p>
+<ol><li>exact stable item;</li><li>next valid sibling at the remembered position;</li><li>previous valid sibling;</li><li>same row or list anchor;</li><li>results-region anchor or valid recovery control.</li></ol>
+<p>Keep the fallback inside the same task and explain an empty state when no items remain. Jumping to the sidebar or Home is not a neutral fallback; it discards the viewer's journey.</p>
+<h2 id="separate-navigation-history-from-focus-history">Separate navigation history from focus history</h2>
+<p>Browser or application navigation history can identify the prior screen, but it rarely carries every focus detail. Maintain a small focus-origin stack tied to navigable layers. Remove an origin when its journey is completed or replaced so stale entries do not restore an unrelated session.</p>
+<p>Protect against double Back and rapid activation. Restoration should be idempotent: processing the same return twice must not produce two competing focus requests.</p>
+<h2 id="test-mutations-and-boundary-positions">Test mutations and boundary positions</h2>
+<p>Open destinations from the first, middle, last, and partially visible items. Repeat with a long row, an incomplete grid row, active filters, and a compacted header. Then remove the origin item, change availability, or reorder results before returning.</p>
+<p>Run the exact routes in the <a href="/blog/remote-dpad-navigation-qa/">remote and D-pad QA guide</a> and use the <a href="/blog/diagnose-tv-focus-trap/">focus-trap diagnostic</a> if the restored cue appears but cannot leave its region.</p>
+<h2 id="measure-the-restoration-outcome">Measure the restoration outcome</h2>
+<p>For each test, record expected item, actual item, retained filters, retained scroll context, time until visible focus, and first reverse movement. A screenshot proves visual position; an input trace proves that the restored target participates in the correct graph.</p>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<ul><li>Storing only a rendered index.</li><li>Requesting focus before results exist.</li><li>Restoring the screen but not filters or row offset.</li><li>Sending Back from a variant layer directly to Home.</li><li>Falling back to the first global navigation item.</li><li>Leaving stale origins after a new journey begins.</li><li>Testing only when the original item still exists.</li></ul>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="should-back-always-restore-the-exact-card">Should Back always restore the exact card?</h3>
+<p>Restore it when it remains valid. Otherwise, choose the documented nearby fallback while preserving the surrounding list state.</p>
+<h3 id="what-if-filters-return-no-results">What if filters return no results?</h3>
+<p>Restore the filter state, show an understandable empty result, and focus a valid recovery control such as changing or clearing the relevant filter.</p>
+<h3 id="is-scroll-position-enough">Is scroll position enough?</h3>
+<p>No. A scroll offset does not identify the intended item and may map to different content after layout or data changes.</p>
+<section class="article-cta"><h2 id="your-next-step">Your next step</h2>
+<p><a  href="https://norva.tv/#product-preview" data-cta="blog-article" data-blog-cta="primary" data-blog-slug="preserve-focus-after-back">Preview Norva's TV Navigation</a></p>
+</section>
+      <section class="sources" aria-labelledby="sources"><h2 id="sources">Sources</h2>
+<ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">Android TV App Quality Guidelines</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html" target="_blank" rel="noopener">W3C: Understanding Focus Order</a></li><li><a href="https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/" target="_blank" rel="noopener">WAI-ARIA APG: Developing a Keyboard Interface</a></li><li><a href="https://norva.tv/#features">Norva Features</a></li></ul>
+</section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/choose-initial-tv-focus/">
+          <span class="tag">Remote &amp; D-pad Navigation</span>
+          <div class="card-title">How to Choose the Right Initial Focus on a TV Screen</div>
+
+          <p>A state-based method for selecting a visible, safe, useful initial focus target and recovering predictably when that target is missing.</p>
+        </a>
+        <a class="card" href="/blog/diagnose-tv-focus-trap/">
+          <span class="tag">Remote &amp; D-pad Navigation</span>
+          <div class="card-title">How to Diagnose a Focus Trap in a TV Interface</div>
+
+          <p>A reproducible debugging workflow for focus traps caused by missing edges, stale geometry, hidden targets, async changes, overlays, and broken Back behavior.</p>
+        </a>
+      </div>
+    </section>
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>

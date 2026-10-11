@@ -145,7 +145,7 @@
 <p>Avoid adding arbitrary key-specific jumps to one item. Such patches often fail with different card counts, localization, or screen dimensions.</p>
 <h2 id="verify-escape-reverse-and-back">Verify escape, reverse, and Back</h2>
 <p>After the fix, run the original route and its reverse. Test the adjacent targets, first and last items, incomplete rows, and fast repeated input. Press Back from the repaired region and confirm that it closes the correct layer or returns to the correct origin.</p>
-<p>Use the focus restoration method when the trap occurs after closing a detail view or variant picker. Finally, add the route to the <a href="/blog/remote-dpad-navigation-qa/">complete remote QA ledger</a> so future layout changes rerun it.</p>
+<p>Use the <a href="/blog/preserve-focus-after-back/">focus restoration method</a> when the trap occurs after closing a detail view or variant picker. Finally, add the route to the <a href="/blog/remote-dpad-navigation-qa/">complete remote QA ledger</a> so future layout changes rerun it.</p>
 <h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
 <ul><li>Reporting a freeze without the focused start target.</li><li>Testing only with a mouse or touch input.</li><li>Fixing visible styling when the route itself is absent.</li><li>Adding a hard-coded jump for one card.</li><li>Ignoring layout changes after loading or filtering.</li><li>Verifying escape but not the reverse path.</li><li>Treating intentional dialog containment as a defect.</li></ul>
 <h2 id="frequently-asked-questions">Frequently asked questions</h2>
@@ -161,7 +161,17 @@
       <section class="sources" aria-labelledby="sources"><h2 id="sources">Sources</h2>
 <ul><li><a href="https://developer.android.com/docs/quality-guidelines/tv-app-quality" target="_blank" rel="noopener">Android TV App Quality Guidelines</a></li><li><a href="https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html" target="_blank" rel="noopener">W3C: Understanding Focus Order</a></li><li><a href="https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/" target="_blank" rel="noopener">WAI-ARIA APG: Modal Dialog Pattern</a></li><li><a href="https://norva.tv/#features">Norva Features</a></li></ul>
 </section>
+      <section class="related">
+      <h2>Related reading</h2>
+      <div class="related-grid">
+        <a class="card" href="/blog/preserve-focus-after-back/">
+          <span class="tag">Remote &amp; D-pad Navigation</span>
+          <div class="card-title">How to Preserve List Focus After Pressing Back</div>
 
+          <p>A semantic origin-token method that returns viewers from detail screens, variants, and episodes to the list position they actually left.</p>
+        </a>
+      </div>
+    </section>
     </article>
   </main>
   <footer class="blog-footer">
