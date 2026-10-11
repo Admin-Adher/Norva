@@ -22,6 +22,7 @@ class TsSeekHints {
                 if (!scan || !scan.video.length) return;
                 let entry = store.entries.get(key);
                 if (!entry || store.now() - entry.at > 600000) entry = { at: store.now(), clocks: [], points: [] };
+                if (start === 0) entry.originHint = scan.video[0].pts / 90000;
                 entry.clocks = [...new Map([...entry.clocks, ...scan.video].map(c => [c.packetOffset, c])).values()]
                     .sort((a, b) => a.packetOffset - b.packetOffset);
                 while (entry.clocks.length > 512) entry.clocks = entry.clocks.filter((_, i) => i % 2 === 0);
@@ -30,6 +31,14 @@ class TsSeekHints {
                 while (entry.points.length > 256) entry.points = entry.points.filter((_, i) => i % 2 === 0);
                 store.entries.delete(key); store.entries.set(key, entry);
                 while (store.entries.size > 16) store.entries.delete(store.entries.keys().next().value);
+            },
+            hasNearby(seconds) {
+                const entry = store.entries.get(key);
+                if (!entry || !Number.isFinite(entry.originHint) || store.now() < entry.at
+                    || store.now() - entry.at > 600000) return false;
+                // Admission to a bounded search only. The exact origin and
+                // playback point must still be proved by the current reads.
+                return entry.clocks.some(c => Math.abs(c.pts / 90000 - entry.originHint - seconds) <= 30);
             },
             pointHint(absoluteSeconds) {
                 const entry = store.entries.get(key);
@@ -86,6 +95,10 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
         const bytes = await read(start, end);
         result.reads++; result.bytes += bytes?.length || 0;
         if (!Buffer.isBuffer(bytes) || bytes.length !== end - start + 1) return null;
+        // The broker may have assembled this response from several complete
+        // cached/new windows. Observe the complete response, not just its last
+        // network fragment, so its program header/IDR remains a useful hint.
+        hints?.observe?.({ start, bytes });
         return scanTsWindow(start, bytes, { navigationOnly });
     };
     // Fresh origin and graph, acquired using the same serialized broker. The
@@ -93,6 +106,7 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
     const header = await read(0, HEADER - 1);
     result.reads++; result.bytes += header?.length || 0;
     const head = scanTsWindow(0, header);
+    if (head) hints?.observe?.({ start: 0, bytes: header });
     const origin = head && await probeOrigin(header);
     if (!origin || !head.video.some(c => c.pid === origin.videoPid)
         || !head.audio.some(c => c.pid === origin.audioPid)) return { ...result, reason: 'origin-unverified' };
@@ -111,11 +125,13 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
         || Math.abs(last.pts / 90000 - origin.startSeconds - durationSeconds) > 2)
         return { ...result, reason: 'duration-unverified' };
     const rate = fileSizeBytes / durationSeconds;
-    let predicted = hints?.pointHint?.(absoluteSeconds) ?? hints?.estimate(absoluteSeconds - 20, rate)
+    const nearby = hints?.hasNearby?.(seconds) === true;
+    const pointHint = hints?.pointHint?.(absoluteSeconds);
+    let predicted = pointHint ?? hints?.estimate(absoluteSeconds - (nearby ? 12 : 20), rate)
         ?? align((seconds - 20) * rate);
     for (let attempt = 0; attempt < 3; attempt++) {
         if (now() - began >= maxMs) return { ...result, reason: 'budget' };
-        const length = attempt === 0 ? 512 * 1024 : WINDOW;
+        const length = attempt === 0 && pointHint == null && !nearby ? 512 * 1024 : WINDOW;
         const start = align(Math.min(fileSizeBytes - length, Math.max(HEADER, predicted)));
         const scan = await acquire(start, length, true);
         // A short window can end before the next complete program/PES header.
@@ -125,10 +141,14 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
         if (!scan || scan.video.some(c => c.pid !== origin.videoPid || c.signature !== signature)
             || scan.audio.some(c => c.pid !== origin.audioPid || c.signature !== signature))
             return { ...result, reason: 'graph-or-clock-unverified' };
+        const audioNear = (c, p) => c.packetOffset >= p.byteOffset && c.dts >= p.dts - 90000
+            && c.dts <= p.dts + (origin.audioCodec === 'aac' ? 22500 : 0)
+            && c.dts <= absoluteSeconds * 90000 - 45000;
         result.scan = { invalidForPlayback: scan.invalid, points: scan.points.length, videoStart: scan.video[0].pts / 90000 - absoluteSeconds,
             videoEnd: scan.video.at(-1).pts / 90000 - absoluteSeconds, audio: scan.audio.length,
             candidates: scan.points.slice(-4).map(p => ({ beforeSeconds: absoluteSeconds - p.pts / 90000,
                 audioBefore: scan.audio.some(c => c.dts <= p.dts && p.dts - c.dts <= 90000),
+                audioNear: scan.audio.some(c => audioNear(c, p)),
                 audioAfter: scan.audio.some(c => c.dts >= p.dts + 180000),
                 videoAfter: scan.video.at(-1).dts >= p.dts + 180000 })) };
         const point = !scan.invalid && scan.points.filter(p => p.signature === signature && p.videoPid === origin.videoPid
@@ -137,7 +157,7 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
             && absoluteSeconds - p.pts / 90000 <= 18
             // Observe clean video beyond the IDR and audio on both sides of it.
             && scan.video.at(-1).dts >= p.dts + 180000
-            && scan.audio.some(c => c.dts <= p.dts && p.dts - c.dts <= 90000)
+            && scan.audio.some(c => audioNear(c, p))
             && scan.audio.some(c => c.dts >= p.dts + 180000)).at(-1);
         if (point) return { ...result, point: { ...point, absoluteSeconds }, reason: 'fresh-point' };
         // Fresh timestamps correct the next search estimate. Neither bitrate

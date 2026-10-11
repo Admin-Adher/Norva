@@ -3,7 +3,7 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const { crc32 } = require('../services/media-gateway/src/finite-ts-landmarks');
 const { TsSeekHints, scanTsWindow, findFreshTsSeek } = require('../services/media-gateway/src/finite-ts-fresh-seek');
 
-function fixture({ noIdr = false, audioGap = false, clockJump = false } = {}) {
+function fixture({ noIdr = false, audioGap = false, clockJump = false, audioLagSeconds = 0 } = {}) {
     const packets = [], cc = new Map();
     const packet = (pid, payload) => {
         const b = Buffer.alloc(188, 255);
@@ -18,14 +18,15 @@ function fixture({ noIdr = false, audioGap = false, clockJump = false } = {}) {
     const pmt = psi([2,0xb0,23,0,1,0xc1,0,0,0xe1,0,0xf0,0,0x1b,0xe1,0,0xf0,0,15,0xe1,1,0xf0,0]);
     for (let frame = 0; frame < 1200; frame++) {
         const pts = 126000 + frame * 9000 + (clockJump && frame >= 650 ? 1800000 : 0);
-        const stamp = Buffer.from([0x21 | (Math.floor(pts / 2 ** 30) << 1), Math.floor(pts / 2 ** 22) & 255,
-            ((Math.floor(pts / 2 ** 15) & 127) << 1) | 1, Math.floor(pts / 128) & 255, ((pts & 127) << 1) | 1]);
+        const timestamp = value => Buffer.from([0x21 | (Math.floor(value / 2 ** 30) << 1), Math.floor(value / 2 ** 22) & 255,
+            ((Math.floor(value / 2 ** 15) & 127) << 1) | 1, Math.floor(value / 128) & 255, ((value & 127) << 1) | 1]);
+        const stamp = timestamp(pts);
         packet(0, pat); packet(4096, pmt);
         const idr = !noIdr && frame % 20 === 0;
         packet(256, Buffer.concat([Buffer.from([0,0,1,0xe0,0,0,0x80,0x80,5]), stamp,
             Buffer.from(idr ? [0,0,1,0x67,9,0,0,1,0x68,9,0,0,1,0x65,9] : [0,0,1,0x41,9])]));
         packet(audioGap && frame >= 500 && frame < 1100 ? 8191 : 257,
-            Buffer.concat([Buffer.from([0,0,1,0xc0,0,0,0x80,0x80,5]), stamp]));
+            Buffer.concat([Buffer.from([0,0,1,0xc0,0,0,0x80,0x80,5]), timestamp(pts + audioLagSeconds * 90000)]));
         for (let j = 0; j < 20; j++) packet(8191, Buffer.alloc(0));
     }
     return Buffer.concat(packets);
@@ -72,6 +73,25 @@ test('one-second preroll is limited to freshly identified AAC with clean A/V aro
     assert.ok(aac.point.absoluteSeconds - aac.point.pts / 90000 < 2);
     assert.ok(mp3.point.absoluteSeconds - mp3.point.pts / 90000 >= 2);
 });
+test('fresh AAC shortly after the IDR is valid only when decoded audio precedes the trim target', async () => {
+    const run = lag => {
+        const data = fixture({ audioLagSeconds: lag });
+        return seek(data, { seconds: 78.3, hints: { pointHint: () => 760 * 24 * 188 },
+            probeOrigin: async () => ({ ...await origin(), audioCodec: 'aac' }) });
+    };
+    const near = (await run(0.2)).result, late = (await run(0.6)).result;
+    assert.equal(near.reason, 'fresh-point');
+    assert.equal(near.point.pts / 90000, 77.4);
+    assert.ok(!late.point || late.point.pts < near.point.pts, 'a 600ms audio gap cannot authorize this point');
+});
+test('complete assembled reads retain temporal hints and admit only nearby future searches', async () => {
+    const data = fixture(), store = new TsSeekHints(), handle = store.begin(scope(data.length));
+    assert.equal(handle.hasNearby(80), false);
+    await seek(data, { hints: handle });
+    assert.equal(handle.hasNearby(80), true);
+    assert.equal(handle.hasNearby(1000), false);
+    assert.ok(handle.pointHint(81.4) > 0);
+});
 test('unsupported clocks, missing audio and missing IDRs retain ordinary seeking', async () => {
     for (const data of [fixture({ audioGap: true }), fixture({ noIdr: true }), fixture({ clockJump: true })]) {
         const { result } = await seek(data); assert.equal(result.point, null);
@@ -107,6 +127,7 @@ test('hints contain metadata only and remain bounded, private to the account and
     handle.observe({ start: 0, bytes: data.subarray(0, 2 * 1024 * 1024) });
     assert.ok(handle.estimate(25, data.length / 120) > 0);
     assert.ok(handle.pointHint(25) > 0);
+    assert.equal(handle.hasNearby(25), true);
     assert.equal(store.begin({ ...scope(data.length), ownerKey: 'b'.repeat(64) }).estimate(25, 10000), null);
     assert.equal(store.begin({ ...scope(data.length), sourceUrl: 'https://other.invalid/file' }).estimate(25, 10000), null);
     for (let i = 0; i < 30; i++) store.begin({ ...scope(data.length), sourceUrl: String(i) })
@@ -115,5 +136,6 @@ test('hints contain metadata only and remain bounded, private to the account and
     assert.ok(!JSON.stringify([...store.entries]).includes('private.invalid'));
     clock = 600001; assert.equal(handle.estimate(25, 10000), null);
     assert.equal(handle.pointHint(25), null);
+    assert.equal(handle.hasNearby(25), false);
     assert.equal(scanTsWindow(0, Buffer.alloc(100)), null);
 });

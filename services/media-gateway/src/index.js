@@ -16780,7 +16780,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     }
     if (finiteTs && session.finiteTsResumeAligned === true && exactAudioTrackCount === 1
         && session.multiAudioHls?.enabled !== true && session.exactSubtitleHls?.enabled !== true
-        && !session.forceFullInputProbe && !session.finiteTsIndexPlan && tsHints) {
+        && !session.forceFullInputProbe && !session.finiteTsIndexPlan && tsHints?.hasNearby(Number(session.seekOffset))) {
         const began = Date.now();
         session.finiteTsNavigationSampling = true;
         let fresh;
