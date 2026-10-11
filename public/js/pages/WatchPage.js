@@ -4174,9 +4174,28 @@ class WatchPage {
             });
             if (strict && results.some(result => result.status === 'rejected')) throw new Error('Playback could not be closed');
         });
+        return { confirmedCloudClose: strict, closedCloudSessions: sessionIds.size };
     }
 
     async releasePlaybackPipelineForRetry({ strict = false } = {}) {
+        // A newer seek can arrive while expiry has cleared the local session ID
+        // but is still draining its provider transport. Join that barrier first.
+        while (this._playbackPipelineReleasePromise) {
+            try { await this._playbackPipelineReleasePromise; } catch (error) {
+                if (strict) throw error;
+            }
+            if (!strict) return;
+        }
+        const release = this.drainPlaybackPipelineForRetry({ strict });
+        this._playbackPipelineReleasePromise = release;
+        try {
+            return await release;
+        } finally {
+            if (this._playbackPipelineReleasePromise === release) this._playbackPipelineReleasePromise = null;
+        }
+    }
+
+    async drainPlaybackPipelineForRetry({ strict = false } = {}) {
         try {
             this.cancelPendingHlsAudioSwitch(false);
             clearTimeout(this._pendingLocalSeekTimer);
@@ -4207,6 +4226,7 @@ class WatchPage {
                 this.stopCloudPlaybackSessions({ strict })
             ]);
             if (strict && results.some(result => result.status === 'rejected')) throw new Error('Playback could not be closed');
+            return results[1].status === 'fulfilled' ? results[1].value : null;
         } catch (error) {
             console.warn('[WatchPage] Playback retry cleanup failed:', error?.message || error);
             if (strict) throw error;
@@ -7118,7 +7138,7 @@ class WatchPage {
         }, 180);
     }
 
-    scheduleProcessedSeek(target, duration, delay = 900) {
+    scheduleProcessedSeek(target, duration, delay = 200) {
         this._pendingSeekTarget = target;
         this.setProgressValue((target / duration) * 100);
         this.trackPlaybackPosition({ position: target, force: true });
@@ -7373,8 +7393,13 @@ class WatchPage {
             this.hls = null;
         }
 
-        await this.releasePlaybackPipelineForRetry();
-        await this.waitForProviderSlotRelease(900);
+        const closeReceipt = await this.releasePlaybackPipelineForRetry({ strict: true });
+        // Cloud expiry awaits Gateway cleanup and its provider release grace.
+        // Admission also checks the slot before opening the replacement. The
+        // legacy/local lane still needs its existing cooldown.
+        if (closeReceipt?.confirmedCloudClose !== true || !(closeReceipt.closedCloudSessions > 0)) {
+            await this.waitForProviderSlotRelease(900);
+        }
         if (isObsoleteRequest()) return;
 
         if (this.video) {
