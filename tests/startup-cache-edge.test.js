@@ -23,6 +23,11 @@ function harness(options = {}) {
     PLAYBACK_SESSION_UUID_PATTERN: /^[a-f0-9-]{36}$/, recordOrEmpty: value => value || {}, stringOr: (value, fallback) => typeof value === 'string' ? value : fallback,
     sha256Hex: async value => value === userId ? owner : 'hash:' + value,
     resolveSourceIdentity: async () => ({ key: 'identity' }), assertProviderCircuitClosed: async () => {},
+    resolvePlaybackTarget: async (source, type, item, user, _db, hints, offline) => {
+      assert.deepEqual([source, type, item, user, offline], [sourceId, 'movie', '1', userId, true]);
+      assert.equal(Object.keys(hints).length, 0); return target;
+    },
+    providerAccountKeyFromUrl: () => 'account',
     userHasLiveSession: async () => false, accountPregenActive: async (_db, user, source) => {
       assert.equal(user, userId); assert.equal(source, sourceId);
       return options.pregenBusy === true;
@@ -90,7 +95,7 @@ test('partial movie metadata schedules one guarded refresh, then leaves prefix p
     assert.equal(result.prepared, false);
     assert.equal(result.reason, deferred ? 'profile-refresh-deferred' : 'profile-refreshed');
     assert.equal(result.refreshAfterSeconds, 60);
-    assert.deepEqual(h.events, ['target', 'profile-refresh']);
+    assert.deepEqual(h.events, ['target', 'provider_account_busy', 'profile-refresh']);
   }
 });
 
@@ -105,7 +110,17 @@ test('missing or ambiguous exact variant cannot acquire a provider probe for sta
 test('an uncertain metadata-refresh transport remains an error and cannot start prefix preparation', async () => {
   const h = harness({ partialProfile: true, refreshUncertain: true });
   await assert.rejects(h.context.runStartupCachePreparation(h.request, h.db), /drain unconfirmed/);
-  assert.deepEqual(h.events, ['target', 'profile-refresh']);
+  assert.deepEqual(h.events, ['target', 'provider_account_busy', 'profile-refresh']);
+});
+
+test('startup metadata recovery defers before probing on account presence or active background work', async () => {
+  for (const options of [{ busy: true }, { pregenBusy: true }]) {
+    const h = harness({ partialProfile: true, ...options });
+    const result = await h.context.runStartupCachePreparation(h.request, h.db);
+    assert.equal(result.prepared, false);
+    assert.equal(result.reason, options.busy ? 'account-presence' : 'background-job-active');
+    assert.deepEqual(h.events, ['target', 'provider_account_busy']);
+  }
 });
 test('startup Edge entry rejects unauthenticated or caller-selected target/profile before authority reads', async () => {
   const h = harness();

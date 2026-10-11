@@ -16144,6 +16144,18 @@ async function refreshStartupCacheMovieProfile(db: SupabaseClient, userId: strin
     || !PLAYBACK_SESSION_UUID_PATTERN.test(stringOr(data[0]?.id, ""))) {
     return { protocol: 1, prepared: false, reason: "exact-file-evidence-unavailable" };
   }
+  // Prefix maintenance keeps the stricter offline-account admission. Ordinary
+  // catalogue probes may ignore passive presence; this preparation must not.
+  const resolved = await resolvePlaybackTarget(sourceId, "movie", itemId, userId, db, {}, true);
+  const accountKey = providerAccountKeyFromUrl(stringOr(resolved.targetUrl, ""));
+  if (!accountKey) return { protocol: 1, prepared: false, reason: "account-unidentified" };
+  const activity = await db.rpc("provider_account_busy", { p_key: accountKey });
+  if (activity.error || typeof activity.data !== "boolean")
+    return { protocol: 1, prepared: false, reason: "activity-unavailable" };
+  if (activity.data) return { protocol: 1, prepared: false, reason: "account-presence" };
+  if (await userHasLiveSession(db, userId)) return { protocol: 1, prepared: false, reason: "viewer-active" };
+  if (await accountPregenActive(db, userId, sourceId))
+    return { protocol: 1, prepared: false, reason: "background-job-active" };
   // A bounded in-band TS observation is useful for playback, but does not
   // certify the complete track table. Never promote its completeness flag.
   // Use the existing source-scoped, idle-only probe with distributed admission,
