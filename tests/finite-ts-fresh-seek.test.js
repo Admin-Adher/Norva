@@ -100,9 +100,9 @@ test('the exact old point is rediscovered in current bytes without a duration-se
     const { result, ranges } = await seek(data, { hints: handle });
     assert.equal(result.reason, 'fresh-witness'); assert.ok(result.point);
     assert.equal(ranges.length, 2);
-    assert.equal(ranges[1][1] - ranges[1][0] + 1, 512 * 1024);
+    assert.equal(ranges[1][1] - ranges[1][0] + 1, 192 * 1024);
     assert.equal(ranges[0][1] + 1, 65536);
-    assert.equal(result.bytes, 589824);
+    assert.equal(result.bytes, 262144);
     assert.ok(ranges.every(([a]) => a < data.length - 262144));
     assert.equal(result.point.packetOffset, handle.pointWitness(81.4).packetOffset);
 });
@@ -254,4 +254,41 @@ test('expiry drops old points without dropping an origin re-observed immediately
     clock=1200002;
     handle.observe({start:currentStart,bytes:data.subarray(currentStart,currentStart+512*1024)});
     assert.equal(handle.describe(80).originKnown,false,'an expired origin is not preserved by new body data');
+});
+
+test('origin lifetime is checked independently even while the newer body batch remains fresh',()=>{
+    const data=fixture();let clock=0;
+    const handle=new TsSeekHints({now:()=>clock}).begin(scope(data.length));
+    handle.observe({start:0,bytes:data.subarray(0,65536)});
+    clock=400000;handle.observe({start:0,bytes:data.subarray(0,65536)});
+    clock=600001;const start=740*24*188;
+    handle.observe({start,bytes:data.subarray(start,start+512*1024)});
+    assert.equal(handle.hasNearby(80),true);
+    clock=1000001;
+    assert.equal(handle.describe(80).fresh,true);
+    assert.equal(handle.describe(80).originKnown,false);
+    assert.equal(handle.describe(80).nearestSeconds,null);
+    assert.equal(handle.hasNearby(80),false);
+});
+
+test('an undersized historical coverage hint expands at the same position and still proves the exact current point',async()=>{
+    const data=fixture({paddingPackets:200}),store=new TsSeekHints(),handle=store.begin(scope(data.length));
+    handle.observe({start:0,bytes:data.subarray(0,262144)});
+    const start=740*204*188;handle.observe({start,bytes:data.subarray(start,start+2*1024*1024)});
+    const witness=handle.pointWitness(81.4);assert.ok(witness);
+    const {result,ranges}=await seek(data,{hints:{pointWitness:()=>({...witness,witnessBytesHint:128*1024})}});
+    assert.equal(result.reason,'fresh-witness');assert.equal(result.point.packetOffset,witness.packetOffset);
+    assert.deepEqual(ranges.slice(1).map(([a,b])=>[a,b-a+1]),[
+        [ranges[1][0],128*1024],[ranges[1][0],512*1024],[ranges[1][0],2*1024*1024]]);
+});
+
+test('invalid coverage sizes fall back to the ordinary bounded witness instead of expanding the read',async()=>{
+    const data=fixture(),store=new TsSeekHints(),handle=store.begin(scope(data.length));
+    handle.observe({start:0,bytes:data.subarray(0,262144)});
+    const start=740*24*188;handle.observe({start,bytes:data.subarray(start,start+2*1024*1024)});
+    const witness=handle.pointWitness(81.4);assert.ok(witness);
+    for(const witnessBytesHint of [-1,131071,131072.5,524289,2**32]){
+        const {result,ranges}=await seek(data,{hints:{pointWitness:()=>({...witness,witnessBytesHint})}});
+        assert.equal(result.reason,'fresh-witness');assert.equal(ranges[1][1]-ranges[1][0]+1,512*1024);
+    }
 });

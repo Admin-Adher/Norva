@@ -16,15 +16,17 @@ class TsSeekHints {
             || !Number.isSafeInteger(fileSizeBytes) || fileSizeBytes <= 0) return null;
         const key = crypto.createHash('sha256').update(JSON.stringify([ownerKey, sourceUrl, fileSizeBytes])).digest('hex');
         const store = this;
+        const currentOrigin = entry => Number.isFinite(entry?.originHint) && Number.isFinite(entry?.originAt)
+            && store.now() >= entry.originAt && store.now() - entry.originAt <= 600000;
         return {
             describe(seconds) {
                 const entry = store.entries.get(key);
                 const fresh = Boolean(entry && store.now() >= entry.at && store.now() - entry.at <= 600000);
                 const clocks = fresh ? [...entry.clocks, ...entry.points] : [];
-                const nearestSeconds = fresh && Number.isFinite(entry.originHint) && clocks.length
+                const nearestSeconds = fresh && currentOrigin(entry) && clocks.length
                     ? Math.min(...clocks.map(c => Math.abs(c.pts / 90000 - entry.originHint - seconds))) : null;
                 return { scopes: store.entries.size, scopePresent: Boolean(entry), fresh,
-                    originKnown: Number.isFinite(entry?.originHint), clocks: entry?.clocks.length || 0,
+                    originKnown: currentOrigin(entry), clocks: entry?.clocks.length || 0,
                     points: entry?.points.length || 0, nearestSeconds: nearestSeconds === null ? null : Number(nearestSeconds.toFixed(3)) };
             },
             observe({ start, bytes }) {
@@ -37,11 +39,9 @@ class TsSeekHints {
                     // separately re-observed current header may be newer than
                     // that batch; do not discard its origin with old points.
                     // This remains navigation metadata, never playback proof.
-                    const currentOrigin = Number.isFinite(entry?.originHint)
-                        && Number.isFinite(entry?.originAt) && observedAt >= entry.originAt
-                        && observedAt - entry.originAt <= 600000
+                    const retainedOrigin = currentOrigin(entry)
                         ? { originHint: entry.originHint, originAt: entry.originAt } : {};
-                    entry = { at: observedAt, clocks: [], points: [], ...currentOrigin };
+                    entry = { at: observedAt, clocks: [], points: [], ...retainedOrigin };
                 }
                 if (start === 0) {
                     entry.originHint = scan.video[0].pts / 90000;
@@ -50,7 +50,18 @@ class TsSeekHints {
                 entry.clocks = [...new Map([...entry.clocks, ...scan.video].map(c => [c.packetOffset, c])).values()]
                     .sort((a, b) => a.packetOffset - b.packetOffset);
                 while (entry.clocks.length > 512) entry.clocks = entry.clocks.filter((_, i) => i % 2 === 0);
-                entry.points = [...new Map([...entry.points, ...scan.points].map(p => [p.byteOffset, p])).values()]
+                const observedPoints = scan.points.map(p => {
+                    // Historical A/V coverage chooses a bounded read size only.
+                    // The complete current response must prove the same IDR and
+                    // both A/V clocks before its offset can be used.
+                    const after = clocks => clocks.find(c => c.signature === p.signature && c.dts >= p.dts + 180000);
+                    const video = after(scan.video), audio = after(scan.audio);
+                    const length = video && audio ? Math.ceil((Math.max(video.packetOffset, audio.packetOffset)
+                        + 4096 - align(p.byteOffset - 65536)) / 65536) * 65536 : 0;
+                    return { ...p, ...(length >= 128 * 1024 && length <= 512 * 1024
+                        ? { witnessBytesHint: length } : {}) };
+                });
+                entry.points = [...new Map([...entry.points, ...observedPoints].map(p => [p.byteOffset, p])).values()]
                     .sort((a, b) => a.byteOffset - b.byteOffset);
                 while (entry.points.length > 256) entry.points = entry.points.filter((_, i) => i % 2 === 0);
                 store.entries.delete(key); store.entries.set(key, entry);
@@ -58,7 +69,7 @@ class TsSeekHints {
             },
             hasNearby(seconds) {
                 const entry = store.entries.get(key);
-                if (!entry || !Number.isFinite(entry.originHint) || store.now() < entry.at
+                if (!entry || !currentOrigin(entry) || store.now() < entry.at
                     || store.now() - entry.at > 600000) return false;
                 // Admission to a bounded search only. The exact origin and
                 // playback point must still be proved by the current reads.
@@ -193,8 +204,15 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
         // current graph and both required seconds of A/V. Keep every proof
         // below; grow at the same byte position only when it is insufficient.
         // The serialized broker reuses the completed prefix on that retry.
-        let scan = await acquire(start, 512 * 1024);
+        const hintedBytes = Number.isSafeInteger(witness.witnessBytesHint)
+            && witness.witnessBytesHint >= 128 * 1024 && witness.witnessBytesHint <= 512 * 1024
+            && witness.witnessBytesHint % 65536 === 0 ? witness.witnessBytesHint : 512 * 1024;
+        let scan = await acquire(start, hintedBytes);
         let point = currentPoint(scan, witness);
+        if (!point && hintedBytes < 512 * 1024 && now() - began < maxMs) {
+            scan = await acquire(start, 512 * 1024);
+            point = currentPoint(scan, witness);
+        }
         if (!point && now() - began < maxMs) {
             scan = await acquire(start, WINDOW);
             point = currentPoint(scan, witness);
