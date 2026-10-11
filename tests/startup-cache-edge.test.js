@@ -9,7 +9,7 @@ class HttpError extends Error { constructor(status, message) { super(message); t
 function harness(options = {}) {
   const events = [], owner = 'a'.repeat(64);
   const target = { targetUrl: 'https://provider.invalid/movie/a/b/1.mkv', accountKey: 'account', accountHash: 'account-hash',
-    revision: 'revision', variantId: options.variantId || '', profileFingerprint: 'profile', resolved: { playbackHint: {} },
+    revision: 'revision', variantId: options.variantId || '', profileFingerprint: 'profile', resolved: { playbackHint: options.playbackHint || {} },
     profile: { audioTracks: [{ index: 1, codec: 'aac', default: true }], fileSizeBytes: 10000 } };
   const context = vm.createContext({ HttpError, crypto: require('node:crypto').webcrypto, Request, URL, Date, AbortSignal,
     ...require('../supabase/functions/_shared/native-mp4-gateway-policy.mjs'),
@@ -54,6 +54,18 @@ test('startup Edge entry rejects unauthenticated or caller-selected target/profi
   await assert.rejects(h.context.runStartupCachePreparation(bad, h.db), e => e.status === 400);
   await assert.rejects(h.context.runStartupCachePreparation(new Request(h.request.url, { method: 'POST', body: '{}' }), h.db), e => e.status === 401);
   assert.deepEqual(h.events, []);
+});
+
+test('startup audio binding matches ordinary catalogue defaults and preserves explicit audio preferences', async () => {
+  const { privateResumeProfile } = require('../services/media-gateway/src/private-resume-profile');
+  for (const hint of [{}, { clientAudioPassthrough: true }, { clientAudioPassthrough: false },
+    { audioMode: 'transcode', clientAudioPassthrough: true }]) {
+    const h = harness({ playbackHint: hint });
+    await h.context.runStartupCachePreparation(h.request, h.db);
+    const base = { format: 'mkv', audio: h.target.profile.audioTracks[0], encoder: 'vaapi' };
+    assert.equal(privateResumeProfile({ ...base, ...h.target.sentSession }),
+      privateResumeProfile({ ...base, ...hint }));
+  }
 });
 for (const scenario of ['busy', 'accountRefused', 'missingEvidence', 'pregenBusy', 'revokedFileLease']) test(`startup Edge opens no transport on ${scenario}`, async () => {
   const h = harness({ [scenario]: true });
