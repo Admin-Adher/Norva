@@ -119,10 +119,13 @@ test('a drained 509 retained-target refusal makes the next claim revalidate at t
   const plan={kind:'sampled-recent-v1',target,ranges:[0,N,2*N,3*N].map(start=>({start,length:N}))};
   let observation,identity,used=[];
   for(const round of [1,2]) {
+    const hintFacts=round===1?facts:{...facts,targetUrl:origin+'/another-old-path',
+      targetHash:crypto.createHash('sha256').update(origin+'/another-old-path').digest('hex'),
+      targetIdentity:h.strictLidEffectiveUrlIdentitySha256(origin+'/another-old-path')};
     const result=await validateRecentResume({plan,onUnavailable:x=>observation=x,
       acceptIdentity:()=>identity?.effectiveUrlIdentitySha256===target,
       createBroker:async signal=>{
-        const b=await h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,recentDeliveryTarget:retain(facts),recentDeliveryOwner:ownerKey,
+        const b=await h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,recentDeliveryTarget:retain(hintFacts),recentDeliveryOwner:ownerKey,
           recentDeliveryRoute:routeKey,freshResumeScope:scope,abortSignal:signal,recentValidationKeepAlive:true,
           dispatcherFactory:()=>new Agent({connections:1,pipelining:1}),completedReleaseDelayMs:0,
           onProviderIdentity:x=>identity=x});used.push(b.recentDeliveryTargetUsed);return b;

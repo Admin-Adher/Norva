@@ -52,7 +52,7 @@ test('a genuine 509 hint refusal defers only that bound routing shortcut for the
     assert.equal(failHint(resolved,{upstreamStatus:509,now:200}),true);
     assert.equal(failHint(resolved,{upstreamStatus:509,now:201}),false);
     assert.equal(consume(retain({...data,now:201}),{...data,now:201}),null);
-    for(const key of ['ownerKey','sourceUrl','userAgent','fileSizeBytes','routeKey','targetIdentity']) {
+    for(const key of ['ownerKey','sourceUrl','userAgent','fileSizeBytes','routeKey']) {
         const other={...data,now:202,[key]:key==='fileSizeBytes'?data[key]+1:key==='ownerKey'||key==='targetIdentity'?'c'.repeat(64):'other'};
         if(key==='sourceUrl')other[key]='https://other.invalid/source';
         assert.ok(consume(retain(other),other),key);
@@ -60,6 +60,9 @@ test('a genuine 509 hint refusal defers only that bound routing shortcut for the
     const rotated={...data,now:202,targetUrl:targetUrl+'?sign=fresh'};
     rotated.targetHash=crypto.createHash('sha256').update(rotated.targetUrl).digest('hex');
     assert.equal(consume(retain(rotated),rotated),null,'a changed signature does not bypass a refusal of the same delivery identity');
+    const moved={...rotated,targetUrl:targetUrl+'/next-path',targetIdentity:'c'.repeat(64)};
+    moved.targetHash=crypto.createHash('sha256').update(moved.targetUrl).digest('hex');
+    assert.equal(consume(retain(moved),moved),null,'a new delivery path still uses the ordinary source after the prior hint was refused');
     const after={...data,now:200+RECENT_TTL_MS};
     assert.ok(consume(retain(after),after));
 });

@@ -5,7 +5,7 @@ const targets = new WeakMap();
 const consumedTargets = new WeakMap();
 const refusedTargets = new Map();
 const refusalKey = value => crypto.createHash('sha256').update(JSON.stringify(
-    ['ownerKey','sourceUrl','userAgent','fileSizeBytes','routeKey','targetIdentity'].map(key=>value[key]))).digest('hex');
+    ['ownerKey','sourceUrl','userAgent','fileSizeBytes','routeKey'].map(key=>value[key]))).digest('hex');
 const hex = v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
 const url = value => {
     try {
@@ -40,7 +40,11 @@ function consumeRecentDeliveryTarget(token, request) {
             .some(key => request[key] !== value[key])) return null;
     for (const [key, at] of refusedTargets) if (now >= at + RECENT_TTL_MS) refusedTargets.delete(key);
     const key = refusalKey(value), refusedAt = refusedTargets.get(key);
-    // A refused retained URL is only a failed routing shortcut. The next
+    // A refused retained URL is only a failed routing shortcut. Delivery
+    // paths can rotate at every normal opening: suppress hints for this
+    // exact private source/route binding, not just the previous signed path.
+    // A different target is NEVER accepted as proof by this routing choice.
+    // The next
     // claim starts at its normal source on the SAME pinned route and must
     // still freshly validate the target and all four sample digests.
     if (refusedAt !== undefined && now - refusedAt < RECENT_TTL_MS) return null;

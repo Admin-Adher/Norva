@@ -265,3 +265,31 @@ test('only a matching private cache candidate exposes an opaque delivery hint',a
     assert.equal(JSON.stringify(cache.publicStatus()).includes('deliveryTarget'),false);
     cache.revokeOwner(binding.ownerKey);assert.equal(cache.revalidationPlan(binding,10),null);
 });
+
+test('session creation defers discarded TS search only for an admitted matching sampled HLS window', async()=>{
+    const fs=require('node:fs'),vm=require('node:vm');
+    const source=fs.readFileSync(require('node:path').join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
+    const start=source.indexOf('        if (!session.retainedVodStartupFormat && FINITE_TS_FAST_START_ENABLED && finiteTsProfileEligible(session)');
+    const end=source.indexOf('        // Browser-incompatible MP4',start);
+    assert.ok(start>0 && end>start);
+    for(const mode of ['matching','missing','different-binding','legacy','not-admitted','startup-job','zero']) {
+        const offset=mode==='zero'?0:100,session={ownerKey:binding.ownerKey,seekOffset:offset,
+            finiteTsResumeAligned:true,startupTimings:{},startupCacheJob:mode==='startup-job'};
+        let prepares=0,deferred,checked=0;
+        const run=vm.runInNewContext('(async()=>{'+source.slice(start,end)+'})',{
+            session,normalizedSeekOffset:offset,FINITE_TS_FAST_START_ENABLED:true,
+            sessionRequestAbortController:{signal:new AbortController().signal},
+            finiteTsProfileEligible:()=>true,canUseRecentResumeSamples:()=>mode!=='not-admitted',
+            privateResumeHlsBindingForSession:()=>mode==='different-binding'?{...binding,profileHash:'different'}:binding,
+            privateResumeHlsCache:{revalidationPlan:(current,position)=>{checked++;
+                assert.equal(position,offset);
+                if(mode==='missing'||current.profileHash!==binding.profileHash)return null;
+                return {kind:mode==='legacy'?'strong-validator':'sampled-recent-v1'};}},
+            prepareFiniteMkvSeekBroker:async(current,signal,options)=>{prepares++;deferred=options.deferTsIndex;
+                assert.equal(current,session);assert.ok(signal instanceof AbortSignal);},
+        });
+        await run();assert.equal(prepares,1);assert.equal(deferred,mode==='matching',mode);
+        assert.equal(checked,['not-admitted','startup-job','zero'].includes(mode)?0:1);
+        assert.equal(session.startupTimings.finiteTsResumeMode,offset?'serialized-window-seek':'initial-playback-observation');
+    }
+});

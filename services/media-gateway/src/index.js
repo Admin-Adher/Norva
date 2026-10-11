@@ -13166,7 +13166,18 @@ app.post('/sessions', requireGatewayAuth, startupCachePreparation.bindSessionCre
             // The exact finite TS uses the existing single-provider range lane.
             // Repeated demuxer seeks can reuse resident windows instead of
             // reconnecting directly through the provider proxy every time.
-            await prepareFiniteMkvSeekBroker(session, sessionRequestAbortController.signal);
+            // Sample revalidation drains and replaces this initial broker.
+            // Do not perform a position search that will be discarded before
+            // even checking a matching private HLS window. A failed proof
+            // still recreates the ordinary input with its current TS search.
+            const sampledHlsCandidate = normalizedSeekOffset > 0 && !session.startupCacheJob
+                && canUseRecentResumeSamples(session.ownerKey)
+                && privateResumeHlsCache.revalidationPlan(
+                    privateResumeHlsBindingForSession(session), normalizedSeekOffset,
+                )?.kind === 'sampled-recent-v1';
+            await prepareFiniteMkvSeekBroker(session, sessionRequestAbortController.signal, {
+                deferTsIndex: Boolean(sampledHlsCandidate),
+            });
             session.startupTimings.finiteTsResumeMode = normalizedSeekOffset === 0
                 ? 'initial-playback-observation' : session.finiteTsIndexPlan ? 'indexed-decoding' : 'serialized-window-seek';
         }
