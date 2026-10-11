@@ -312,11 +312,14 @@ class PrivateResumeHlsCache {
         if (!ended && end - position < (startup ? 60 : this.minimumAheadSeconds)) return this.rejectCapture('insufficient-ahead');
         this.prune(); const key = keyFor(binding), prior = this.entries.get(key);
         if (prior?.leases) return this.rejectCapture('active-lease');
-        // Reserve the entire per-file budget before asynchronous reads. Pending
-        // captures and leased windows count towards the same hard memory bound.
-        const inputBudget = recentProof && Array.isArray(inputWindows) ? Math.min(RECENT_INPUT_MAX_BYTES,
-            inputWindows.slice(0,512).reduce((sum,w) => sum + (Buffer.isBuffer(w?.payload) ? w.payload.length : 0), 0)) : 0;
-        const reservation = 2 * (this.perFileBytes + inputBudget); // read buffer + immutable copy
+        // Segments, subtitles and retained source intervals form one snapshot:
+        // its hydrated form must fit the same per-file limit. Plan input before
+        // copying, and reserve that limit only once (read + immutable copy).
+        const inputSelection = recentProof ? planInputWindows(inputWindows, binding.fileSizeBytes, RECENT_INPUT_MAX_BYTES) : [];
+        const inputBudget = inputSelection.reduce((sum,w) => sum+w.length, 0);
+        if (inputBudget >= this.perFileBytes) return this.rejectCapture('reservation-budget');
+        const mediaBudget = this.perFileBytes - inputBudget;
+        const reservation = 2 * this.perFileBytes;
         while (this.entries.size - (prior ? 1 : 0) >= this.maxEntries || this.bytes + this.reservedBytes + reservation > this.maxBytes) {
             // Background prefixes must not evict a viewer's recent resume.
             const victim = [...this.entries].find(([, entry]) => !entry.leases && entry !== prior
@@ -330,9 +333,9 @@ class PrivateResumeHlsCache {
         try {
             const retainedInput = inputBudget ? captureInputWindows(inputWindows, binding.fileSizeBytes, inputBudget) : [];
             for (const [i, segment] of selected.entries()) {
-                const payload = await readAsset(segment.name, this.perFileBytes - bytes);
+                const payload = await readAsset(segment.name, mediaBudget - bytes);
                 if (epoch !== this.epoch || !Buffer.isBuffer(payload) || !payload.length
-                    || payload.length > this.perFileBytes - bytes) return this.rejectCapture('asset-unavailable-or-budget');
+                    || payload.length > mediaBudget - bytes) return this.rejectCapture('asset-unavailable-or-budget');
                 const name = `resume-${i}.ts`;
                 // Detached immutable snapshot. A new FFmpeg process may delete
                 // or replace its temporary files without changing this cache.
@@ -341,7 +344,7 @@ class PrivateResumeHlsCache {
                 segments.push({ name, duration: segment.duration });
             }
             const subtitles = await captureSubtitleWindow({ renditions: subtitleRenditions,
-                videoSegments: selected, readAsset, sourcePesClock, maxBytes: Math.min(4 * 1024 * 1024, this.perFileBytes - bytes) });
+                videoSegments: selected, readAsset, sourcePesClock, maxBytes: Math.min(4 * 1024 * 1024, mediaBudget - bytes) });
             if (!subtitles || epoch !== this.epoch) return this.rejectCapture('subtitle-coverage-or-revoked');
             for (const [name, payload] of subtitles.assets) assets.set(name, payload);
             bytes += subtitles.bytes;

@@ -269,6 +269,36 @@ test('retained input never escapes the existing aggregate memory reservation', a
     assert.equal(cache.publicStatus().bytes,0);assert.equal(cache.publicStatus().reservedBytes,0);
 });
 
+test('HLS and retained input share one per-file budget and remain hydratable', async () => {
+    const options={recentRevalidation:true,maxBytes:4*N,perFileBytes:2*N};
+    const cache=new PrivateResumeHlsCache(options);
+    assert.equal(await capture(cache,{inputWindows:[{start:0,payload:Buffer.alloc(N,7)}],
+        readAsset:async(_,remaining)=>{
+            assert.equal(cache.publicStatus().reservedBytes,4*N);
+            assert.ok(remaining<=N);
+            return Buffer.alloc(188,0x47);
+        }}),true);
+    const entry=cache.candidate(binding,10);
+    assert.ok(entry.bytes>N && entry.bytes<=2*N);
+    const restored=new PrivateResumeHlsCache(options);
+    assert.equal(await restored.restoreWindow(binding,10,async()=>entry),true);
+    const lease=restored.acquire(binding,10,observed());
+    assert.ok(lease);
+    assert.equal(lease.inputSnapshot().windows[0].payload[0],7);
+    assert.ok(lease.asset('resume-0.ts').length>0);
+    lease.release();
+    assert.equal(restored.publicStatus().reservedBytes,0);
+});
+
+test('HLS refuses a snapshot whose combined source and media bytes exceed the per-file limit', async () => {
+    const cache=new PrivateResumeHlsCache({recentRevalidation:true,maxBytes:4*N,perFileBytes:2*N});
+    assert.equal(await capture(cache,{inputWindows:[{start:0,payload:Buffer.alloc(N)}],
+        readAsset:async()=>Buffer.alloc(N+1)}),false);
+    assert.equal(cache.publicStatus().lastCaptureRejection,'asset-unavailable-or-budget');
+    assert.equal(cache.publicStatus().bytes,0);
+    assert.equal(cache.publicStatus().reservedBytes,0);
+});
+
 
 test('successful fresh header is handed off after all four reads drain; failures never hand it off', async()=>{
     for(const failAt of [0,2,4]){
