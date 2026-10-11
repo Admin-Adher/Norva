@@ -114,6 +114,17 @@ test('a changed historical IDR clock and incomplete fresh window cannot authoriz
     const partial = await seek(data, { hints: handle, read: async (a, b) => data.subarray(a, b + 1 - (a ? 1 : 0)) });
     assert.equal(partial.result.point, null); assert.equal(partial.result.reason, 'witness-unverified');
 });
+test('bounded frame-clock thinning does not hide an intact nearby IDR witness', () => {
+    const data = fixture(), store = new TsSeekHints(), handle = store.begin(scope(data.length));
+    handle.observe({ start: 0, bytes: data.subarray(0, 262144) });
+    const at = 740 * 24 * 188;
+    handle.observe({ start: at, bytes: data.subarray(at, at + 2 * 1024 * 1024) });
+    const entry = [...store.entries.values()][0];
+    entry.clocks = entry.clocks.filter(c => Math.abs(c.pts / 90000 - entry.originHint - 80) > 30);
+    assert.ok(handle.pointWitness(81.4)); assert.equal(handle.hasNearby(80), true);
+    assert.ok(handle.describe(80).nearestSeconds < 5);
+    entry.points = []; assert.equal(handle.hasNearby(80), false);
+});
 test('unsupported clocks, missing audio and missing IDRs retain ordinary seeking', async () => {
     for (const data of [fixture({ audioGap: true }), fixture({ noIdr: true }), fixture({ clockJump: true })]) {
         const { result } = await seek(data); assert.equal(result.point, null);

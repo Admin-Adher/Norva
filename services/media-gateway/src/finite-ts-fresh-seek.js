@@ -20,8 +20,9 @@ class TsSeekHints {
             describe(seconds) {
                 const entry = store.entries.get(key);
                 const fresh = Boolean(entry && store.now() >= entry.at && store.now() - entry.at <= 600000);
-                const nearestSeconds = fresh && Number.isFinite(entry.originHint) && entry.clocks.length
-                    ? Math.min(...entry.clocks.map(c => Math.abs(c.pts / 90000 - entry.originHint - seconds))) : null;
+                const clocks = fresh ? [...entry.clocks, ...entry.points] : [];
+                const nearestSeconds = fresh && Number.isFinite(entry.originHint) && clocks.length
+                    ? Math.min(...clocks.map(c => Math.abs(c.pts / 90000 - entry.originHint - seconds))) : null;
                 return { scopes: store.entries.size, scopePresent: Boolean(entry), fresh,
                     originKnown: Number.isFinite(entry?.originHint), clocks: entry?.clocks.length || 0,
                     points: entry?.points.length || 0, nearestSeconds: nearestSeconds === null ? null : Number(nearestSeconds.toFixed(3)) };
@@ -47,7 +48,10 @@ class TsSeekHints {
                     || store.now() - entry.at > 600000) return false;
                 // Admission to a bounded search only. The exact origin and
                 // playback point must still be proved by the current reads.
-                return entry.clocks.some(c => Math.abs(c.pts / 90000 - entry.originHint - seconds) <= 30);
+                // Bounded clock thinning can remove nearby frame clocks while
+                // a complete IDR witness remains. Its validated PTS is also a
+                // temporal observation; it still only admits a current read.
+                return [...entry.clocks, ...entry.points].some(c => Math.abs(c.pts / 90000 - entry.originHint - seconds) <= 30);
             },
             pointHint(absoluteSeconds) {
                 const entry = store.entries.get(key);
