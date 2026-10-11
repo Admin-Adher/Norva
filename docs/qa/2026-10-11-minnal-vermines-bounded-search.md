@@ -61,3 +61,19 @@ The first production read now completes bytes 4,456,448–5,558,469 (1,102,022 b
 A post-restart opening took **21.353 seconds**. A subsequent out-of-cache seek to exactly 4,444 seconds first progressed at **16.859 seconds**. Gateway readiness was 10.681 seconds, first segment 10.161 seconds, with zero interrupted provider ranges at inspection. The same multi-step timestamp search remains; shorter network responses contributed to the difference from the preceding 20-second run. No new TS acceleration is claimed from this MP4-only correction, and no general rollout is justified.
 
 PR772 remains a draft. The production pilot contains the MP4 correction; remaining latency and broader repeatability are still open.
+
+## 07:00 UTC follow-up: smaller TS search experiment rejected
+
+Candidate `aafefc7ae60b7585a06e9d7fe4f7b6828bfd2960` reduced pilot TS lookbehind and first regular slice to 64 KiB. 183 focused tests passed, six optional skips; CI contracts and isolated image/GPU checks passed. It was temporarily deployed only to the owner pilot.
+
+At the same 4,444-second seek target, browser progression started at 20.536 seconds, Gateway ready at 14.443 seconds. The first six provider windows totalled 791,800 bytes versus 2,102,520 bytes in the preceding 256-KiB trace, but network time did not improve reliably: the initial 262-KiB header took 3.089 seconds and a later 2-MiB continuation took 15.262 seconds. Smaller windows did not eliminate the sequential timestamp-search requests. No successful seek acceleration is claimed.
+
+The experiment was reverted in `b722684c1`. At 07:01 UTC production was restored to the previously validated MP4-correction image `sha256:c368c08efa3471e267dccc13bd4f54f592f1cf6f61d8d76162ed688b0a3ec152`, with the original TS settings, admissions restored and Edge/main Gateway unchanged. Sanitized deployment receipts are `ts64-apply.remote.py.safe.json` and `tsrestore-apply.remote.py.safe.json`; search trace is `ts64-search.safe.json` in the local artifact directory.
+
+### Repeated Vermines reopens after restoration
+
+- The cold post-restart opening took 46.952 seconds to the first progressing sample. This reinforces the distinction between cold input and a cache hit.
+- First warm reopening: 5.660 seconds. The player advanced from 1537.401 to 1665.157 seconds by elapsed 133.409 seconds. No stall in the samples; initial buffer ended near 1574 seconds, so continuation passed beyond it.
+- Second warm reopening: 5.126 seconds. By elapsed 115.522 seconds the player advanced from 1665.096 to 1775.489 seconds, readyState 4 and buffer through 1840.594 seconds. No stalled or low-readiness post-start sample; continuation passed the initial buffer near 1720 seconds.
+- The polling intervals have tool-call gaps. These observations support repeatability for these positions and this account, not an exhaustive no-freeze or all-copy guarantee.
+- All jobs of CI run 38119678050 succeeded. Its candidate was nevertheless reverted because the real TS latency goal was not met. The successful MP4 correction remains deployed, with no new general rollout.
