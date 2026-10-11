@@ -103,7 +103,7 @@ test('real Gateway preparation admits disabled frozen topologies but rejects act
         source.indexOf('\nfunction applyFiniteMkvSeekBrokerFailure('));
     const point = { byteOffset: 188, packetOffset: 376, pts: 84 * 90000, dts: 84 * 90000,
         absoluteSeconds: 87, signature: 'a'.repeat(64), videoPid: 256, audioPid: 257 };
-    for (const scenario of ['absent', 'disabled', 'audio-active', 'subtitle-active', 'full-probe', 'two-audio', 'unproven']) {
+    for (const scenario of ['absent', 'disabled', 'audio-active', 'subtitle-active', 'full-probe', 'two-audio', 'unproven', 'pilot']) {
         let drained = false, fetches = 0, brokerOptions;
         const broker = { inputUrl: 'http://127.0.0.1:12345/finite-mkv-seek/' + 'A'.repeat(43) };
         const constants = Object.fromEntries([...new Set(block.match(/\b(?:FINITE_[A-Z_]+|INBAND_HEADER_BYTES|PROVIDER_SLOT_RELEASE_DELAY_MS)\b/g))]
@@ -113,7 +113,7 @@ test('real Gateway preparation admits disabled frozen topologies but rejects act
             playbackStartupWindowPolicy: require("../services/media-gateway/src/playback-startup-window").createPlaybackStartupWindowPolicy({enabled:false}),
             isFiniteMkvVodSession: () => false,
             canUsePrivateResumeCache: require("../services/media-gateway/src/private-resume-binding").createPrivateResumeOwnerGate({enabled:false}),
-            canUseRecentResumeSamples: () => false,
+            canUseRecentResumeSamples: () => scenario === 'pilot',
             sharedPlaybackRanges: new (require("../services/media-gateway/src/shared-playback-ranges").SharedPlaybackRanges)({enabled:false}),
             hybridPlaybackRanges: require("../services/media-gateway/src/shared-playback-ranges").hybridPlaybackRanges,
             finiteTsProfileEligible: () => true,
@@ -149,7 +149,8 @@ test('real Gateway preparation admits disabled frozen topologies but rejects act
             }) };
         await prepare(session, new AbortController().signal);
         assert.equal(typeof brokerOptions.onFiniteWindow, 'function');
-        const eligible = ['absent', 'disabled'].includes(scenario);
+        assert.equal(brokerOptions.finiteInitialContinuationGraceMs, scenario === 'pilot' ? 500 : 0);
+        const eligible = ['absent', 'disabled', 'pilot'].includes(scenario);
         assert.equal(session.startupTimings.finiteTsIndexUsed, eligible, scenario);
         assert.equal(fetches, eligible || scenario === 'unproven' ? 1 : 0, scenario);
         if (eligible) {
