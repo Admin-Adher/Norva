@@ -33,6 +33,16 @@ public class ConsentDpadInstrumentedTest {
         instrumentation.sendKeyDownUpSync(code);
         instrumentation.waitForIdleSync();
     }
+    private void waitForChoice(WebView view, String choice) throws Exception {
+        String expected = "\"" + choice + "\"";
+        long deadline = android.os.SystemClock.elapsedRealtime() + 5000;
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
+            if (expected.equals(eval(view,"document.activeElement.getAttribute('data-consent')"))) return;
+            Thread.sleep(50);
+        }
+        assertEquals("Consent focus ready before remote input", expected,
+            eval(view,"document.activeElement.getAttribute('data-consent')"));
+    }
     @Test public void remoteCanChooseDismissAndRestoreFocus() throws Exception {
         Intent intent = new Intent(instrumentation.getTargetContext(), ConsentQaActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         ConsentQaActivity activity = (ConsentQaActivity) instrumentation.startActivitySync(intent);
@@ -79,15 +89,25 @@ public class ConsentDpadInstrumentedTest {
             assertEquals("Focus restored to fiche", "\"detail\"", eval(view,"document.activeElement.id"));
             assertEquals("Original inert state retained", "true", eval(view,"document.getElementById('already-inert').inert"));
             eval(view,"NorvaConsent.open()");
+            // Activity idle does not drain the WebView renderer's input queue.
+            // Verify the actual focus before sending the next remote action.
+            waitForChoice(view,"denied");
             key(KeyEvent.KEYCODE_DPAD_RIGHT);
+            waitForChoice(view,"granted");
+            assertEquals("Reopened Accept reachable", "\"granted\"", eval(view,"document.activeElement.getAttribute('data-consent')"));
             key(KeyEvent.KEYCODE_DPAD_CENTER);
+            long acceptedDeadline = android.os.SystemClock.elapsedRealtime() + 5000;
+            while (!"\"granted\"".equals(eval(view,"NorvaConsent.get()"))
+                    && android.os.SystemClock.elapsedRealtime() < acceptedDeadline) Thread.sleep(50);
             assertEquals("Acceptance persisted", "\"granted\"", eval(view,"NorvaConsent.get()"));
             eval(view,"NorvaConsent.open()");
+            waitForChoice(view,"denied");
             key(KeyEvent.KEYCODE_BACK);
             assertEquals("Back closes consent first", "false", eval(view,"!!document.querySelector('.norva-consent')"));
             assertEquals("Fiche remains open", "true", eval(view,"document.getElementById('modal').classList.contains('active')"));
             assertEquals("Back preserves prior choice", "\"granted\"", eval(view,"NorvaConsent.get()"));
             eval(view,"document.getElementById('modal').classList.remove('active');localStorage.removeItem('norva_consent');openConsent()");
+            waitForChoice(view,"denied");
             key(KeyEvent.KEYCODE_BACK);
             assertEquals("No implicit consent", "null", eval(view,"NorvaConsent.get()"));
             assertEquals("Settings opener restored", "\"opener\"", eval(view,"document.activeElement.id"));
@@ -100,6 +120,7 @@ public class ConsentDpadInstrumentedTest {
             }
             assertTrue("Standalone pairing loaded", pairingReady);
             eval(view,"NorvaConsent.open()");
+            waitForChoice(view,"denied");
             assertEquals("Pairing consent opaque", "true", eval(view,"getComputedStyle(document.querySelector('.norva-consent__card')).backgroundColor!=='rgba(0, 0, 0, 0)'"));
             key(KeyEvent.KEYCODE_DPAD_RIGHT);
             assertEquals("Pairing Accept reachable", "\"granted\"", eval(view,"document.activeElement.getAttribute('data-consent')"));
