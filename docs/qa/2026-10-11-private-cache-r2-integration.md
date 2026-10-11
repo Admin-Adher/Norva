@@ -20,6 +20,23 @@ en isolation dans la suite de ce rapport. Les profils incomplets restent
 refusés. Ces preuves ne constituent pas un déploiement public ni une validation
 générale de fluidité.
 
+### Bilan de la campagne du 12 octobre
+
+La validation Android du code `a6a209cf` est terminée : **six configurations
+téléphone/TV réussies**, ainsi que les deux contrôles de consentement TV.
+Les paquets Windows, téléphone et TV sont construits ; **6 547 tests de contrats
+réussissent, 39 sont ignorés**. Les réparations de fixtures et d'injection Back
+concernent le banc d'instrumentation ; elles ne prouvent pas une accélération
+de la lecture Android en production.
+
+Les copies réelles MP4, MKV et MPEG-TS ont été rejouées sur les trois plateformes,
+avec une quatrième copie, épisode MP4, sur l'émulateur Android. La conservation
+après redémarrage et le renouvellement A → B sont démontrés en isolation.
+La fluidité reste inégale : pauses et saut hors cache de 78,64 s sur Lost web,
+sauts Android jusqu'à 19,45 s, Jolt Windows saccadé et position de reprise
+ignorée sur Minnal Windows. Aucune validation à l'écoute n'est revendiquée.
+**PR786 reste en brouillon, production inchangée et R2 payant désactivé.**
+
 ## Première minute et file globale
 
 - Publication atomique du média puis du manifeste signé ; objets privés,
@@ -608,6 +625,24 @@ même injection, puis arrêt de l'émulateur de test. Les contrôles de consente
 TV du commit `9868c56c` réussissent aussi aux deux polices en CI :
 [38184228832](https://github.com/Admin-Adher/Norva/actions/runs/38184228832).
 La correction Back suivante requiert son propre passage de la matrice complète.
+
+### Validation CI finale du code et des tests
+
+Le commit **`a6a209cf20250bb5453f40cf242c0d8d7d964303`** termine ensuite tous
+ses contrôles. La [matrice Android 38184784234](https://github.com/Admin-Adher/Norva/actions/runs/38184784234)
+réussit sur les quatre configurations téléphone API 35 (gestes et trois boutons,
+polices 1,0 et 1,3), ainsi que les deux configurations TV API 34.
+Les [contrôles de consentement TV 38184784208](https://github.com/Admin-Adher/Norva/actions/runs/38184784208)
+réussissent aussi aux deux polices.
+
+[Build Norva 38184784209](https://github.com/Admin-Adher/Norva/actions/runs/38184784209)
+valide **6 547 tests, 39 ignorés**, SQL 50/50, Worker SQLite/R2 local 15/15,
+et les trois paquets Windows/téléphone/TV. Les échecs antérieurs restent
+consignés ci-dessus ; cette nouvelle matrice porte bien sur la dernière
+injection Back, avec les assertions conservées.
+Preuves locales : `durable-final-ci.safe.json`, `native-durable-ci.safe.json`
+et logs des quatre jobs téléphone. Cette clôture documentaire ne modifie
+aucun code de lecture ou de test par rapport à `a6a209cf`.
 
 ### Clôture de la campagne réelle
 
