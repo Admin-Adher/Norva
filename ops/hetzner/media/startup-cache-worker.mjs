@@ -3,6 +3,11 @@ import { pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const deferredReasons = new Set(['pilot-disabled', 'exact-file-evidence-unavailable',
+    'native-mp4-prefix-unavailable', 'account-unidentified', 'activity-unavailable',
+    'account-presence', 'viewer-active', 'background-job-active', 'account-reserved',
+    'provider-reserved', 'activity-changed', 'not-admitted', 'cancelled', 'not-prepared',
+    'profile-refreshed', 'profile-refresh-deferred']);
 export function startupTargets(value) {
     if (!Array.isArray(value) || !value.length || value.length > 8) throw Error('Invalid startup target list');
     return value.map(row => {
@@ -33,7 +38,8 @@ export async function runStartupCycle({ targets, endpoint, token, fetchImpl = fe
             result = { ok: response.ok && body.protocol === 1, prepared: response.ok && body.prepared === true,
                 refreshAfterSeconds: Number.isInteger(body.refreshAfterSeconds) ? Math.max(30, Math.min(300, body.refreshAfterSeconds)) : 60,
                 // Avoid repeating private identifiers or upstream error text.
-                reason: response.ok && body.prepared === true ? 'prefix-ready' : response.ok ? 'deferred' : 'request-rejected' };
+                reason: response.ok && body.prepared === true ? 'prefix-ready' : response.ok
+                    ? deferredReasons.has(body.reason) ? body.reason : 'deferred' : 'request-rejected' };
         } catch (_) { result = { ok: false, prepared: false, reason: 'transport-unconfirmed' }; }
         onResult(index, result);
         // A rejected service request or uncertain transport must not cascade

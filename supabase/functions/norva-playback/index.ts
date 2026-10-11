@@ -16134,6 +16134,32 @@ async function runStartupCacheControl(req: Request, db: SupabaseClient): Promise
   return { protocol: 1, authorized: await startupCachePermitCurrent(db, permit) };
 }
 
+async function refreshStartupCacheMovieProfile(db: SupabaseClient, userId: string,
+  sourceId: string, itemId: string): Promise<JsonRecord> {
+  const { data, error } = await db.from("cloud_catalog_visible_title_variants")
+    .select("id").eq("user_id", userId).eq("source_id", sourceId)
+    .eq("item_type", "movie").eq("external_id", itemId).limit(2);
+  if (error) throwDb(error, "Unable to resolve startup profile maintenance");
+  if (!Array.isArray(data) || data.length !== 1
+    || !PLAYBACK_SESSION_UUID_PATTERN.test(stringOr(data[0]?.id, ""))) {
+    return { protocol: 1, prepared: false, reason: "exact-file-evidence-unavailable" };
+  }
+  // A bounded in-band TS observation is useful for playback, but does not
+  // certify the complete track table. Never promote its completeness flag.
+  // Use the existing source-scoped, idle-only probe with distributed admission,
+  // current ownership/generation and positive transport-drain attestation.
+  const token = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
+  const result = await runCodecProfileBackfill(new Request("http://internal/codec-profile-backfill", {
+    method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ userId, variantIds: [data[0].id], allowSourceLocal: true }),
+  }), db, sourceId);
+  // Finish this attempt after the probe. Preparing the minute belongs to the
+  // next worker cycle, with a fresh ownership/profile/presence check; two
+  // provider acquisitions must not outlive the worker's request budget.
+  return { protocol: 1, prepared: false, refreshAfterSeconds: 60,
+    reason: result.persisted === 1 ? "profile-refreshed" : "profile-refresh-deferred" };
+}
+
 async function runStartupCachePreparation(req: Request, db: SupabaseClient): Promise<JsonRecord> {
   const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
   const supplied = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
@@ -16149,6 +16175,11 @@ async function runStartupCachePreparation(req: Request, db: SupabaseClient): Pro
   let target: Awaited<ReturnType<typeof startupCacheTarget>>;
   try { target = await startupCacheTarget(db, userId, sourceId, itemType, itemId); }
   catch (error) {
+    if (itemType === "movie" && error instanceof HttpError && error.status === 409
+      && ["LANGUAGE_VALIDATION_CODEC_PROFILE_REQUIRED", "LANGUAGE_VALIDATION_CODEC_AUDIO_INVALID"]
+        .includes(stringOr(recordOrEmpty(error.details).code, ""))) {
+      return await refreshStartupCacheMovieProfile(db, userId, sourceId, itemId);
+    }
     if (error instanceof HttpError && [404, 409].includes(error.status))
       return { protocol: 1, prepared: false, reason: "exact-file-evidence-unavailable" };
     throw error;
