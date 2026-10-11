@@ -157,6 +157,33 @@ test('an unavailable fresh startup check keeps the prefix unleased without anoth
     }
 });
 
+test('MKV and TS resumes keep an unavailable candidate unleased and retain normal broker fallback', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8');
+    const start = source.indexOf('async function tryStartPrivateResumeWindow(');
+    const end = source.indexOf('\nfunction usesFiniteMkvSeekBroker', start);
+    for (const format of ['mkv', 'mpegts']) for (const changedTarget of [false, true]) {
+        const calls = [], session = { seekOffset: 175, ownerKey: binding.ownerKey, startupTimings: {} };
+        const run = vm.runInNewContext('(' + source.slice(start, end) + ')', {
+            Date, Number, canUseStartupCache: () => true, canUseRecentResumeSamples: () => true,
+            privateResumeHlsBindingForSession: () => binding, privateResumeFormat: () => format,
+            privateResumeHlsCache: { hasCandidate: () => true, revalidationPlan: () => ({ kind: 'sampled-recent-v1' }),
+                acquire: () => { calls.push('invalidate'); return null; } },
+            revalidateRecentResumeSession: async () => {
+                calls.push('fresh-drained');
+                session.startupTimings.recentResumeValidationUnavailable = { kind: 'cancelled-or-budget' };
+                if (changedTarget) session.startupTimings.recentResumeValidationOutcome = 'target-changed';
+                return null;
+            },
+            prepareFiniteMkvSeekBroker: async () => { calls.push('normal-broker'); return {}; },
+        });
+        assert.equal(await run(session), false);
+        assert.equal(session.privateResumeLease, undefined);
+        assert.deepEqual(calls, changedTarget ? ['fresh-drained', 'normal-broker', 'invalidate']
+            : ['fresh-drained', 'normal-broker']);
+        assert.equal(session.finiteTsResumeAligned, format === 'mpegts' ? true : undefined);
+    }
+});
+
 test('startup continuation and rejected-prefix fallback retain the zero-position range broker', async () => {
     const source = fs.readFileSync(path.join(__dirname, '../services/media-gateway/src/index.js'), 'utf8');
     const uses = source.slice(source.indexOf('function usesFiniteMkvSeekBroker('), source.indexOf('function applyFiniteMkvSeekProviderIdentity('));

@@ -16454,6 +16454,14 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
         // continuation and a miss's normal startup still need indexed input.
         // Never fall through to direct remote FFmpeg after closing that owner.
         if (!await prepareFiniteMkvSeekBroker(session, requestSignal)) return false;
+        // A failed fresh read is not evidence that the retained file changed.
+        // Continue through the ordinary broker without leasing these bytes,
+        // but preserve their original TTL for a later fully validated attempt.
+        if (!observed && session.startupTimings.recentResumeValidationUnavailable
+            && session.startupTimings.recentResumeValidationOutcome !== 'target-changed') {
+            session.startupTimings.privateResumeValidationMs = Date.now() - startedAt;
+            return false;
+        }
     } else {
         const broker = await prepareFiniteMkvSeekBroker(session, requestSignal);
         if (!broker) return false;
