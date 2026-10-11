@@ -7,6 +7,17 @@ durée annoncée 9 558,8 secondes. La variante MKV du même titre n'est pas
 le témoin de cet audit. Aucun identifiant ni accès fournisseur n'est publié.
 La portée générale des caches reste active.
 
+### État final après PR783 et PR784
+
+Le refus Norva sur changement du seul chemin de livraison et la tentative
+inutile de l'ancienne adresse sont corrigés et déployés. Les deux derniers
+rejeux publics prouvent un chemin réellement renouvelé, quatre échantillons
+fraîchement concordants et **8 Mio réutilisés** : reprises en **9,3 et 8,4 s**.
+Chaque lecture dépasse deux minutes au-delà de sa fenêtre conservée, sans
+pause ni erreur dans les relevés. Les limites d'échantillonnage et le détail
+des vérifications figurent dans la dernière section. Les mesures initiales
+ci-dessous décrivent les étapes antérieures et restent conservées.
+
 ## Reproduction de l'occupation sans lecture
 
 Le 11 octobre, aucune session de lecture du propriétaire ou du même compte
@@ -286,3 +297,155 @@ Déploiement et rejeux : `identity-stage.safe.json`,
 `minnal-zero-identity-server.safe.json`, `minnal-warm-identity-server.safe.json`,
 `minnal-warm-identity-audio.safe.json`, `final-status.remote.py.safe.json`.
 Les captures locales restent hors Git, avec les identifiants et accès privés.
+
+## Suite — livraison renouvelée et reprise réelle, 11 octobre
+
+### Défaut Norva et correction PR783
+
+La première réponse fraîche était rejetée sur le seul changement de chemin
+CDN, avant de comparer les quatre échantillons du fichier. Un chemin de
+livraison transitoire était donc traité comme une identité permanente.
+
+PR783 autorise la fin des quatre vérifications lorsque seul le chemin change
+sur le même protocole, hôte et forme de requête. L'acquisition du cache exige
+toujours la liaison privée exacte compte/source/révision/profil, la taille
+exacte, les quatre plages et leurs empreintes identiques. TTL original de
+dix minutes, révocation et plafonds mémoire restent inchangés. Il s'agit
+toujours d'une preuve partielle récente, jamais d'une empreinte du fichier
+entier. Les entrées à ETag fort restent liées à leur cible exacte.
+
+Après un 509 confirmé d'une adresse conservée, le validateur peut fermer et
+drainer cette connexion, puis ouvrir la source d'origine une seule fois sur
+le même trajet et sous le même claim. Le budget total reste de huit secondes.
+Les fixtures HTTP prouvent un seul lecteur amont actif, la fermeture avant
+réouverture et le refus d'une plage modifiée malgré une nouvelle adresse.
+
+**273 tests ciblés réussis, cinq contrôles optionnels existants ignorés.**
+Contrats CI réussis sur `ecbe1f4195c1174cb5e7212e0adca876527715e1`, run
+`38156195567`, job `114519570113`. PR783 fusionnée dans
+`adc62611c5c92139bb6f403923e741823f6bd000`.
+
+Canary isolé sain, tests du renouvellement réussis dans l'image et encodage
+VAAPI validé. Déploiement des deux Gateways de **16:39:13 à 16:39:38 UTC**,
+image `sha256:f7d41b741bbd1067152955d32bc685dd9d4747411ef6c75f5793a932d256f67d`.
+Admissions de fond restaurées ; environnements, portée générale et budgets
+conservés. Le redémarrage vide les caches mémoire : le premier rejeu est froid.
+
+### Deux reprises publiques après PR783
+
+Même copie TS de Minnal, depuis les boutons publics de la fiche, après fermeture
+par Accueil. Les positions diffèrent des essais précédents.
+
+| Rejeu | Position absolue demandée | Première progression depuis le clic | Cache réellement utilisé |
+| --- | --- | --- | --- |
+| Préparation froide après redémarrage | 336 s | 21,0 s | Non |
+| Première reprise | 469 s | **5,4 s** | Quatre plages fraîches concordantes ; **8 Mio** d'entrée réinjectés ; 49 s de vidéo en réserve |
+| Deuxième reprise | 723 s | **6,3 s** | Quatre plages fraîches concordantes ; **8 Mio** d'entrée réinjectés ; 49 s de vidéo en réserve |
+
+Les deux reprises atteignent respectivement **256,7 et 208,5 s** sur leur
+timeline locale, donc dépassent largement les fenêtres conservées et reçoivent
+la continuation. Aucun arrêt ni erreur dans les échantillons relevés. Les
+adresses conservées restent valides dans ces deux essais : la branche de
+renouvellement de chemin n'y est pas encore éprouvée sur source réelle.
+
+Les démarrages sont échantillonnés dès le clic, environ chaque seconde. Les
+mesures sont ensuite réparties en fenêtres, avec des trous maximaux de
+82 et 50 s ; aucune fluidité exhaustive n'est revendiquée durant ces trous.
+Les compteurs d'images ne sont pas disponibles dans cette surface navigateur.
+
+### Éviter la livraison périmée : PR784
+
+PR783 sécurisait le renouvellement, mais essayait encore d'abord l'adresse
+conservée. PR784 ouvre directement la source canonique pour une fenêtre HLS
+autorisant le renouvellement de chemin. Les quatre échantillons suivants
+restent lus sur la cible fraîche épinglée ; les en-têtes et cette cible sont
+transmis à la continuation. Le parcours ancien, sans cette autorisation,
+conserve sa vérification liée à la cible. La règle ne fait pas confiance à
+une nouvelle URL : elle permet d'effectuer les preuves avant décision.
+
+**274 tests ciblés réussis, cinq contrôles optionnels existants ignorés.**
+Contrats CI réussis sur `850c16687c51e3d76c89cb1d26bee5f726abf4bd`, run
+`38157334595`, job `114522909719`. PR784 fusionnée dans
+`c64ccdff2919dd0daa3318171b06193fa025d18e`. Canary sain, tests du
+renouvellement exécutés dans l'image et encodage VAAPI validé.
+
+Les deux Gateways utilisent depuis **16:56:22–16:56:57 UTC** l'image
+`sha256:bf01e53f69bafcf2a0d3f81d9dc0358e57948c69804b2c4878dff6a06abfc63d`.
+Les environnements, budgets, trajets et portée générale sont conservés.
+La restauration des admissions et les images de retour arrière sont vérifiées.
+
+### Renouvellement réel du chemin : deux reprises publiques
+
+Même copie MPEG-TS, avec fermeture par Accueil, réouverture par Films puis
+Reprendre. Aucun historique ni bail n'est supprimé pour fabriquer un résultat.
+Le premier démarrage après le second redémarrage est froid : **17,0 s**.
+
+| Rejeu | Position absolue demandée | Première progression depuis le clic | Validation du cache |
+| --- | --- | --- | --- |
+| Première reprise après PR784 | 980 s | **9,3 s** | Chemin différent, taille identique, **4/4 empreintes concordantes**, 8 Mio réinjectés, fenêtre vidéo 49,0 s |
+| Seconde reprise après PR784 | 1 411 s | **8,4 s** | Chemin différent, taille identique, **4/4 empreintes concordantes**, 8 Mio réinjectés, fenêtre vidéo 50,0 s |
+
+Dans les deux cas, `sameTarget: false`, `accepted-path-renewal` et
+`privateResumeWindowHit: true` attestent le changement réel et l'acquisition
+du cache. `recentDeliveryTargetUsed: false` confirme le départ canonique.
+Il n'y a pas de refus de livraison dans ces deux validations. Les vérifications
+prennent **7,018 et 6,501 s**, comprises dans le délai annoncé depuis le clic.
+Ce délai reste soumis à l'arrivée des quatre lectures réseau ; ce n'est pas
+une reprise instantanée ni un résultat garanti sur toute livraison.
+
+Les timelines locales atteignent **180,3 et 177,8 s**, soit plus de deux minutes
+au-delà des fenêtres réutilisées. De nouvelles données sont reçues et la réserve
+continue d'avancer. Aucune paire d'échantillons espacés de trois secondes au
+maximum ne montre un arrêt de progression ; aucune erreur vidéo n'est relevée.
+Les trous maximaux entre fenêtres de mesure sont respectivement **56,8 et
+14,6 s** : aucune certification de chaque image ou absence de pause pendant
+ces trous n'est revendiquée. Les compteurs de frames restent indisponibles.
+
+Après la première reprise, le bouton public de recul de dix secondes est
+contrôlé : lecture active à la position attendue au premier relevé, **0,693 s**
+après la demande. Le saut avant est demandé ensuite, mais l'interruption de
+collecte empêche d'en établir le délai : les mesures ne reprennent qu'environ
+196 s plus tard. Elles montrent ensuite 35 s de progression sans erreur.
+Ces sauts visent la vidéo déjà chargée ; ils ne prouvent pas une accélération
+d'un saut hors cache.
+
+Trois segments locaux de la première reprise contiennent du H.264 High et de
+l'AAC-LC stéréo 48 kHz. Décodage audio sans erreur, sans nouvelle connexion
+fournisseur pour ce contrôle. Cela ne remplace pas une validation à l'écoute.
+
+### Conclusion et clôture
+
+La livraison change réellement de chemin tout en conservant les quatre plages
+échantillonnées. Le défaut Norva était de rejeter ce changement avant comparaison,
+puis de privilégier une URL transitoire conservée. Ces deux défauts sont corrigés
+en production générale. La cause interne des précédents 509 chez le fournisseur
+ou le relais n'est pas établie ; le nouveau parcours évite ce détour sans changer
+de route, d'IP ou de compte.
+
+Les reprises depuis le cache réel sont démontrées. Un démarrage froid, une entrée
+expirée ou un fichier dont les plages diffèrent reprend toujours le parcours
+normal, sans promesse du même délai. La minute préparée à zéro n'a pas été
+rééprouvée dans ces derniers rejeux à positions positives.
+
+À la clôture : **zéro session et zéro raw pump sur les deux Gateways**, Cloud et
+Playback sains, admissions normales (`enrichment_paused: false`), dispatcher non
+arrêté, worker audio et worker de préfixes conservés. Aucun compte n'est retiré
+du déploiement général. L'onglet créé pour les essais est fermé ; les onglets
+de l'utilisateur restent ouverts.
+
+### Preuves supplémentaires
+
+Dans `.codex-artifacts/startup-cache-20261010/` :
+
+- `delivery-stage.safe.json`, `delivery-apply.remote.py.safe.json`,
+  `canonical-stage.safe.json`, `canonical-apply.remote.py.safe.json` ;
+- `minnal-delivery-public.safe.json`, `minnal-delivery-final-analysis.safe.json` ;
+- `minnal-delivery-resume1-server.safe.json`,
+  `minnal-delivery-resume2-server.safe.json` ;
+- `minnal-canonical-resume1-server.safe.json`,
+  `minnal-canonical-resume2-server.safe.json` ;
+- `minnal-canonical-resume1-audio.safe.json`, `final-status.remote.py.safe.json`.
+
+Captures locales hors Git : `minnal-canonical-resume1.png` et
+`minnal-canonical-resume2.png`. La seconde est prise en pause volontaire à la
+fin de l'essai, après le contrôle de continuation.
