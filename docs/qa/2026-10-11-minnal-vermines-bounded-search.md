@@ -39,3 +39,25 @@ At closure, the agent exited playback through Home. Both Gateways and Edge repli
 ## Remaining work
 
 Confirm the MP4 metadata byte boundaries before changing initial-read caching. For TS, measure how much of the remaining time belongs to serial timestamp search versus delivery; a validated position index would avoid searches only where suitable evidence exists. Neither item is claimed repaired by this iteration.
+
+## Follow-up: complete MP4 metadata windows (same day)
+
+Revision `00a9dcba34c808ef58b7c27a3c5f75eea874fee3` adds a bounded top-level `moov` scheduling boundary. On the native MP4 pilot route only, an exact provider response finishes at that boundary before reading media speculatively. It does not accept partial responses, weaken validators or infer playable coverage from a declared box size. Split headers, unsupported layouts and byte-identical full/cached broker reads are tested: 167 tests passed, five optional skips.
+
+After CI contracts and the isolated image/GPU canary succeeded, the owner-only Gateway was updated to image `sha256:c368c08efa3471e267dccc13bd4f54f592f1cf6f61d8d76162ed688b0a3ec152` at 06:46 UTC. Edge code had independently changed and its routing listed two owners; those changes were preserved. The Gateway cache flags still list one owner. Neither Edge replica nor the main Gateway was redeployed.
+
+### Vermines: real metadata loss confirmed and repaired
+
+The first production read now completes bytes 4,456,448–5,558,469 (1,102,022 bytes), exactly finishing the metadata. Previously a larger range at that location was superseded before completing, so its metadata suffix was not retained. Speculative bytes after the metadata can still be abandoned normally.
+
+- Cold post-restart opening: first progressing browser sample at 31.323 seconds (telemetry first frame 31.142 seconds). This remains slow and is not a cache-hit result.
+- Warm reopening: first progressing sample at **5.523 seconds**, with **12,112,070 cached bytes seeded** and 62 cache hits by closure. The initial metadata suffix was not fetched again; the first subsequent provider range begins at byte 5,558,470.
+- Playback advanced from 1392.271 to 1507.608 seconds by elapsed 120.857 seconds. All post-start samples had readyState 4, with no equal-time pairs. Sampling has gaps between tool calls; this is not an exhaustive event-based guarantee.
+- Initial cached/read-ahead buffer ended around 1446 seconds, so the observed progression extends beyond it.
+- A buffered 10-second backward seek was already progressing at the first sample, **320 ms** after the action.
+
+### Minnal: still not resolved
+
+A post-restart opening took **21.353 seconds**. A subsequent out-of-cache seek to exactly 4,444 seconds first progressed at **16.859 seconds**. Gateway readiness was 10.681 seconds, first segment 10.161 seconds, with zero interrupted provider ranges at inspection. The same multi-step timestamp search remains; shorter network responses contributed to the difference from the preceding 20-second run. No new TS acceleration is claimed from this MP4-only correction, and no general rollout is justified.
+
+PR772 remains a draft. The production pilot contains the MP4 correction; remaining latency and broader repeatability are still open.
