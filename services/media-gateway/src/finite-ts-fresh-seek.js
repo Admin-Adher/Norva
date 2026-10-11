@@ -58,6 +58,13 @@ class TsSeekHints {
                 // point is still only a hint until the fresh scan proves it.
                 return p ? align(Math.max(HEADER, p.byteOffset - 65536)) : null;
             },
+            pointWitness(absoluteSeconds) {
+                const entry = store.entries.get(key);
+                if (!entry || store.now() < entry.at || store.now() - entry.at > 600000) return null;
+                const p = entry.points.filter(p => absoluteSeconds - p.pts / 90000 >= 1
+                    && absoluteSeconds - p.pts / 90000 <= 18).at(-1);
+                return p ? { ...p } : null;
+            },
             estimate(absoluteSeconds, bytesPerSecond) {
                 const entry = store.entries.get(key);
                 if (!entry || store.now() < entry.at || store.now() - entry.at > 600000) return null;
@@ -125,6 +132,36 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
     // codec can select this margin; other codecs keep the existing 2s guard.
     // The complete current IDR and audio on both sides remain mandatory.
     const minimumPreroll = origin.audioCodec === 'aac' ? 1 : 2;
+    const currentPoint = (scan, witness = null) => {
+        if (!scan || scan.invalid || scan.video.some(c => c.pid !== origin.videoPid || c.signature !== signature)
+            || scan.audio.some(c => c.pid !== origin.audioPid || c.signature !== signature)) return null;
+        return scan.points.filter(p => p.signature === signature && p.videoPid === origin.videoPid
+            && p.audioPid === origin.audioPid && absoluteSeconds - p.pts / 90000 >= minimumPreroll
+            && (minimumPreroll === 2 || p.pts - p.dts <= 45000)
+            && absoluteSeconds - p.pts / 90000 <= 18
+            && (!witness || ['packetOffset', 'pts', 'dts', 'videoPid', 'audioPid', 'signature'].every(k => p[k] === witness[k]))
+            && scan.video.at(-1).dts >= p.dts + 180000
+            && scan.audio.some(c => c.packetOffset >= p.byteOffset && c.dts >= p.dts - 90000
+                && c.dts <= p.dts + (origin.audioCodec === 'aac' ? 22500 : 0)
+                && c.dts <= absoluteSeconds * 90000 - 45000)
+            && scan.audio.some(c => c.dts >= p.dts + 180000)).at(-1) || null;
+    };
+    const witness = hints?.pointWitness?.(absoluteSeconds);
+    if (witness && Number.isSafeInteger(witness.byteOffset) && witness.byteOffset > HEADER
+        && witness.byteOffset + PACKET * 10 < fileSizeBytes && witness.signature === signature
+        && witness.videoPid === origin.videoPid && witness.audioPid === origin.audioPid) {
+        if (now() - began >= maxMs) return { ...result, reason: 'budget' };
+        // Re-observe the precise old IDR and its clocks in a complete CURRENT
+        // response. The old point only selects a read. Matching fresh origin,
+        // packet position, graph, A/V clocks and complete IDR proves the trim
+        // directly, without estimating a position from the dated duration or
+        // reopening the remote tail. Changed/missing points fall back to the
+        // ordinary seek; they never authorize retained media.
+        const scan = await acquire(align(witness.byteOffset - 65536), WINDOW);
+        const point = currentPoint(scan, witness);
+        return { ...result, point: point ? { ...point, absoluteSeconds } : null,
+            reason: point ? 'fresh-witness' : 'witness-unverified' };
+    }
     // The tail must confirm that the dated duration and fresh origin describe
     // this response's clock. No timestamp wrap or unrelated delivery timeline
     // may turn a byte estimate into an authorized seek.
@@ -160,14 +197,7 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
                 audioNear: scan.audio.some(c => audioNear(c, p)),
                 audioAfter: scan.audio.some(c => c.dts >= p.dts + 180000),
                 videoAfter: scan.video.at(-1).dts >= p.dts + 180000 })) };
-        const point = !scan.invalid && scan.points.filter(p => p.signature === signature && p.videoPid === origin.videoPid
-            && p.audioPid === origin.audioPid && absoluteSeconds - p.pts / 90000 >= minimumPreroll
-            && (minimumPreroll === 2 || p.pts - p.dts <= 45000)
-            && absoluteSeconds - p.pts / 90000 <= 18
-            // Observe clean video beyond the IDR and audio on both sides of it.
-            && scan.video.at(-1).dts >= p.dts + 180000
-            && scan.audio.some(c => audioNear(c, p))
-            && scan.audio.some(c => c.dts >= p.dts + 180000)).at(-1);
+        const point = currentPoint(scan);
         if (point) return { ...result, point: { ...point, absoluteSeconds }, reason: 'fresh-point' };
         // Fresh timestamps correct the next search estimate. Neither bitrate
         // nor historical metadata is ever used as the final playback offset.

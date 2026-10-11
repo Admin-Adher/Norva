@@ -92,6 +92,28 @@ test('complete assembled reads retain temporal hints and admit only nearby futur
     assert.equal(handle.hasNearby(1000), false);
     assert.ok(handle.pointHint(81.4) > 0);
 });
+test('the exact old point is rediscovered in current bytes without a duration-search tail read', async () => {
+    const data = fixture(), store = new TsSeekHints(), handle = store.begin(scope(data.length));
+    handle.observe({ start: 0, bytes: data.subarray(0, 262144) });
+    const at = 740 * 24 * 188;
+    handle.observe({ start: at, bytes: data.subarray(at, at + 2 * 1024 * 1024) });
+    const { result, ranges } = await seek(data, { hints: handle });
+    assert.equal(result.reason, 'fresh-witness'); assert.ok(result.point);
+    assert.equal(ranges.length, 2);
+    assert.ok(ranges.every(([a]) => a < data.length - 262144));
+    assert.equal(result.point.packetOffset, handle.pointWitness(81.4).packetOffset);
+});
+test('a changed historical IDR clock and incomplete fresh window cannot authorize the witness', async () => {
+    const data = fixture(), store = new TsSeekHints(), handle = store.begin(scope(data.length));
+    handle.observe({ start: 0, bytes: data.subarray(0, 262144) });
+    const at = 740 * 24 * 188;
+    handle.observe({ start: at, bytes: data.subarray(at, at + 2 * 1024 * 1024) });
+    const witness = handle.pointWitness(81.4); assert.ok(witness);
+    const changed = await seek(data, { hints: { pointWitness: () => ({ ...witness, pts: witness.pts + 1 }) } });
+    assert.equal(changed.result.reason, 'witness-unverified'); assert.equal(changed.result.point, null);
+    const partial = await seek(data, { hints: handle, read: async (a, b) => data.subarray(a, b + 1 - (a ? 1 : 0)) });
+    assert.equal(partial.result.point, null); assert.equal(partial.result.reason, 'witness-unverified');
+});
 test('unsupported clocks, missing audio and missing IDRs retain ordinary seeking', async () => {
     for (const data of [fixture({ audioGap: true }), fixture({ noIdr: true }), fixture({ clockJump: true })]) {
         const { result } = await seek(data); assert.equal(result.point, null);
