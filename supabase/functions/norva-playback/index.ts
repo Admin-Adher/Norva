@@ -16042,9 +16042,11 @@ function requireConfiguredMediaGatewayCallback(
 }
 
 function startupCacheOwnerAllowed(ownerKey: string): boolean {
+  if (Deno.env.get("PRIVATE_STARTUP_CACHE_ENABLED") !== "true" || !/^[a-f0-9]{64}$/.test(ownerKey)) return false;
+  if (Deno.env.get("PRIVATE_STARTUP_CACHE_ALL_AUTHENTICATED_OWNERS") === "true") return true;
   const owners = (Deno.env.get("PRIVATE_STARTUP_CACHE_OWNER_HASHES") ?? "").split(/[,\s]+/)
     .filter(value => /^[a-f0-9]{64}$/.test(value));
-  return Deno.env.get("PRIVATE_STARTUP_CACHE_ENABLED") === "true" && owners.includes(ownerKey);
+  return owners.includes(ownerKey);
 }
 
 async function vodPlaybackIdentityKey(sourceId: unknown, itemType: unknown, itemId: unknown,

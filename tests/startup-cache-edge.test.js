@@ -15,7 +15,9 @@ function harness(options = {}) {
     ...require('../supabase/functions/_shared/native-mp4-gateway-policy.mjs'),
     resolvedVodContainerAuthority: hint => hint?.codecProfile?.container === 'mov,mp4,m4a,3gp,3g2,mj2' ? 'mp4' : 'mkv',
     canonicalVodContainer: value => value === 'mp4' ? 'mp4' : null,
-    Deno: { env: { get: key => ({ PRIVATE_STARTUP_CACHE_ENABLED: 'true', PRIVATE_STARTUP_CACHE_OWNER_HASHES: owner,
+    Deno: { env: { get: key => ({ PRIVATE_STARTUP_CACHE_ENABLED: options.disabled ? 'false' : 'true',
+      PRIVATE_STARTUP_CACHE_OWNER_HASHES: options.ownerHashes ?? owner,
+      PRIVATE_STARTUP_CACHE_ALL_AUTHENTICATED_OWNERS: options.globalScope ?? 'false',
       NORVA_NATIVE_MP4_GATEWAY_ENABLED: options.nativeDisabled ? 'false' : 'true',
       NORVA_BACKFILL_TOKEN: 'operator-token' })[key] } },
     PLAYBACK_SESSION_UUID_PATTERN: /^[a-f0-9-]{36}$/, recordOrEmpty: value => value || {}, stringOr: (value, fallback) => typeof value === 'string' ? value : fallback,
@@ -48,6 +50,23 @@ function harness(options = {}) {
     body: JSON.stringify({ userId, sourceId, itemType: 'movie', itemId: '1' }) });
   return { context, events, target, db, request };
 }
+test('global startup enrollment still requires the explicit flag, valid authenticated owner and all admission guards', async () => {
+  for (const options of [{ ownerHashes: '' }, { ownerHashes: 'invalid' }, { ownerHashes: 'b'.repeat(64) },
+    { ownerHashes: '', globalScope: 'TRUE' }, { globalScope: 'true', disabled: true }]) {
+    const h = harness(options);
+    assert.equal((await h.context.runStartupCachePreparation(h.request, h.db)).prepared, false);
+    assert.deepEqual(h.events, []);
+  }
+  const h = harness({ ownerHashes: '', globalScope: 'true' });
+  assert.equal(h.context.startupCacheOwnerAllowed('b'.repeat(64)), true);
+  assert.equal(h.context.startupCacheOwnerAllowed('invalid'), false);
+  assert.equal(h.context.startupCacheOwnerAllowed(''), false);
+  assert.equal((await h.context.runStartupCachePreparation(h.request, h.db)).prepared, true);
+  assert.ok(h.events.indexOf('claim_provider_file_probe') < h.events.indexOf('gateway'));
+  const busy = harness({ ownerHashes: '', globalScope: 'true', busy: true });
+  assert.equal((await busy.context.runStartupCachePreparation(busy.request, busy.db)).prepared, false);
+  assert.equal(busy.events.includes('gateway'), false);
+});
 test('startup Edge entry rejects unauthenticated or caller-selected target/profile before authority reads', async () => {
   const h = harness();
   const bad = new Request(h.request.url, { method: 'POST', body: JSON.stringify({ userId, sourceId, itemType: 'movie', itemId: '1', sourceUrl: 'https://other.invalid' }), headers: { Authorization: 'Bearer operator-token' } });

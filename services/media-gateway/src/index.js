@@ -132,7 +132,7 @@ const { privateResumeBinding, createPrivateResumeOwnerGate, createRecentResumeOw
 const { createFreshResumeHandoff, consumeFreshResumeHandoff } = require('./fresh-resume-handoff');
 const { RetainedInputBarrier } = require('./retained-input-barrier');
 const { RetainedSessionTransfer } = require('./retained-session-transfer');
-const { retainRecentDeliveryTarget, consumeRecentDeliveryTarget, forkRecentDeliveryTarget } = require('./recent-delivery-target');
+const { retainRecentDeliveryTarget, consumeRecentDeliveryTarget, forkRecentDeliveryTarget, noteRecentDeliveryTargetFailure } = require('./recent-delivery-target');
 const { privateResumeProfile, canonicalResumeProfile } = require('./private-resume-profile');
 const { SOURCE_CLOCK, retainedSubtitleClock, retainedSubtitleClockArgs } = require('./retained-subtitle-clock');
 const { committedSubtitleOutputArgs, readCommittedSubtitle } = require('./committed-subtitle-delivery');
@@ -143,6 +143,8 @@ const { PrivateResumeHlsCache, parseResumeMediaPlaylist } = require('./private-r
 const { captureSubtitleWindow, parseSubtitlePlaylist } = require('./private-resume-subtitles');
 const { SharedPlaybackRanges, hybridPlaybackRanges } = require('./shared-playback-ranges');
 const { FiniteTsSeekIndex, indexedTsInputUrl } = require('./finite-ts-seek-index');
+const { TsSeekHints, findFreshTsSeek } = require('./finite-ts-fresh-seek');
+const finiteTsSeekHints = new TsSeekHints();
 const { PrivateMediaCacheStoreClient } = require('./privateMediaCacheStoreClient');
 const { SharedHlsObjectPublisher } = require('./sharedHlsObjectPublisher');
 const { publishSharedMediaCacheSessionWithRetry } = require('./sharedMediaCachePublication');
@@ -2830,16 +2832,18 @@ const canUseRecentResumeSamples = createRecentResumeOwnerGate({
     ownerHashes: process.env.PRIVATE_RESUME_RECENT_SAMPLES_OWNER_HASHES,
     allAuthenticatedOwners: process.env.PRIVATE_RESUME_RECENT_SAMPLES_ALL_AUTHENTICATED_OWNERS === 'true',
 });
-// Separate, explicit pilot opt-in. Omission (including an empty owner list)
+// Separate, explicit rollout opt-in. Omission (including an empty owner list)
 // leaves decoder retention disabled; the existing cache policy is unchanged.
 const retainedSessionOwnerGate = createRecentResumeOwnerGate({
     enabled: process.env.PRIVATE_RETAINED_SESSION_ENABLED === 'true',
     ownerHashes: process.env.PRIVATE_RETAINED_SESSION_OWNER_HASHES,
+    allAuthenticatedOwners: process.env.PRIVATE_RETAINED_SESSION_ALL_AUTHENTICATED_OWNERS === 'true',
 });
 // A separate pilot: a brief production burst cannot certify future delivery.
 const startupObservationOwnerGate = createRecentResumeOwnerGate({
     enabled: process.env.VOD_STARTUP_OBSERVATION_ENABLED === 'true',
     ownerHashes: process.env.VOD_STARTUP_OBSERVATION_OWNER_HASHES,
+    allAuthenticatedOwners: process.env.VOD_STARTUP_OBSERVATION_ALL_AUTHENTICATED_OWNERS === 'true',
 });
 const retainedSessionTransfer = new RetainedSessionTransfer({
     stop: session => stopSession(session, { reason: 'retained-session-discarded' }),
@@ -2855,6 +2859,7 @@ const { StartupCachePreparation } = require('./startup-cache-preparation');
 const canUseStartupCache = createRecentResumeOwnerGate({
     enabled: PRIVATE_RESUME_CACHE_ENABLED && process.env.PRIVATE_STARTUP_CACHE_ENABLED === 'true',
     ownerHashes: process.env.PRIVATE_STARTUP_CACHE_OWNER_HASHES,
+    allAuthenticatedOwners: process.env.PRIVATE_STARTUP_CACHE_ALL_AUTHENTICATED_OWNERS === 'true',
 });
 const privateStartupHlsCache = createPrivateStartupCache(privateResumeHlsCache);
 const startupCachePreparation = new StartupCachePreparation({
@@ -3165,7 +3170,13 @@ app.get('/health', (req, res) => {
                 ? 'all-authenticated-owners' : 'owner-allowlist',
             ownerScoped: Boolean(process.env.PRIVATE_RESUME_CACHE_OWNER_HASHES?.trim()), ...privateResumeHlsCache.publicStatus() },
         privateStartupHlsCache: { enabled: process.env.PRIVATE_STARTUP_CACHE_ENABLED === 'true',
-            ownerScope: 'owner-allowlist', ...privateStartupHlsCache.status(), preparation: startupCachePreparation.status() },
+            ownerScope: process.env.PRIVATE_STARTUP_CACHE_ALL_AUTHENTICATED_OWNERS === 'true'
+                ? 'all-authenticated-owners' : 'owner-allowlist',
+            ...privateStartupHlsCache.status(), preparation: startupCachePreparation.status() },
+        retainedSessionOwnerScope: process.env.PRIVATE_RETAINED_SESSION_ALL_AUTHENTICATED_OWNERS === 'true'
+            ? 'all-authenticated-owners' : 'owner-allowlist',
+        startupObservationOwnerScope: process.env.VOD_STARTUP_OBSERVATION_ALL_AUTHENTICATED_OWNERS === 'true'
+            ? 'all-authenticated-owners' : 'owner-allowlist',
         sharedPlaybackRanges: sharedPlaybackRanges.publicStatus(),
         finiteTsSeekIndex: finiteTsSeekIndex.status(),
         finiteMkvLinearSeekBridge: {
@@ -6402,6 +6413,8 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 }
             }
             if (finiteSeek && !finiteWindowRange) {
+                const navigationWindow = context.finiteNavigationWindow?.() === true
+                    && range.end - range.start + 1 <= 2 * 1024 * 1024;
                 finiteWindowIsWarmup = (
                     context.finiteWarmupWindowBytes > 0
                     && !context.finiteWarmupWindowConsumed
@@ -6432,6 +6445,17 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     // only its missing tail instead of redownloading the prefix.
                     alignToWindowEnd: !boundedTail && context.finiteAlignFirstWindow && regularProviderWindowsCompleted === 0,
                 });
+                // The internal TS navigator requested an exact bounded sample.
+                // Complete it in one response; libav's ordinary reads retain
+                // their existing first slice, lookbehind and growth policy.
+                if (navigationWindow) finiteWindowRange = { start: range.start + forwarded, end: range.end, total: range.total };
+                // Finish the complete metadata response before speculatively
+                // entering media bytes. Chromium may abandon that continuation
+                // for its resume cue; a complete moov window remains reusable.
+                // This only bounds I/O on the existing native MP4 pilot route.
+                const metadataEnd = context.mp4CacheCoverage ? context.mp4SizeEvidence?.metadataEnd() : null;
+                if (metadataEnd > finiteWindowRange.start && metadataEnd <= finiteWindowRange.end)
+                    finiteWindowRange.end = metadataEnd - 1;
                 const cached = finiteMkvSeekCacheLookup(context, finiteWindowRange, {
                     allowPrefix: true,
                 });
@@ -6472,7 +6496,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         // A tail cue can be queued while the header warmup is
                         // still running. It still needs its bounded preceding
                         // packets; the warmup flag must not remove that slice.
-                        forwarded === 0 ? context.finiteSeekLookbehindBytes : 0
+                        forwarded === 0 && !navigationWindow ? context.finiteSeekLookbehindBytes : 0
                     )),
                 };
                 finiteBufferedBytes = 0;
@@ -7515,6 +7539,8 @@ async function createStrictLidBroker(options = {}) {
         onFiniteResumePrefix,
         onFiniteWindow: pathPrefix === 'finite-mkv-seek' && typeof options.onFiniteWindow === 'function'
             ? options.onFiniteWindow : null,
+        finiteNavigationWindow: pathPrefix === 'finite-mkv-seek' && typeof options.finiteNavigationWindow === 'function'
+            ? options.finiteNavigationWindow : null,
         finiteWindowTrace: [],
         finiteQueuedRequests: 0,
         finiteMaxQueuedRequests: 0,
@@ -7588,10 +7614,20 @@ async function createStrictLidBroker(options = {}) {
         context.validator = freshContinuation.validator || null;
         context.effectiveUrlSha256 = freshContinuation.effectiveUrlSha256;
         context.effectiveUrlIdentitySha256 = freshContinuation.effectiveUrlIdentitySha256;
-        seedFiniteMkvCurrentPrefix(context, { finiteCurrentPrefix: freshContinuation.prefix,
+        const seededFreshHeader = seedFiniteMkvCurrentPrefix(context, { finiteCurrentPrefix: freshContinuation.prefix,
             finiteCurrentPrefixOwner: options.freshResumeScope.id });
         onProviderIdentity?.({ validator: context.validator, effectiveUrlSha256: context.effectiveUrlSha256,
             effectiveUrlIdentitySha256: context.effectiveUrlIdentitySha256, targetParts: freshContinuation.targetParts });
+        // This is the same claim's complete, freshly drained header, not old
+        // retained media. Passive navigation also needs its origin: otherwise
+        // recently observed body hints lose their clock after the prior header
+        // expires, and FFmpeg repeats an ordinary remote position search.
+        // Metadata failure cannot alter playback or authorize a cached window.
+        if (seededFreshHeader) try {
+            context.onFiniteWindow?.({ start: 0, bytes: Buffer.from(freshContinuation.prefix.payload),
+                proof: { fileSizeBytes: context.fileSizeBytes, validator: context.validator,
+                    effectiveUrlIdentitySha256: context.effectiveUrlIdentitySha256 } });
+        } catch (_) {}
     } else seedFiniteMkvCurrentPrefix(context, options);
     const server = http.createServer((req, res) => {
         handleStrictLidBrokerRequest(context, expectedPath, req, res);
@@ -7846,6 +7882,11 @@ async function createStrictLidBroker(options = {}) {
                 options.abortSignal?.removeEventListener?.('abort', onAbort);
                 strictLidBrokers.delete(broker);
                 context.drainCompleted = true;
+                if (recentDelivery && context.recentValidationKeepAlive
+                    && context.completedProviderFetches === 0
+                    && context.terminalError?.code === 'PROVIDER_REQUEST_FAILED') {
+                    noteRecentDeliveryTargetFailure(recentDelivery, { upstreamStatus: context.terminalError.upstreamStatus });
+                }
             })();
             return closePromise;
         },
@@ -13144,7 +13185,18 @@ app.post('/sessions', requireGatewayAuth, startupCachePreparation.bindSessionCre
             // The exact finite TS uses the existing single-provider range lane.
             // Repeated demuxer seeks can reuse resident windows instead of
             // reconnecting directly through the provider proxy every time.
-            await prepareFiniteMkvSeekBroker(session, sessionRequestAbortController.signal);
+            // Sample revalidation drains and replaces this initial broker.
+            // Do not perform a position search that will be discarded before
+            // even checking a matching private HLS window. A failed proof
+            // still recreates the ordinary input with its current TS search.
+            const sampledHlsCandidate = normalizedSeekOffset > 0 && !session.startupCacheJob
+                && canUseRecentResumeSamples(session.ownerKey)
+                && privateResumeHlsCache.revalidationPlan(
+                    privateResumeHlsBindingForSession(session), normalizedSeekOffset,
+                )?.kind === 'sampled-recent-v1';
+            await prepareFiniteMkvSeekBroker(session, sessionRequestAbortController.signal, {
+                deferTsIndex: Boolean(sampledHlsCandidate),
+            });
             session.startupTimings.finiteTsResumeMode = normalizedSeekOffset === 0
                 ? 'initial-playback-observation' : session.finiteTsIndexPlan ? 'indexed-decoding' : 'serialized-window-seek';
         }
@@ -16441,7 +16493,7 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
     }
     const startedAt = Date.now();
     const plan = cache.revalidationPlan(binding, position);
-    let observed;
+    let observed, lease = null;
     if (plan) {
         if (!canUseRecentResumeSamples(session.ownerKey)) return false;
         observed = await revalidateRecentResumeSession(session, plan, requestSignal);
@@ -16453,10 +16505,19 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
             return false;
         }
         if (observed) applyFiniteMkvSeekProviderIdentity(session, observed);
+        // A successful check still has to match every retained sample before
+        // the cache can authorize playback. Acquire first: searching the TS
+        // position here would be discarded when the cached splice is chosen.
+        if (observed || session.startupTimings.recentResumeValidationOutcome === 'target-changed')
+            lease = cache.acquire(binding, position, observed);
         // Validation drained the preparation broker. Both a cache hit's
         // continuation and a miss's normal startup still need indexed input.
         // Never fall through to direct remote FFmpeg after closing that owner.
-        if (!await prepareFiniteMkvSeekBroker(session, requestSignal)) return false;
+        try {
+            if (!await prepareFiniteMkvSeekBroker(session, requestSignal, { deferTsIndex: Boolean(lease) })) {
+                lease?.release(); return false;
+            }
+        } catch (error) { lease?.release(); throw error; }
         // A failed fresh read is not evidence that the retained file changed.
         // Continue through the ordinary broker without leasing these bytes,
         // but preserve their original TTL for a later fully validated attempt.
@@ -16476,12 +16537,14 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
         if (response.status !== 206 || fresh.byteLength !== Math.min(size, 65536)) return false;
         observed = privateResumeObservedIdentity(session);
     }
-    const lease = cache.acquire(binding, position, observed);
+    if (!plan) lease = cache.acquire(binding, position, observed);
     session.startupTimings.privateResumeValidationMs = Date.now() - startedAt;
     if (!lease) return false;
     if (lease.validationMode === 'sampled-recent-v1') {
-        session.startupTimings.privateResumeInputSeededBytes = session.finiteMkvSeekBroker?.seedRecentInput(
-            lease.inputSnapshot()) || 0;
+        try {
+            session.startupTimings.privateResumeInputSeededBytes = session.finiteMkvSeekBroker?.seedRecentInput(
+                lease.inputSnapshot()) || 0;
+        } catch (error) { lease.release(); throw error; }
     }
     session.startupTimings.privateResumeValidationMode = lease.validationMode;
     session.privateResumeLease = lease;
@@ -16564,7 +16627,7 @@ function applyFiniteMkvSeekProviderIdentity(session, identity) {
     session.startupTimings.finiteMkvSeekProviderIdentityBound = true;
 }
 
-async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
+async function prepareFiniteMkvSeekBroker(session, parentSignal = null, { deferTsIndex = false } = {}) {
     const finiteMkv = isFiniteMkvVodSession(session);
     const finiteMp4 = session?.finiteMp4SeekBroker === true;
     const finiteTs = !finiteMkv && finiteTsProfileEligible(session)
@@ -16601,7 +16664,13 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     const tsObserver = finiteTs ? await finiteTsSeekIndex.begin({
         ownerKey: session.ownerKey, sourceUrl: session.sourceUrl, fileSizeBytes,
     }).catch(() => null) : null;
+    const tsHints = finiteTs && canUseRecentResumeSamples(session.ownerKey) ? finiteTsSeekHints.begin({
+        ownerKey: session.ownerKey, sourceUrl: session.sourceUrl, fileSizeBytes,
+    }) : null;
     session.finiteTsIndexObserver = tsObserver;
+    if (tsHints) session.startupTimings.finiteTsHints = { ...tsHints.describe(Number(session.seekOffset)),
+        audioTrackCount: exactAudioTrackCount, forceFullInputProbe: Boolean(session.forceFullInputProbe),
+        aligned: session.finiteTsResumeAligned === true, observedWindows: 0, observerErrors: 0 };
     const coldFiniteTs = finiteTs && Number(session?.seekOffset || 0) === 0;
     const effectiveWindowBytes = finiteMp4 ? FINITE_MKV_SEEK_WINDOW_BYTES : playbackStartupWindowPolicy.bytes(session.ownerKey, coldFiniteTs ? FINITE_MKV_SEEK_WINDOW_BYTES
         : finiteTs ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, 1024 * 1024) : exactAudioTrackCount > 1
@@ -16690,7 +16759,8 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         finiteSequentialWindowBytes: sequentialWindowBytes,
         finiteInitialSequentialWindowBytes: growMkvSequential ? effectiveWindowBytes : 0,
         finiteSequentialGrowthBytes: growMkvSequential ? 2 * effectiveWindowBytes : 0,
-        finiteFirstWindowBytes: finiteMp4 ? 1024 * 1024 : 0,
+        finiteFirstWindowBytes: finiteMp4 ? 1024 * 1024
+            : finiteTs && canUseRecentResumeSamples(session.ownerKey) ? 256 * 1024 : 0,
         finiteAtomicWindowBytes: finiteMp4 ? 1024 * 1024 : 0,
         finiteYieldToNewRange: finiteMp4 && canUseRecentResumeSamples(session.ownerKey),
         finiteCacheAbandonedPrefix: finiteMp4,
@@ -16701,7 +16771,16 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         finiteCurrentPrefix: finiteMkv ? session.currentVodPrefix : null,
         finiteCurrentPrefixOwner: session.id,
         finiteResumeRanges: resumeRanges,
-        onFiniteWindow: tsObserver ? window => tsObserver.observe(window) : null,
+        onFiniteWindow: tsObserver || tsHints ? window => {
+            try { tsObserver?.observe(window); } catch (_) {
+                if (session.startupTimings.finiteTsHints) session.startupTimings.finiteTsHints.observerErrors++;
+            }
+            tsHints?.observe(window);
+            if (tsHints) session.startupTimings.finiteTsHints = { ...session.startupTimings.finiteTsHints,
+                ...tsHints.describe(Number(session.seekOffset)),
+                observedWindows: session.startupTimings.finiteTsHints.observedWindows + 1 };
+        } : null,
+        finiteNavigationWindow: tsHints ? () => session.finiteTsNavigationSampling === true : null,
         onFiniteResumePrefix: !finiteMkv ? null : (prefix) => finiteMkvResumePrefixCache.put({
             sourceUrl: session.sourceUrl,
             ...prefix,
@@ -16738,7 +16817,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     // proves the same strong validator, exact size and final target. This small
     // header read is retained by the same serialized broker for FFmpeg.
     session.finiteTsIndexPlan = null;
-    if (finiteTs && session.finiteTsResumeAligned === true && exactAudioTrackCount === 1
+    if (!deferTsIndex && finiteTs && session.finiteTsResumeAligned === true && exactAudioTrackCount === 1
         // Frozen plans exist even when disabled (for example not_finite_mkv).
         // Only active rendition graphs exclude this single-A/V shortcut.
         && session.multiAudioHls?.enabled !== true && session.exactSubtitleHls?.enabled !== true
@@ -16753,6 +16832,30 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
             const indexedInputUrl = point ? indexedTsInputUrl(broker.inputUrl, point, fileSizeBytes) : null;
             if (indexedInputUrl) session.finiteTsIndexPlan = { ...point, inputUrl: indexedInputUrl };
         }
+    }
+    if (!deferTsIndex && finiteTs && session.finiteTsResumeAligned === true && exactAudioTrackCount === 1
+        && session.multiAudioHls?.enabled !== true && session.exactSubtitleHls?.enabled !== true
+        && !session.forceFullInputProbe && !session.finiteTsIndexPlan && tsHints?.hasNearby(Number(session.seekOffset))) {
+        const began = Date.now();
+        session.finiteTsNavigationSampling = true;
+        let fresh;
+        try { fresh = await findFreshTsSeek({ fileSizeBytes, seconds: Number(session.seekOffset),
+            durationSeconds: Number(session.codecProfile.durationSeconds ?? session.codecProfile.duration_seconds
+                ?? session.codecProfile.duration), hints: tsHints, signal: parentSignal,
+            read: async (start, end) => {
+                const response = await fetch(broker.inputUrl, { headers: { Range: `bytes=${start}-${end}` },
+                    signal: parentSignal || undefined });
+                const bytes = Buffer.from(await response.arrayBuffer());
+                if (broker.terminalError) throw broker.terminalError;
+                return response.status === 206 ? bytes : null;
+            } }); } finally { session.finiteTsNavigationSampling = false; }
+        const inputUrl = fresh.point ? indexedTsInputUrl(broker.inputUrl, fresh.point, fileSizeBytes) : null;
+        if (inputUrl) session.finiteTsIndexPlan = { ...fresh.point, inputUrl };
+        session.startupTimings.finiteTsFreshSearchMs = Date.now() - began;
+        session.startupTimings.finiteTsFreshSearchReason = fresh.reason;
+        session.startupTimings.finiteTsFreshSearchReads = fresh.reads;
+        session.startupTimings.finiteTsFreshSearchBytes = fresh.bytes;
+        session.startupTimings.finiteTsFreshSearchScan = fresh.scan || null;
     }
     session.startupTimings.finiteTsIndexUsed = Boolean(session.finiteTsIndexPlan);
     session.startupTimings.finiteTsIndexPrerollSeconds = session.finiteTsIndexPlan
@@ -21848,10 +21951,10 @@ function freezeExactSubtitleHlsTopology(session) {
 
 function audioArgsForSession(session, copyAudio = shouldCopyAudio(session)) {
     if (copyAudio) return ['-c:a', 'copy'];
-    // Retained subtitle graphs use -copyts for every lane. Forcing first_pts=0
+    // Retained subtitle graphs and indexed TS use -copyts for every lane. Forcing first_pts=0
     // here would pad audio from zero to the seek position while video and
     // subtitles already start on the source clock.
-    if (retainedSubtitleClock(session)) {
+    if (retainedSubtitleClock(session) || session?.finiteTsIndexPlan) {
         return TRANSCODE_AUDIO_ARGS.map((value) => value === 'aresample=48000:async=1:first_pts=0'
             ? 'aresample=48000:async=1' : value);
     }

@@ -30,3 +30,13 @@ test('ordinary, multi-audio and complete-cache graphs retain their existing AAC 
     }
     assert.deepEqual(Array.from(context.audio(retained, true)), ['-c:a', 'copy']);
 });
+
+test('indexed TS trims AAC on the same absolute source clock as the video', () => {
+    const indexed = { finiteTsIndexPlan: { absoluteSeconds: 4607.101 } };
+    const actual = Array.from(context.audio(indexed, false));
+    assert.equal(actual[actual.indexOf('-af') + 1], 'aresample=48000:async=1');
+    assert.equal(actual[actual.indexOf('-profile:a') + 1], 'aac_low');
+    assert.deepEqual(Array.from(context.audio(indexed, true)), ['-c:a', 'copy']);
+    const ordinary = Array.from(context.audio({ finiteTsIndexPlan: null }, false));
+    assert.equal(ordinary[ordinary.indexOf('-af') + 1], 'aresample=48000:async=1:first_pts=0');
+});

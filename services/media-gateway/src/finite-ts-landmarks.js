@@ -39,8 +39,8 @@ function pesClock(payload, video) {
 }
 
 class TsLandmarks {
-    constructor({ onPoint, onInvalid = () => {} } = {}) {
-        this.onPoint = onPoint || (() => {}); this.onInvalid = onInvalid;
+    constructor({ onPoint, onClock = () => {}, onInvalid = () => {} } = {}) {
+        this.onPoint = onPoint || (() => {}); this.onClock = onClock; this.onInvalid = onInvalid;
         this.next = null; this.pending = Buffer.alloc(0); this.signature = null;
         this.reset();
     }
@@ -142,6 +142,7 @@ class TsLandmarks {
                     this.invalid(); return;
                 }
                 this.lastAudioDts = clock.dts;
+                this.onClock({ ...clock, packetOffset: pos, pid, video: false, signature: this.signature });
             }
         } else if (pid === this.videoPid) {
             if (start) {
@@ -157,6 +158,7 @@ class TsLandmarks {
                     this.invalid(); return; // wraps/discontinuities are not linear navigation
                 }
                 this.lastDts = dts;
+                this.onClock({ pts, dts, packetOffset: pos, pid, video: true, signature: this.signature });
                 this.pes = { pos, pts, dts, anchor: this.patOffset, signature: this.signature,
                     chunks: [], length: 0, overflow: this.pmtOffset === null || this.pmtOffset < this.patOffset };
                 this.addPes(payload.subarray(9 + payload[8]));

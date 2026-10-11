@@ -51,3 +51,26 @@ test('incomplete and malformed boxes never become proof of truncation', () => {
     }
     assert.equal(createMp4SizeEvidence(100).observe(0, fixture(81).subarray(0, 24)), null);
 });
+
+test('bounded top-level metadata boundary survives split headers without claiming completeness', () => {
+    const check = createMp4SizeEvidence(1000);
+    const bytes = Buffer.alloc(32);
+    box('ftyp', 20).copy(bytes); box('moov', 300).copy(bytes, 20);
+    check.observe(0, bytes.subarray(0, 24));
+    assert.equal(check.metadataEnd(), null);
+    assert.equal(check.observe(24, bytes.subarray(24)), null);
+    assert.equal(check.metadataEnd(), 320);
+});
+
+test('payload signatures, missing headers and oversized metadata do not plan initial reads', () => {
+    const missing = createMp4SizeEvidence(1000);
+    missing.observe(20, box('moov', 300));
+    assert.equal(missing.metadataEnd(), null);
+    const big = createMp4SizeEvidence(20 * 1024 * 1024);
+    big.observe(0, box('ftyp', 20)); big.observe(20, box('moov', 9 * 1024 * 1024));
+    assert.equal(big.metadataEnd(), null);
+    const payload = createMp4SizeEvidence(100);
+    const bytes = fixture(); box('moov', 16).copy(bytes, 40);
+    payload.observe(0, bytes);
+    assert.equal(payload.metadataEnd(), null);
+});

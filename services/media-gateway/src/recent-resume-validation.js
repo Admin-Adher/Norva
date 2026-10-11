@@ -37,8 +37,11 @@ async function validateRecentResume({ plan, createBroker, signal, budgetMs = 800
     let broker, rejectedHeader = null, validatedHeader = null;
     const unavailable = observation => {
         const code = broker?.terminalError?.code;
+        const upstreamStatus = broker?.terminalError?.upstreamStatus;
         onUnavailable({ ...observation,
-            ...(typeof code === 'string' && /^[A-Z0-9_]{1,80}$/.test(code) ? { code } : {}) });
+            ...(typeof code === 'string' && /^[A-Z0-9_]{1,80}$/.test(code) ? { code } : {}),
+            ...(Number.isInteger(upstreamStatus) && upstreamStatus >= 100 && upstreamStatus <= 599
+                ? { upstreamStatus } : {}) });
     };
     try {
         if (controller.signal.aborted) return null;

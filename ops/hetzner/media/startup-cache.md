@@ -7,6 +7,16 @@ Gateway doivent tous deux recevoir `PRIVATE_STARTUP_CACHE_ENABLED=true` et
 `PRIVATE_STARTUP_CACHE_OWNER_HASHES`, une liste explicite de SHA256 des propriétaires.
 Une liste vide ne généralise pas le pilote.
 
+Pour l'ouverture générale explicitement autorisée, Edge et Gateway utilisent
+`PRIVATE_STARTUP_CACHE_ALL_AUTHENTICATED_OWNERS=true`. Ce drapeau retire seulement
+la liste de déploiement : le propriétaire authentifié, ses droits, les preuves
+du fichier et les réservations restent requis. Les drapeaux généraux du cache
+récent, de la conservation du décodeur et de l'observation du débit sont séparés
+et réversibles (`ops/hetzner/playback-cache-general.env.example`). Les nouveaux
+comptes sont éligibles sans ajout manuel. Les listes pilotes restent disponibles
+pour le retour arrière. La file de préchargement reste bornée et sélectionnée ;
+l'ouverture générale ne prépare pas une minute de chaque titre automatiquement.
+
 Les deux réplicas Edge (`norva-edge-functions` et `norva-edge-functions-2`)
 doivent porter le même code de lecture, la même liste de propriétaires et le
 même routage canary. Contrôler chacun avant les essais publics : une création

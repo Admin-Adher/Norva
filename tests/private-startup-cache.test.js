@@ -147,7 +147,7 @@ test('an unavailable fresh startup check keeps the prefix unleased without anoth
         });
         assert.equal(await run(session), false);
         assert.equal(session.privateResumeLease, undefined);
-        if (changedTarget) assert.deepEqual(calls, ['fresh-drained', 'prepare-input', 'invalidate']);
+        if (changedTarget) assert.deepEqual(calls, ['fresh-drained', 'invalidate', 'prepare-input']);
         else {
             assert.deepEqual(calls, ['fresh-drained']);
             assert.equal(session.startupTimings.privateStartupValidationDeferred, true);
@@ -178,7 +178,7 @@ test('MKV and TS resumes keep an unavailable candidate unleased and retain norma
         });
         assert.equal(await run(session), false);
         assert.equal(session.privateResumeLease, undefined);
-        assert.deepEqual(calls, changedTarget ? ['fresh-drained', 'normal-broker', 'invalidate']
+        assert.deepEqual(calls, changedTarget ? ['fresh-drained', 'invalidate', 'normal-broker']
             : ['fresh-drained', 'normal-broker']);
         assert.equal(session.finiteTsResumeAligned, format === 'mpegts' ? true : undefined);
     }

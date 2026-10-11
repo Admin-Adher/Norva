@@ -103,7 +103,7 @@ test('real Gateway preparation admits disabled frozen topologies but rejects act
         source.indexOf('\nfunction applyFiniteMkvSeekBrokerFailure('));
     const point = { byteOffset: 188, packetOffset: 376, pts: 84 * 90000, dts: 84 * 90000,
         absoluteSeconds: 87, signature: 'a'.repeat(64), videoPid: 256, audioPid: 257 };
-    for (const scenario of ['absent', 'disabled', 'audio-active', 'subtitle-active', 'full-probe', 'two-audio', 'unproven', 'pilot']) {
+    for (const scenario of ['absent', 'disabled', 'audio-active', 'subtitle-active', 'full-probe', 'two-audio', 'unproven', 'pilot', 'cached-window', 'cached-window-hints']) {
         let drained = false, fetches = 0, brokerOptions;
         const broker = { inputUrl: 'http://127.0.0.1:12345/finite-mkv-seek/' + 'A'.repeat(43) };
         const constants = Object.fromEntries([...new Set(block.match(/\b(?:FINITE_[A-Z_]+|INBAND_HEADER_BYTES|PROVIDER_SLOT_RELEASE_DELAY_MS)\b/g))]
@@ -113,7 +113,11 @@ test('real Gateway preparation admits disabled frozen topologies but rejects act
             playbackStartupWindowPolicy: require("../services/media-gateway/src/playback-startup-window").createPlaybackStartupWindowPolicy({enabled:false}),
             isFiniteMkvVodSession: () => false,
             canUsePrivateResumeCache: require("../services/media-gateway/src/private-resume-binding").createPrivateResumeOwnerGate({enabled:false}),
-            canUseRecentResumeSamples: () => scenario === 'pilot',
+            canUseRecentResumeSamples: () => ['pilot','cached-window-hints'].includes(scenario),
+            finiteTsSeekHints: { begin: () => scenario === 'cached-window-hints' ? {
+                describe:()=>({}),hasNearby:()=>true,observe:()=>{},
+            } : null },
+            findFreshTsSeek: () => assert.fail('a cached splice must not open a fresh timestamp search'),
             sharedPlaybackRanges: new (require("../services/media-gateway/src/shared-playback-ranges").SharedPlaybackRanges)({enabled:false}),
             hybridPlaybackRanges: require("../services/media-gateway/src/shared-playback-ranges").hybridPlaybackRanges,
             finiteTsProfileEligible: () => true,
@@ -147,9 +151,10 @@ test('real Gateway preparation admits disabled frozen topologies but rejects act
                 multiAudioHls: { enabled: scenario === 'audio-active', reason: 'not_finite_mkv' },
                 exactSubtitleHls: { enabled: scenario === 'subtitle-active', reason: 'no-subtitles' },
             }) };
-        await prepare(session, new AbortController().signal);
+        await prepare(session, new AbortController().signal, { deferTsIndex: scenario.startsWith('cached-window') });
         assert.equal(typeof brokerOptions.onFiniteWindow, 'function');
-        assert.equal(brokerOptions.finiteInitialContinuationGraceMs, scenario === 'pilot' ? 500 : 0);
+        assert.equal(brokerOptions.finiteInitialContinuationGraceMs, ['pilot','cached-window-hints'].includes(scenario) ? 500 : 0);
+        assert.equal(brokerOptions.finiteFirstWindowBytes, ['pilot','cached-window-hints'].includes(scenario) ? 256 * 1024 : 0);
         const eligible = ['absent', 'disabled', 'pilot'].includes(scenario);
         assert.equal(session.startupTimings.finiteTsIndexUsed, eligible, scenario);
         assert.equal(fetches, eligible || scenario === 'unproven' ? 1 : 0, scenario);

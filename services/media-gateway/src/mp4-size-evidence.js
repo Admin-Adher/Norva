@@ -8,7 +8,7 @@ function createMp4SizeEvidence(total) {
     if (!Number.isSafeInteger(total) || total < 8) throw new TypeError('Invalid representation size');
     let next = 0, used = 0, boxes = 0, recognized = false, stopped = false;
     const header = Buffer.alloc(16);
-    let evidence = null;
+    let evidence = null, metadataEnd = null;
     function observe(start, bytes) {
         if (stopped || evidence || !Buffer.isBuffer(bytes) || !Number.isSafeInteger(start)
             || start < 0 || start + bytes.length > total) return evidence;
@@ -39,13 +39,17 @@ function createMp4SizeEvidence(total) {
                 break;
             }
             if (BigInt(next) + size > BigInt(total)) { stopped = true; break; }
+            // A scheduling boundary only, never evidence that metadata or media
+            // is complete. Accept only a traversed top-level bounded moov.
+            if (type === 'moov' && next + Number(size) <= 8 * 1024 * 1024)
+                metadataEnd = next + Number(size);
             next += Number(size); used = 0; boxes++;
             if (next >= total) { stopped = true; break; }
         }
         if (boxes >= 4096) stopped = true;
         return evidence;
     }
-    return Object.freeze({ observe });
+    return Object.freeze({ observe, metadataEnd: () => metadataEnd });
 }
 
 module.exports = { createMp4SizeEvidence };

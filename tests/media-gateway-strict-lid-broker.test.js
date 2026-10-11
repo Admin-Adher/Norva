@@ -95,6 +95,52 @@ test('recent target rejection drains one real range and preserves the changed-ta
   } finally {await new Promise(resolve=>server.close(resolve));}
 });
 
+test('a drained 509 retained-target refusal makes the next claim revalidate at the normal source, never reuse unproved media',async t=>{
+  const {retainRecentDeliveryTarget:retain}=require('../services/media-gateway/src/recent-delivery-target');
+  const {validateRecentResume}=require('../services/media-gateway/src/recent-resume-validation');
+  const {sampleProof,samplesMatch}=require('../services/media-gateway/src/recent-resume-samples');
+  const {Agent}=require('undici'),crypto=require('node:crypto');
+  const N=65536,size=8*N,scope={id:'private-validation'},ownerKey='d'.repeat(64),routeKey='fixture';
+  let entries=0,refusals=0,ranges=0,active=0,maxActive=0;
+  const server=http.createServer((req,res)=>{
+    if(req.url==='/entry'){entries++;res.writeHead(302,{Location:'/target?sign=fresh'});res.end();return;}
+    active++;maxActive=Math.max(active,maxActive);res.once('finish',()=>active--);
+    if(req.url==='/target?sign=old'){refusals++;res.writeHead(509,{'Content-Length':0});res.end();return;}
+    ranges++;const [start,end]=req.headers.range.slice(6).split('-').map(Number);
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${size}`,'Content-Length':end-start+1});
+    res.end(Buffer.alloc(end-start+1,7));
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+  const origin=`http://127.0.0.1:${server.address().port}`,sourceUrl=origin+'/entry',targetUrl=origin+'/target?sign=old',h=brokerHarness();
+  const target=h.strictLidEffectiveUrlIdentitySha256(targetUrl);
+  const facts={ownerKey,sourceUrl,userAgent:'Norva-LID-Test/1',routeKey,fileSizeBytes:size,targetUrl,targetIdentity:target,
+    targetHash:crypto.createHash('sha256').update(targetUrl).digest('hex')};
+  const plan={kind:'sampled-recent-v1',target,ranges:[0,N,2*N,3*N].map(start=>({start,length:N}))};
+  let observation,identity,used=[];
+  for(const round of [1,2]) {
+    const hintFacts=round===1?facts:{...facts,targetUrl:origin+'/another-old-path',
+      targetHash:crypto.createHash('sha256').update(origin+'/another-old-path').digest('hex'),
+      targetIdentity:h.strictLidEffectiveUrlIdentitySha256(origin+'/another-old-path')};
+    const result=await validateRecentResume({plan,onUnavailable:x=>observation=x,
+      acceptIdentity:()=>identity?.effectiveUrlIdentitySha256===target,
+      createBroker:async signal=>{
+        const b=await h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,recentDeliveryTarget:retain(hintFacts),recentDeliveryOwner:ownerKey,
+          recentDeliveryRoute:routeKey,freshResumeScope:scope,abortSignal:signal,recentValidationKeepAlive:true,
+          dispatcherFactory:()=>new Agent({connections:1,pipelining:1}),completedReleaseDelayMs:0,
+          onProviderIdentity:x=>identity=x});used.push(b.recentDeliveryTargetUsed);return b;
+      }});
+    if(round===1){assert.equal(result,null);assert.equal(observation.upstreamStatus,509);assert.equal(entries,0);assert.equal(ranges,0);}
+    else {
+      const prior=sampleProof(plan.ranges.map(r=>({start:r.start,payload:Buffer.alloc(N,7)})),size,target);
+      assert.equal(samplesMatch(prior,result,size,identity.effectiveUrlIdentitySha256),true);
+      assert.equal(result.length,4);assert.equal(entries,1);assert.equal(ranges,4);
+    }
+    assert.equal(active,0);assert.equal(h.strictLidBrokers.size,0);
+  }
+  assert.deepEqual(used,[true,false]);assert.equal(refusals,1);assert.equal(maxActive,1);
+});
+
 test('a drained rejected-cache header continues on the same current target, never the older cache or a second redirect', async()=>{
   const {validateRecentResume}=require('../services/media-gateway/src/recent-resume-validation');
   const N=65536,size=8*N,scope={id:'same-playback'};let entries=0,ranges=0,active=0,maxActive=0,token=null,redirectAgain=false;
@@ -113,9 +159,15 @@ test('a drained rejected-cache header continues on the same current target, neve
       acceptIdentity:()=>false,onFreshRejectedHeader:(broker,payload)=>{assert.equal(active,0);token=broker.takeFreshRejectedHeader(payload);},
       createBroker:signal=>h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,freshResumeScope:scope,abortSignal:signal,completedReleaseDelayMs:0})});
     assert.equal(result,null);assert.ok(token);assert.equal(ranges,1);assert.equal(h.strictLidBrokers.size,0);
+    const observed=[];
     next=await h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,freshResumeScope:scope,freshResumeHandoff:token,
+      onFiniteWindow:window=>{observed.push({start:window.start,bytes:window.bytes.length,first:window.bytes[0],proof:window.proof});
+        if(window.start===0)window.bytes.fill(9);},
       pathPrefix:'finite-mkv-seek',finiteWindowBytes:N,finiteWarmupWindowBytes:0,finiteCacheBytes:4*N,completedReleaseDelayMs:0});
     assert.equal(next.currentPrefixBytes,N);
+    assert.equal(observed.length,1);assert.equal(observed[0].start,0);assert.equal(observed[0].bytes,N);assert.equal(observed[0].first,4);
+    assert.equal(observed[0].proof.fileSizeBytes,size);
+    assert.equal(observed[0].proof.effectiveUrlIdentitySha256,h.strictLidEffectiveUrlIdentitySha256(sourceUrl.replace('/entry','/token-1')));
     const header=await fetch(next.inputUrl,{headers:{Range:'bytes=0-4095'}});assert.equal(header.status,206);
     assert.equal(Buffer.from(await header.arrayBuffer()).equals(Buffer.alloc(4096,4)),true);assert.equal(ranges,1);
     const body=await fetch(next.inputUrl,{headers:{Range:`bytes=${N}-${2*N-1}`}});assert.equal(body.status,206);
@@ -190,6 +242,32 @@ function brokerHarness(diagnosticLogs = null) {
     },
   );
 }
+
+test('native MP4 finishes metadata as a complete cached response before reading media', async t => {
+  const N=65536, data=Buffer.alloc(8*N), metadataEnd=3*N+123, ranges=[];
+  data.writeUInt32BE(20,0);data.write('ftyp',4);
+  data.writeUInt32BE(metadataEnd-20,20);data.write('moov',24);
+  data.writeUInt32BE(data.length-metadataEnd,metadataEnd);data.write('mdat',metadataEnd+4);
+  const upstream=http.createServer((req,res)=>{
+    const [start,end]=req.headers.range.slice(6).split('-').map(Number);ranges.push([start,end]);
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1,ETag:'"same"'});
+    res.end(data.subarray(start,end+1));
+  });
+  await new Promise(resolve=>upstream.listen(0,'127.0.0.1',resolve));
+  const broker=await brokerHarness().createStrictLidBroker({
+    sourceUrl:`http://127.0.0.1:${upstream.address().port}/file`,fileSizeBytes:data.length,
+    pathPrefix:'finite-mkv-seek',finiteWindowBytes:4*N,finiteWarmupWindowBytes:N,
+    finiteCacheBytes:8*N,finiteMp4Coverage:true,completedReleaseDelayMs:0,
+  });
+  t.after(async()=>{await broker.close();upstream.closeAllConnections();await new Promise(resolve=>upstream.close(resolve));});
+  const response=await fetch(broker.inputUrl,{headers:{Range:`bytes=0-${data.length-1}`}});
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()),data);
+  assert.deepEqual(ranges.slice(0,2),[[0,N-1],[N,metadataEnd-1]]);
+  const count=ranges.length;
+  const cached=await fetch(broker.inputUrl,{headers:{Range:`bytes=0-${metadataEnd-1}`}});
+  assert.deepEqual(Buffer.from(await cached.arrayBuffer()),data.subarray(0,metadataEnd));
+  assert.equal(ranges.length,count);
+});
 
 test('MP4 coverage reads the real bounded broker cache without provider I/O and follows eviction', async t => {
   const N=65536, data=Buffer.alloc(3*N), words=(...xs)=>{const b=Buffer.alloc(xs.length*4);xs.forEach((x,i)=>b.writeUInt32BE(x,i*4));return b;};
@@ -884,6 +962,28 @@ test('finite MP4 seek fetches only the gap before a complete cached suffix', asy
   }
   assert.deepEqual(calls, ['bytes=64-95','bytes=60-63','bytes=58-59','bytes=96-100']);
   assert.equal(broker.interruptedProviderFetches,0);
+});
+
+test('internal TS navigation samples complete exactly once and ordinary reads retain lookbehind', { timeout: 8000 }, async t => {
+  const data = Buffer.from(Array.from({ length: 4 * 1024 * 1024 }, (_, i) => i % 251)), calls = [];
+  let navigating = true;
+  const provider = http.createServer((req, res) => { calls.push(req.headers.range); sendExactRange(req, res, data); });
+  const sourceUrl = await listen(provider); t.after(() => closeServer(provider));
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: data.length,
+    pathPrefix: 'finite-mkv-seek', dispatcher: null, finiteWindowBytes: 1048576,
+    finiteFirstWindowBytes: 262144, finiteSeekLookbehindBytes: 262144, finiteNavigationWindow: () => navigating,
+    finiteCacheBytes: data.length, releaseDelayMs: 0 });
+  t.after(() => broker.close());
+  const start = 500000, end = start + 1572864 - 1;
+  const r = await fetch(broker.inputUrl, { headers: { Range: `bytes=${start}-${end}` } });
+  assert.equal(r.headers.get('content-range'), `bytes ${start}-${end}/${data.length}`);
+  assert.deepEqual(Buffer.from(await r.arrayBuffer()), data.subarray(start, end + 1));
+  assert.deepEqual(calls, [`bytes=${start}-${end}`]);
+  navigating = false;
+  const normal = await fetch(broker.inputUrl, { headers: { Range: 'bytes=3000000-3032767' } });
+  assert.deepEqual(Buffer.from(await normal.arrayBuffer()), data.subarray(3000000, 3032768));
+  assert.equal(calls[1], 'bytes=2737856-3032767');
+  assert.equal(broker.interruptedProviderFetches, 0);
 });
 
 for (const warmup of [0, 16]) test(`finite TS lookbehind returns only requested bytes with warmup ${warmup}`, { timeout: 8000 }, async (t) => {
