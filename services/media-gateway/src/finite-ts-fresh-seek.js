@@ -21,12 +21,24 @@ class TsSeekHints {
                 const scan = scanTsWindow(start, bytes);
                 if (!scan || !scan.video.length) return;
                 let entry = store.entries.get(key);
-                if (!entry || store.now() - entry.at > 600000) entry = { at: store.now(), clocks: [] };
+                if (!entry || store.now() - entry.at > 600000) entry = { at: store.now(), clocks: [], points: [] };
                 entry.clocks = [...new Map([...entry.clocks, ...scan.video].map(c => [c.packetOffset, c])).values()]
                     .sort((a, b) => a.packetOffset - b.packetOffset);
                 while (entry.clocks.length > 512) entry.clocks = entry.clocks.filter((_, i) => i % 2 === 0);
+                entry.points = [...new Map([...entry.points, ...scan.points].map(p => [p.byteOffset, p])).values()]
+                    .sort((a, b) => a.byteOffset - b.byteOffset);
+                while (entry.points.length > 256) entry.points = entry.points.filter((_, i) => i % 2 === 0);
                 store.entries.delete(key); store.entries.set(key, entry);
                 while (store.entries.size > 16) store.entries.delete(store.entries.keys().next().value);
+            },
+            pointHint(absoluteSeconds) {
+                const entry = store.entries.get(key);
+                if (!entry || store.now() < entry.at || store.now() - entry.at > 600000) return null;
+                const p = entry.points.filter(p => absoluteSeconds - p.pts / 90000 >= 1
+                    && absoluteSeconds - p.pts / 90000 <= 18).at(-1);
+                // Include earlier audio PES bytes when rereading the IDR. The
+                // point is still only a hint until the fresh scan proves it.
+                return p ? align(Math.max(HEADER, p.byteOffset - 65536)) : null;
             },
             estimate(absoluteSeconds, bytesPerSecond) {
                 const entry = store.entries.get(key);
@@ -86,6 +98,10 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
         || !head.audio.some(c => c.pid === origin.audioPid)) return { ...result, reason: 'origin-unverified' };
     const signature = head.video[0].signature;
     const absoluteSeconds = seconds + origin.startSeconds;
+    // AAC priming is far shorter than a second. Only the actual fresh ffprobe
+    // codec can select this margin; other codecs keep the existing 2s guard.
+    // The complete current IDR and audio on both sides remain mandatory.
+    const minimumPreroll = origin.audioCodec === 'aac' ? 1 : 2;
     // The tail must confirm that the dated duration and fresh origin describe
     // this response's clock. No timestamp wrap or unrelated delivery timeline
     // may turn a byte estimate into an authorized seek.
@@ -95,7 +111,7 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
         || Math.abs(last.pts / 90000 - origin.startSeconds - durationSeconds) > 2)
         return { ...result, reason: 'duration-unverified' };
     const rate = fileSizeBytes / durationSeconds;
-    let predicted = hints?.estimate(absoluteSeconds - 20, rate)
+    let predicted = hints?.pointHint?.(absoluteSeconds) ?? hints?.estimate(absoluteSeconds - 20, rate)
         ?? align((seconds - 20) * rate);
     for (let attempt = 0; attempt < 3; attempt++) {
         if (now() - began >= maxMs) return { ...result, reason: 'budget' };
@@ -112,7 +128,8 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
                 audioAfter: scan.audio.some(c => c.dts >= p.dts + 180000),
                 videoAfter: scan.video.at(-1).dts >= p.dts + 180000 })) };
         const point = !scan.invalid && scan.points.filter(p => p.signature === signature && p.videoPid === origin.videoPid
-            && p.audioPid === origin.audioPid && absoluteSeconds - p.pts / 90000 >= 2
+            && p.audioPid === origin.audioPid && absoluteSeconds - p.pts / 90000 >= minimumPreroll
+            && (minimumPreroll === 2 || p.pts - p.dts <= 45000)
             && absoluteSeconds - p.pts / 90000 <= 18
             // Observe clean video beyond the IDR and audio on both sides of it.
             && scan.video.at(-1).dts >= p.dts + 180000

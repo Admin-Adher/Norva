@@ -52,6 +52,16 @@ test('a misleading historical hint is corrected from fresh clocks, never accepte
     assert.equal(ranges.length, 4); assert.equal(result.reason, 'fresh-point');
     assert.ok(result.point.pts / 90000 > 60);
 });
+test('one-second preroll is limited to freshly identified AAC with clean A/V around the IDR', async () => {
+    const data = fixture();
+    const run = codec => seek(data, { seconds: 81.3, hints: { estimate: () => Math.floor(data.length * 79 / 120 / 188) * 188 },
+        probeOrigin: async () => ({ ...await origin(), audioCodec: codec }) });
+    const aac = (await run('aac')).result, mp3 = (await run('mp3')).result;
+    assert.equal(aac.reason, 'fresh-point');
+    assert.ok(aac.point.absoluteSeconds - aac.point.pts / 90000 >= 1);
+    assert.ok(aac.point.absoluteSeconds - aac.point.pts / 90000 < 2);
+    assert.ok(mp3.point.absoluteSeconds - mp3.point.pts / 90000 >= 2);
+});
 test('unsupported clocks, missing audio and missing IDRs retain ordinary seeking', async () => {
     for (const data of [fixture({ audioGap: true }), fixture({ noIdr: true }), fixture({ clockJump: true })]) {
         const { result } = await seek(data); assert.equal(result.point, null);
@@ -86,6 +96,7 @@ test('hints contain metadata only and remain bounded, private to the account and
     const store = new TsSeekHints({ now: () => clock }), handle = store.begin(scope(data.length));
     handle.observe({ start: 0, bytes: data.subarray(0, 2 * 1024 * 1024) });
     assert.ok(handle.estimate(25, data.length / 120) > 0);
+    assert.ok(handle.pointHint(25) > 0);
     assert.equal(store.begin({ ...scope(data.length), ownerKey: 'b'.repeat(64) }).estimate(25, 10000), null);
     assert.equal(store.begin({ ...scope(data.length), sourceUrl: 'https://other.invalid/file' }).estimate(25, 10000), null);
     for (let i = 0; i < 30; i++) store.begin({ ...scope(data.length), sourceUrl: String(i) })
@@ -93,5 +104,6 @@ test('hints contain metadata only and remain bounded, private to the account and
     assert.ok(store.entries.size <= 16);
     assert.ok(!JSON.stringify([...store.entries]).includes('private.invalid'));
     clock = 600001; assert.equal(handle.estimate(25, 10000), null);
+    assert.equal(handle.pointHint(25), null);
     assert.equal(scanTsWindow(0, Buffer.alloc(100)), null);
 });

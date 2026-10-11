@@ -49,7 +49,7 @@ function probeTsOrigin(bytes, bin = 'ffprobe') {
                     || metadata.some(s => s.index !== 2 || s.codec_type !== 'data' || s.codec_name !== 'timed_id3')
                     || video.codec_name !== 'h264' || !Number.isFinite(startSeconds) || startSeconds < 0
                     || startSeconds >= 86400 || !/^0x[a-f0-9]+$/i.test(video.id) || !/^0x[a-f0-9]+$/i.test(audio.id)) return finish(null);
-                finish({ startSeconds, videoPid: Number(video.id), audioPid: Number(audio.id) });
+                finish({ startSeconds, videoPid: Number(video.id), audioPid: Number(audio.id), audioCodec: audio.codec_name });
             } catch (_) { finish(null); }
         });
         timer = setTimeout(() => { overflow = true; child.kill('SIGKILL'); }, 1500);
