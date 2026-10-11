@@ -16622,6 +16622,9 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         ownerKey: session.ownerKey, sourceUrl: session.sourceUrl, fileSizeBytes,
     }) : null;
     session.finiteTsIndexObserver = tsObserver;
+    if (tsHints) session.startupTimings.finiteTsHints = { ...tsHints.describe(Number(session.seekOffset)),
+        audioTrackCount: exactAudioTrackCount, forceFullInputProbe: Boolean(session.forceFullInputProbe),
+        aligned: session.finiteTsResumeAligned === true, observedWindows: 0, observerErrors: 0 };
     const coldFiniteTs = finiteTs && Number(session?.seekOffset || 0) === 0;
     const effectiveWindowBytes = finiteMp4 ? FINITE_MKV_SEEK_WINDOW_BYTES : playbackStartupWindowPolicy.bytes(session.ownerKey, coldFiniteTs ? FINITE_MKV_SEEK_WINDOW_BYTES
         : finiteTs ? Math.min(FINITE_MKV_SEEK_WINDOW_BYTES, 1024 * 1024) : exactAudioTrackCount > 1
@@ -16723,7 +16726,13 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         finiteCurrentPrefixOwner: session.id,
         finiteResumeRanges: resumeRanges,
         onFiniteWindow: tsObserver || tsHints ? window => {
-            tsObserver?.observe(window); tsHints?.observe(window);
+            try { tsObserver?.observe(window); } catch (_) {
+                if (session.startupTimings.finiteTsHints) session.startupTimings.finiteTsHints.observerErrors++;
+            }
+            tsHints?.observe(window);
+            if (tsHints) session.startupTimings.finiteTsHints = { ...session.startupTimings.finiteTsHints,
+                ...tsHints.describe(Number(session.seekOffset)),
+                observedWindows: session.startupTimings.finiteTsHints.observedWindows + 1 };
         } : null,
         finiteNavigationWindow: tsHints ? () => session.finiteTsNavigationSampling === true : null,
         onFiniteResumePrefix: !finiteMkv ? null : (prefix) => finiteMkvResumePrefixCache.put({

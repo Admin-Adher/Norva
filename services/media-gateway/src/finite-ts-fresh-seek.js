@@ -17,6 +17,15 @@ class TsSeekHints {
         const key = crypto.createHash('sha256').update(JSON.stringify([ownerKey, sourceUrl, fileSizeBytes])).digest('hex');
         const store = this;
         return {
+            describe(seconds) {
+                const entry = store.entries.get(key);
+                const fresh = Boolean(entry && store.now() >= entry.at && store.now() - entry.at <= 600000);
+                const nearestSeconds = fresh && Number.isFinite(entry.originHint) && entry.clocks.length
+                    ? Math.min(...entry.clocks.map(c => Math.abs(c.pts / 90000 - entry.originHint - seconds))) : null;
+                return { scopes: store.entries.size, scopePresent: Boolean(entry), fresh,
+                    originKnown: Number.isFinite(entry?.originHint), clocks: entry?.clocks.length || 0,
+                    points: entry?.points.length || 0, nearestSeconds: nearestSeconds === null ? null : Number(nearestSeconds.toFixed(3)) };
+            },
             observe({ start, bytes }) {
                 const scan = scanTsWindow(start, bytes);
                 if (!scan || !scan.video.length) return;
