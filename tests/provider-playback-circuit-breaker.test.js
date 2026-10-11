@@ -320,8 +320,8 @@ test('playback edge checks the circuit, claims one account session and reports s
   'both claim paths must pass the same provider circuit check first');
   assert.doesNotMatch(create, /\.from\("cloud_playback_sessions"\)\s*\.insert\(/);
   assert.match(create, /releaseSupersededPlaybackSessions/);
-  assert.match(create, /PROVIDER_NATIVE_TAKEOVER_GRACE_MS/);
-  assert.match(create, /mode !== "transcode"[\s\S]{0,160}releasedSuperseded > 0/);
+  assert.match(edge, /PROVIDER_NATIVE_TAKEOVER_GRACE_MS/);
+  assert.match(create, /supersededPlaybackWaitMs\(mode, releasedSuperseded/);
   assert.match(heartbeat, /superseded_at/);
   assert.doesNotMatch(heartbeat, /superseded_by/);
   assert.match(heartbeat, /PLAYBACK_SUPERSEDED/);
