@@ -161,8 +161,17 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
         // directly, without estimating a position from the dated duration or
         // reopening the remote tail. Changed/missing points fall back to the
         // ordinary seek; they never authorize retained media.
-        const scan = await acquire(align(witness.byteOffset - 65536), WINDOW);
-        const point = currentPoint(scan, witness);
+        const start = align(witness.byteOffset - 65536);
+        // A complete smaller response may already contain the exact IDR,
+        // current graph and both required seconds of A/V. Keep every proof
+        // below; grow at the same byte position only when it is insufficient.
+        // The serialized broker reuses the completed prefix on that retry.
+        let scan = await acquire(start, 512 * 1024);
+        let point = currentPoint(scan, witness);
+        if (!point && now() - began < maxMs) {
+            scan = await acquire(start, WINDOW);
+            point = currentPoint(scan, witness);
+        }
         return { ...result, point: point ? { ...point, absoluteSeconds } : null,
             reason: point ? 'fresh-witness' : 'witness-unverified' };
     }

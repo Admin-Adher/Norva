@@ -3,7 +3,7 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const { crc32 } = require('../services/media-gateway/src/finite-ts-landmarks');
 const { TsSeekHints, scanTsWindow, findFreshTsSeek } = require('../services/media-gateway/src/finite-ts-fresh-seek');
 
-function fixture({ noIdr = false, audioGap = false, clockJump = false, audioLagSeconds = 0 } = {}) {
+function fixture({ noIdr = false, audioGap = false, clockJump = false, audioLagSeconds = 0, paddingPackets = 20 } = {}) {
     const packets = [], cc = new Map();
     const packet = (pid, payload) => {
         const b = Buffer.alloc(188, 255);
@@ -27,7 +27,7 @@ function fixture({ noIdr = false, audioGap = false, clockJump = false, audioLagS
             Buffer.from(idr ? [0,0,1,0x67,9,0,0,1,0x68,9,0,0,1,0x65,9] : [0,0,1,0x41,9])]));
         packet(audioGap && frame >= 500 && frame < 1100 ? 8191 : 257,
             Buffer.concat([Buffer.from([0,0,1,0xc0,0,0,0x80,0x80,5]), timestamp(pts + audioLagSeconds * 90000)]));
-        for (let j = 0; j < 20; j++) packet(8191, Buffer.alloc(0));
+        for (let j = 0; j < paddingPackets; j++) packet(8191, Buffer.alloc(0));
     }
     return Buffer.concat(packets);
 }
@@ -100,8 +100,35 @@ test('the exact old point is rediscovered in current bytes without a duration-se
     const { result, ranges } = await seek(data, { hints: handle });
     assert.equal(result.reason, 'fresh-witness'); assert.ok(result.point);
     assert.equal(ranges.length, 2);
+    assert.equal(ranges[1][1] - ranges[1][0] + 1, 512 * 1024);
+    assert.equal(result.bytes, 786432);
     assert.ok(ranges.every(([a]) => a < data.length - 262144));
     assert.equal(result.point.packetOffset, handle.pointWitness(81.4).packetOffset);
+});
+test('a dense source expands the same witness position when the small complete response lacks A/V coverage', async () => {
+    const data = fixture({ paddingPackets: 200 }), store = new TsSeekHints(), handle = store.begin(scope(data.length));
+    handle.observe({ start: 0, bytes: data.subarray(0, 262144) });
+    const at = 740 * 204 * 188;
+    handle.observe({ start: at, bytes: data.subarray(at, at + 2 * 1024 * 1024) });
+    const { result, ranges } = await seek(data, { hints: handle });
+    assert.equal(result.reason, 'fresh-witness'); assert.ok(result.point);
+    assert.equal(ranges.length, 3);
+    assert.equal(ranges[1][0], ranges[2][0]);
+    assert.equal(ranges[1][1] - ranges[1][0] + 1, 512 * 1024);
+    assert.equal(ranges[2][1] - ranges[2][0] + 1, 2 * 1024 * 1024);
+});
+test('an insufficient witness response exceeding the scheduling budget cannot start a larger read', async () => {
+    const data = fixture(), store = new TsSeekHints(), handle = store.begin(scope(data.length));
+    handle.observe({ start: 0, bytes: data.subarray(0, 262144) });
+    const at = 740 * 24 * 188;
+    handle.observe({ start: at, bytes: data.subarray(at, at + 2 * 1024 * 1024) });
+    let clock = 0;
+    const { result } = await seek(data, { hints: handle, now: () => clock, read: async (a, b) => {
+        clock += a ? 10000 : 100;
+        return a ? Buffer.alloc(b - a + 1) : data.subarray(a, b + 1);
+    } });
+    assert.equal(result.point, null); assert.equal(result.reason, 'witness-unverified');
+    assert.equal(result.reads, 2);
 });
 test('a changed historical IDR clock and incomplete fresh window cannot authorize the witness', async () => {
     const data = fixture(), store = new TsSeekHints(), handle = store.begin(scope(data.length));
