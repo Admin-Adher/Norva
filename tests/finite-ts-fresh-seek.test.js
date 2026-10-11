@@ -232,3 +232,26 @@ test('a current handed-off header restores navigation origin after expiry, while
     const rejected=await seek(data,{hints:handle,read:async(a,b)=>a===0?Buffer.alloc(b-a+1):data.subarray(a,b+1)});
     assert.equal(rejected.result.point,null);assert.equal(rejected.result.reason,'origin-unverified');
 });
+
+test('expiry drops old points without dropping an origin re-observed immediately before the boundary', async()=>{
+    const data=fixture();let clock=0;
+    const store=new TsSeekHints({now:()=>clock}),handle=store.begin(scope(data.length));
+    handle.observe({start:0,bytes:data.subarray(0,65536)});
+    const oldStart=240*24*188;
+    handle.observe({start:oldStart,bytes:data.subarray(oldStart,oldStart+512*1024)});
+    assert.ok(handle.pointWitness(26.4));
+    clock=599999;
+    handle.observe({start:0,bytes:data.subarray(0,65536)});
+    clock=600001;
+    const currentStart=740*24*188;
+    handle.observe({start:currentStart,bytes:data.subarray(currentStart,currentStart+512*1024)});
+    assert.equal(handle.describe(80).originKnown,true);
+    assert.equal(handle.hasNearby(80),true);
+    assert.equal(handle.pointWitness(26.4),null,'expired body points are discarded');
+    const {result}=await seek(data,{hints:handle});assert.equal(result.reason,'fresh-witness');
+    const rejected=await seek(data,{hints:handle,read:async(a,b)=>a===0?Buffer.alloc(b-a+1):data.subarray(a,b+1)});
+    assert.equal(rejected.result.point,null);assert.equal(rejected.result.reason,'origin-unverified');
+    clock=1200002;
+    handle.observe({start:currentStart,bytes:data.subarray(currentStart,currentStart+512*1024)});
+    assert.equal(handle.describe(80).originKnown,false,'an expired origin is not preserved by new body data');
+});

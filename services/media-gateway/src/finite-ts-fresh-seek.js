@@ -31,8 +31,22 @@ class TsSeekHints {
                 const scan = scanTsWindow(start, bytes);
                 if (!scan || !scan.video.length) return;
                 let entry = store.entries.get(key);
-                if (!entry || store.now() - entry.at > 600000) entry = { at: store.now(), clocks: [], points: [] };
-                if (start === 0) entry.originHint = scan.video[0].pts / 90000;
+                const observedAt = store.now();
+                if (!entry || observedAt < entry.at || observedAt - entry.at > 600000) {
+                    // Body points keep their original bounded lifetime. A
+                    // separately re-observed current header may be newer than
+                    // that batch; do not discard its origin with old points.
+                    // This remains navigation metadata, never playback proof.
+                    const currentOrigin = Number.isFinite(entry?.originHint)
+                        && Number.isFinite(entry?.originAt) && observedAt >= entry.originAt
+                        && observedAt - entry.originAt <= 600000
+                        ? { originHint: entry.originHint, originAt: entry.originAt } : {};
+                    entry = { at: observedAt, clocks: [], points: [], ...currentOrigin };
+                }
+                if (start === 0) {
+                    entry.originHint = scan.video[0].pts / 90000;
+                    entry.originAt = observedAt;
+                }
                 entry.clocks = [...new Map([...entry.clocks, ...scan.video].map(c => [c.packetOffset, c])).values()]
                     .sort((a, b) => a.packetOffset - b.packetOffset);
                 while (entry.clocks.length > 512) entry.clocks = entry.clocks.filter((_, i) => i % 2 === 0);
