@@ -11542,16 +11542,28 @@ function extractStoryboardSprite(
         const reg = registerAccountExtraction(proxyKeyFromUrl(url), child, true, globalPreemptible);
         let stderr = '';
         let timedOut = false;
+        let childError = false;
         const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
-        child.on('error', (e) => { clearTimeout(timer); reg.release?.(); resolve({ ok: false, error: 'ffmpeg error: ' + String((e && e.message) || e) }); });
+        child.on('error', () => {
+            childError = true;
+            if (!child.pid) {
+                clearTimeout(timer); reg.release?.();
+                resolve({ ok: false, error: 'ffmpeg spawn failed' });
+            }
+        });
         child.on('close', async (code) => {
+            // Legacy jobs requeue on preemption too. Mark each confirmed
+            // provider pass before the early return, rather than waiting for
+            // completion of the full-film sprite.
+            markStoryboardRun(url);
             clearTimeout(timer);
             reg.release?.();
             if (reg.preempted) {
                 fsp.unlink(outputPath).catch(() => {});
                 return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback on this account' });
             }
+            if (childError) return resolve({ ok: false, error: 'ffmpeg process failed' });
             const tail = redactCreds(stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr');
             // A truncated read can still have flushed a usable (partial) sprite — accept any
             // plausible JPEG; only a missing/tiny file is a failure.

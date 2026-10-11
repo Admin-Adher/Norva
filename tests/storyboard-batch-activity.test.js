@@ -52,3 +52,37 @@ test('a live-child error does not release its slot or start its cooldown', async
     h.child.emit('close', 1); await pending;
     assert.equal(h.state.released, 1); assert.equal(h.state.cooldown.length, 1);
 });
+
+function legacyHarness(preempted) {
+    const child = new EventEmitter(); child.pid = 123;
+    child.stderr = new EventEmitter(); child.kill = () => true;
+    const state = { released: 0, cooldown: [] };
+    const context = {
+        FFMPEG_PATH: 'ffmpeg', process, setTimeout, clearTimeout,
+        STORYBOARD_TILE_WIDTH: 212, spawn: () => child, proxyEnvFor: () => ({}),
+        trackStoryboardChild() {}, proxyKeyFromUrl: () => 'account',
+        storyboardEncodingArgs: () => [],
+        registerAccountExtraction: () => ({ preempted, release() { state.released++; } }),
+        markStoryboardRun: url => state.cooldown.push(url),
+        fsp: { unlink: async () => {}, stat: async () => ({ size: 0 }) },
+        redactCreds: value => value, console: { warn() {} },
+    };
+    const legacy = source.slice(source.indexOf('function extractStoryboardSprite('),
+        source.indexOf('// Restore only signed checkpoints;'));
+    assert.ok(legacy.startsWith('function extractStoryboardSprite('));
+    vm.runInNewContext(legacy + '\nthis.run = extractStoryboardSprite;', context);
+    return { child, state, run: () => context.run('https://provider.invalid/file', 'qa', 10, 10, 2, '/tmp/sprite', 1000, '', true, {}) };
+}
+test('a preempted legacy sprite marks provider cooldown before requeue', async () => {
+    const h = legacyHarness(true), pending = h.run();
+    h.child.emit('close', 1);
+    assert.equal((await pending).preempted, true);
+    assert.equal(h.state.cooldown.length, 1); assert.equal(h.state.released, 1);
+});
+test('legacy sprite retains the account after a live process error until confirmed close', async () => {
+    const h = legacyHarness(false), pending = h.run();
+    h.child.emit('error', Error('kill failed'));
+    assert.equal(h.state.released, 0); assert.equal(h.state.cooldown.length, 0);
+    h.child.emit('close', 1); assert.equal((await pending).ok, false);
+    assert.equal(h.state.released, 1); assert.equal(h.state.cooldown.length, 1);
+});
