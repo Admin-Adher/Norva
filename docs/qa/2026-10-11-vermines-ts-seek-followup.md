@@ -84,6 +84,10 @@ Hit du cache HLS confirmé, 49,032 s devant la reprise, 8 Mio d'entrée
 réutilisés et quatre échantillons frais acceptés. Préparation 2,984 s,
 validation 2,943 s, continuation prête en 11,878 s. Il s'agit bien d'une
 reprise couverte ; ce résultat ne qualifie pas le saut hors cache à 21 s.
+La lecture atteint ensuite 176,784 s localement, soit plus de deux minutes
+au-delà des 49 s conservées. Les blocs 65,498–112,210 s et 129,996–176,784 s
+restent readyState 4, sans temps figé ni erreur. Fermeture par l'accueil,
+puis fermeture de l'onglet de test ; les onglets utilisateur sont conservés.
 
 ## Preuves
 
@@ -106,3 +110,9 @@ Le contrôle de mise à jour du seul Gateway pilote a donc été précisé pour
 conserver ces réservations étrangères et vérifier les réservations de son
 propre périmètre. Aucun bail n'est effacé ni écourté ; les connexions publiques
 et les pompes actives restent des conditions bloquantes.
+
+À la clôture vers 06:20 UTC : deux Gateways et deux réplicas Edge sains,
+zéro session publique active, zéro pompe brute. Admissions de fond actives,
+dispatcher et worker revenus à leur fonctionnement normal. Aucun accès
+fournisseur ni routage global modifié. L'objectif de sauts hors cache rapides
+et de reprise Vermines sans interruption n'est pas atteint.
