@@ -153,6 +153,28 @@ test('Gateway checks the fresh target and rejects without publishing partial pro
     }
 });
 
+test('path-renewable Gateway cache resolves the owned source directly and preserves legacy hints', async()=>{
+    const fs=require('node:fs'),vm=require('node:vm');
+    const source=fs.readFileSync(require('node:path').join(__dirname,'../services/media-gateway/src/index.js'),'utf8');
+    const start=source.indexOf('function recentDeliveryRouteKey('),end=source.indexOf('\nasync function tryStartPrivateResumeWindow',start);
+    for(const renewable of [false,true]) {
+        let options;const hint={};
+        const run=vm.runInNewContext('(()=>{'+source.slice(start,end)+';return revalidateRecentResumeSession;})()',{
+            AbortController,closeFiniteMkvSeekBroker:async()=>{},closePreopenedBoundedMkvInput:async()=>{},
+            fileSizeBytesForSession:()=>size,FFMPEG_USER_AGENT:'fixture',pinnedProxyAgentFactoryForRoute:()=>null,
+            providerNodeRouteForSession:()=>null,PROVIDER_SLOT_RELEASE_DELAY_MS:0,
+            compareRecentResumeTargetParts:()=>null,
+            recentResumeTargetEligible:require('../services/media-gateway/src/recent-resume-validation').recentResumeTargetEligible,
+            createStrictLidBroker:async opts=>{options=opts;opts.onProviderIdentity({effectiveUrlIdentitySha256:target});return {};},
+            validateRecentResume:async opts=>{await opts.createBroker();return samples();},
+        });
+        const result=await run({startupTimings:{},sourceUrl:'https://owned.invalid/file'},
+            {target,deliveryTarget:hint,allowDeliveryPathRenewal:renewable});
+        assert.equal(result.samples.length,4);assert.equal(options.sourceUrl,'https://owned.invalid/file');
+        assert.equal(options.recentDeliveryTarget,renewable?null:hint);
+    }
+});
+
 test('target diagnostics expose only component equality and never authorize changed targets',()=>{
     const {recentResumeTargetParts:parts,compareRecentResumeTargetParts:compare}=require('../services/media-gateway/src/recent-resume-validation');
     const a=parts('https://user:secret@fixture.invalid/token-a/file?sign=secret-one');

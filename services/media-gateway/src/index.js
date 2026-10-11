@@ -16491,8 +16491,13 @@ async function revalidateRecentResumeSession(session, plan, requestSignal) {
                 }
             },
             createBroker: async (signal, { freshSource = false } = {}) => {
+                // Path-renewable HLS entries no longer depend on an expired
+                // signed address. Resolve the owned source once, finish the
+                // four content checks, then hand that SAME fresh target to the
+                // continuation. Legacy target-pinned checks retain their hint.
                 const broker = await createStrictLidBroker({ sourceUrl: session.sourceUrl,
-                    recentDeliveryTarget: freshSource ? null : plan.deliveryTarget, recentDeliveryOwner: session.ownerKey,
+                    recentDeliveryTarget: freshSource || plan.allowDeliveryPathRenewal === true ? null : plan.deliveryTarget,
+                    recentDeliveryOwner: session.ownerKey,
                     recentDeliveryRoute: recentDeliveryRouteKey(session),
                     fileSizeBytes: fileSizeBytesForSession(session),
                     userAgent: session.userAgent || FFMPEG_USER_AGENT,
