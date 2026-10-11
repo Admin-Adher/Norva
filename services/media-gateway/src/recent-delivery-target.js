@@ -2,6 +2,10 @@
 const crypto = require('node:crypto');
 const { RECENT_TTL_MS } = require('./recent-resume-samples');
 const targets = new WeakMap();
+const consumedTargets = new WeakMap();
+const refusedTargets = new Map();
+const refusalKey = value => crypto.createHash('sha256').update(JSON.stringify(
+    ['ownerKey','sourceUrl','userAgent','fileSizeBytes','routeKey','targetIdentity'].map(key=>value[key]))).digest('hex');
 const hex = v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
 const url = value => {
     try {
@@ -34,7 +38,27 @@ function consumeRecentDeliveryTarget(token, request) {
     if (!Number.isFinite(now) || now < value.at || now - value.at >= RECENT_TTL_MS
         || ['ownerKey', 'sourceUrl', 'userAgent', 'fileSizeBytes', 'routeKey']
             .some(key => request[key] !== value[key])) return null;
-    return { targetUrl: value.targetUrl, targetHash: value.targetHash, targetIdentity: value.targetIdentity };
+    for (const [key, at] of refusedTargets) if (now >= at + RECENT_TTL_MS) refusedTargets.delete(key);
+    const key = refusalKey(value), refusedAt = refusedTargets.get(key);
+    // A refused retained URL is only a failed routing shortcut. The next
+    // claim starts at its normal source on the SAME pinned route and must
+    // still freshly validate the target and all four sample digests.
+    if (refusedAt !== undefined && now - refusedAt < RECENT_TTL_MS) return null;
+    const resolved = { targetUrl: value.targetUrl, targetHash: value.targetHash, targetIdentity: value.targetIdentity };
+    consumedTargets.set(resolved, { key, at: now });
+    return resolved;
+}
+
+// Record only the observed 509 refusal of a genuine consumed hint, after its
+// uncached broker has drained. Keep hashes/timestamps, never URLs or media.
+// This does not retry the failed claim or authorize a cache hit.
+function noteRecentDeliveryTargetFailure(resolved, { upstreamStatus, now = Date.now() } = {}) {
+    const value = resolved && consumedTargets.get(resolved);
+    if (!value || upstreamStatus !== 509 || !Number.isFinite(now) || now < value.at) return false;
+    consumedTargets.delete(resolved);
+    refusedTargets.delete(value.key); refusedTargets.set(value.key, now);
+    while (refusedTargets.size > 64) refusedTargets.delete(refusedTargets.keys().next().value);
+    return true;
 }
 // A startup prefix can outlive several ordinary playback claims. Keep its
 // private routing template intact and issue a one-use hint for each check.
@@ -48,4 +72,4 @@ function forkRecentDeliveryTarget(token, { ownerKey, now = Date.now() } = {}) {
     targets.set(fork, { ...value, forkable: false });
     return fork;
 }
-module.exports = { retainRecentDeliveryTarget, consumeRecentDeliveryTarget, forkRecentDeliveryTarget };
+module.exports = { retainRecentDeliveryTarget, consumeRecentDeliveryTarget, forkRecentDeliveryTarget, noteRecentDeliveryTargetFailure };

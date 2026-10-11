@@ -95,6 +95,49 @@ test('recent target rejection drains one real range and preserves the changed-ta
   } finally {await new Promise(resolve=>server.close(resolve));}
 });
 
+test('a drained 509 retained-target refusal makes the next claim revalidate at the normal source, never reuse unproved media',async t=>{
+  const {retainRecentDeliveryTarget:retain}=require('../services/media-gateway/src/recent-delivery-target');
+  const {validateRecentResume}=require('../services/media-gateway/src/recent-resume-validation');
+  const {sampleProof,samplesMatch}=require('../services/media-gateway/src/recent-resume-samples');
+  const {Agent}=require('undici'),crypto=require('node:crypto');
+  const N=65536,size=8*N,scope={id:'private-validation'},ownerKey='d'.repeat(64),routeKey='fixture';
+  let entries=0,refusals=0,ranges=0,active=0,maxActive=0;
+  const server=http.createServer((req,res)=>{
+    if(req.url==='/entry'){entries++;res.writeHead(302,{Location:'/target?sign=fresh'});res.end();return;}
+    active++;maxActive=Math.max(active,maxActive);res.once('finish',()=>active--);
+    if(req.url==='/target?sign=old'){refusals++;res.writeHead(509,{'Content-Length':0});res.end();return;}
+    ranges++;const [start,end]=req.headers.range.slice(6).split('-').map(Number);
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${size}`,'Content-Length':end-start+1});
+    res.end(Buffer.alloc(end-start+1,7));
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+  const origin=`http://127.0.0.1:${server.address().port}`,sourceUrl=origin+'/entry',targetUrl=origin+'/target?sign=old',h=brokerHarness();
+  const target=h.strictLidEffectiveUrlIdentitySha256(targetUrl);
+  const facts={ownerKey,sourceUrl,userAgent:'Norva-LID-Test/1',routeKey,fileSizeBytes:size,targetUrl,targetIdentity:target,
+    targetHash:crypto.createHash('sha256').update(targetUrl).digest('hex')};
+  const plan={kind:'sampled-recent-v1',target,ranges:[0,N,2*N,3*N].map(start=>({start,length:N}))};
+  let observation,identity,used=[];
+  for(const round of [1,2]) {
+    const result=await validateRecentResume({plan,onUnavailable:x=>observation=x,
+      acceptIdentity:()=>identity?.effectiveUrlIdentitySha256===target,
+      createBroker:async signal=>{
+        const b=await h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,recentDeliveryTarget:retain(facts),recentDeliveryOwner:ownerKey,
+          recentDeliveryRoute:routeKey,freshResumeScope:scope,abortSignal:signal,recentValidationKeepAlive:true,
+          dispatcherFactory:()=>new Agent({connections:1,pipelining:1}),completedReleaseDelayMs:0,
+          onProviderIdentity:x=>identity=x});used.push(b.recentDeliveryTargetUsed);return b;
+      }});
+    if(round===1){assert.equal(result,null);assert.equal(observation.upstreamStatus,509);assert.equal(entries,0);assert.equal(ranges,0);}
+    else {
+      const prior=sampleProof(plan.ranges.map(r=>({start:r.start,payload:Buffer.alloc(N,7)})),size,target);
+      assert.equal(samplesMatch(prior,result,size,identity.effectiveUrlIdentitySha256),true);
+      assert.equal(result.length,4);assert.equal(entries,1);assert.equal(ranges,4);
+    }
+    assert.equal(active,0);assert.equal(h.strictLidBrokers.size,0);
+  }
+  assert.deepEqual(used,[true,false]);assert.equal(refusals,1);assert.equal(maxActive,1);
+});
+
 test('a drained rejected-cache header continues on the same current target, never the older cache or a second redirect', async()=>{
   const {validateRecentResume}=require('../services/media-gateway/src/recent-resume-validation');
   const N=65536,size=8*N,scope={id:'same-playback'};let entries=0,ranges=0,active=0,maxActive=0,token=null,redirectAgain=false;

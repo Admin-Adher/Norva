@@ -1,6 +1,7 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict'), crypto = require('node:crypto');
-const { retainRecentDeliveryTarget: retain, consumeRecentDeliveryTarget: consume, forkRecentDeliveryTarget: fork } = require('../services/media-gateway/src/recent-delivery-target');
+const { retainRecentDeliveryTarget: retain, consumeRecentDeliveryTarget: consume, forkRecentDeliveryTarget: fork,
+    noteRecentDeliveryTargetFailure: failHint } = require('../services/media-gateway/src/recent-delivery-target');
 const { RECENT_TTL_MS } = require('../services/media-gateway/src/recent-resume-samples');
 const targetUrl = 'https://delivery.invalid/private-token';
 const facts = { ownerKey:'a'.repeat(64), sourceUrl:'https://provider.invalid/movie', userAgent:'Norva/Test',
@@ -43,4 +44,33 @@ test('prefix routing forks preserve expiry, isolation and one-use consumption', 
     assert.ok(consume(fork(root, facts), facts));
     assert.ok(consume(root, facts));
     assert.equal(fork(root, facts), null);
+});
+
+test('a genuine 509 hint refusal defers only that bound routing shortcut for the existing recent TTL',()=>{
+    const data={...facts,sourceUrl:facts.sourceUrl+'/509'};
+    const resolved=consume(retain(data),data);
+    assert.equal(failHint(resolved,{upstreamStatus:509,now:200}),true);
+    assert.equal(failHint(resolved,{upstreamStatus:509,now:201}),false);
+    assert.equal(consume(retain({...data,now:201}),{...data,now:201}),null);
+    for(const key of ['ownerKey','sourceUrl','userAgent','fileSizeBytes','routeKey','targetIdentity']) {
+        const other={...data,now:202,[key]:key==='fileSizeBytes'?data[key]+1:key==='ownerKey'||key==='targetIdentity'?'c'.repeat(64):'other'};
+        if(key==='sourceUrl')other[key]='https://other.invalid/source';
+        assert.ok(consume(retain(other),other),key);
+    }
+    const rotated={...data,now:202,targetUrl:targetUrl+'?sign=fresh'};
+    rotated.targetHash=crypto.createHash('sha256').update(rotated.targetUrl).digest('hex');
+    assert.equal(consume(retain(rotated),rotated),null,'a changed signature does not bypass a refusal of the same delivery identity');
+    const after={...data,now:200+RECENT_TTL_MS};
+    assert.ok(consume(retain(after),after));
+});
+
+test('arbitrary failures and forged hints cannot suppress the routing shortcut',()=>{
+    for(const status of [200,407,458,500,'509',null]) {
+        const data={...facts,sourceUrl:facts.sourceUrl+'/status-'+status};
+        const resolved=consume(retain(data),data);
+        assert.equal(failHint(resolved,{upstreamStatus:status,now:200}),false);
+        assert.ok(consume(retain(data),data));
+    }
+    assert.equal(failHint({targetUrl},{upstreamStatus:509,now:200}),false);
+    assert.equal(failHint(consume(retain(facts),facts),{upstreamStatus:509,now:99}),false);
 });

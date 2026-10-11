@@ -132,7 +132,7 @@ const { privateResumeBinding, createPrivateResumeOwnerGate, createRecentResumeOw
 const { createFreshResumeHandoff, consumeFreshResumeHandoff } = require('./fresh-resume-handoff');
 const { RetainedInputBarrier } = require('./retained-input-barrier');
 const { RetainedSessionTransfer } = require('./retained-session-transfer');
-const { retainRecentDeliveryTarget, consumeRecentDeliveryTarget, forkRecentDeliveryTarget } = require('./recent-delivery-target');
+const { retainRecentDeliveryTarget, consumeRecentDeliveryTarget, forkRecentDeliveryTarget, noteRecentDeliveryTargetFailure } = require('./recent-delivery-target');
 const { privateResumeProfile, canonicalResumeProfile } = require('./private-resume-profile');
 const { SOURCE_CLOCK, retainedSubtitleClock, retainedSubtitleClockArgs } = require('./retained-subtitle-clock');
 const { committedSubtitleOutputArgs, readCommittedSubtitle } = require('./committed-subtitle-delivery');
@@ -7863,6 +7863,11 @@ async function createStrictLidBroker(options = {}) {
                 options.abortSignal?.removeEventListener?.('abort', onAbort);
                 strictLidBrokers.delete(broker);
                 context.drainCompleted = true;
+                if (recentDelivery && context.recentValidationKeepAlive
+                    && context.completedProviderFetches === 0
+                    && context.terminalError?.code === 'PROVIDER_REQUEST_FAILED') {
+                    noteRecentDeliveryTargetFailure(recentDelivery, { upstreamStatus: context.terminalError.upstreamStatus });
+                }
             })();
             return closePromise;
         },
