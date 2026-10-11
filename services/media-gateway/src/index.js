@@ -16690,7 +16690,8 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         finiteSequentialWindowBytes: sequentialWindowBytes,
         finiteInitialSequentialWindowBytes: growMkvSequential ? effectiveWindowBytes : 0,
         finiteSequentialGrowthBytes: growMkvSequential ? 2 * effectiveWindowBytes : 0,
-        finiteFirstWindowBytes: finiteMp4 ? 1024 * 1024 : 0,
+        finiteFirstWindowBytes: finiteMp4 ? 1024 * 1024
+            : finiteTs && canUseRecentResumeSamples(session.ownerKey) ? 256 * 1024 : 0,
         finiteAtomicWindowBytes: finiteMp4 ? 1024 * 1024 : 0,
         finiteYieldToNewRange: finiteMp4 && canUseRecentResumeSamples(session.ownerKey),
         finiteCacheAbandonedPrefix: finiteMp4,
