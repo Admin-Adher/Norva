@@ -1,6 +1,6 @@
 'use strict';
 const crypto = require('node:crypto');
-const { sampleProof, samplesMatch, RECENT_TTL_MS, captureInputWindows,
+const { sampleProof, samplesMatch, RECENT_TTL_MS, captureInputWindows, planInputWindows,
     RECENT_INPUT_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES } = require('./recent-resume-samples');
 const { strongResumeIdentity } = require('./private-resume-binding');
 const { captureSubtitleWindow } = require('./private-resume-subtitles');
@@ -245,7 +245,12 @@ class PrivateResumeHlsCache {
         if (prior?.leases || (prior && !prior.inputOnly)) return this.rejectCapture('input-entry-in-use');
         // Shares the HLS cache's hard bound. No second cache or extra global
         // memory allowance. Reserve before detaching the bounded input bytes.
-        const reservation = 2 * limit;
+        // Reserve for the exact bounded, overlap-free selection before copying
+        // it. Reserving twice the configured maximum needlessly rejects B when
+        // A still exists, even if the received window is much smaller.
+        const selection = planInputWindows(inputWindows,binding.fileSizeBytes,limit);
+        const reservation = 2 * selection.reduce((n,w)=>n+w.length,0);
+        if (!reservation) return this.rejectCapture('input-header-unavailable');
         while (this.entries.size - (prior ? 1 : 0) >= this.maxEntries
             || this.bytes + this.reservedBytes + reservation > this.maxBytes) {
             const victim = [...this.entries].find(([, e]) => !e.leases && e !== prior);

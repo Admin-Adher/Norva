@@ -46,6 +46,7 @@ public final class RealCatalogueCacheInstrumentedTest {
  @Test public void mp4ResumeSeekAndContinue()throws Exception { replay(6); }
  @Test public void mkvResumeSeekAndContinue()throws Exception { replay(5); }
  @Test public void tsResumeSeekAndContinue()throws Exception { replay(9); }
+ @Test public void episodeResumeSeekAndContinue()throws Exception { replay(10); }
  private JSONObject post(String p,JSONObject body)throws Exception {
   HttpURLConnection c=(HttpURLConnection)new URL(base+p).openConnection();c.setConnectTimeout(10000);c.setReadTimeout(130000);c.setRequestMethod("POST");c.setDoOutput(true);c.setRequestProperty("Content-Type","application/json");byte[] b=body.toString().getBytes(StandardCharsets.UTF_8);c.setFixedLengthStreamingMode(b.length);
   try(OutputStream out=c.getOutputStream()){out.write(b);}int status=c.getResponseCode();assertTrue("Local replay request status "+status,status>=200 && status<300);

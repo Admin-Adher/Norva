@@ -13,6 +13,19 @@ const observed={fileSizeBytes:bytes.length,effectiveUrlIdentitySha256:'b'.repeat
 function cache(now=Date.now){return new PrivateResumeHlsCache({maxBytes:4*1024**2,perFileBytes:1024**2,recentRevalidation:true,now});}
 function capture(c,position=110,evidence=observed){return c.captureInput({binding,observed:evidence,inputWindows:[{start:0,payload:bytes}],
  nativeResume:{position,duration:1000}});}
+test('small native B replaces A within the unchanged aggregate reservation bound',()=>{
+ const c=new PrivateResumeHlsCache({maxBytes:2*1024**2,perFileBytes:1024**2,recentRevalidation:true});
+ assert.equal(capture(c,110),true);
+ assert.equal(capture(c,140),true,'configured maximum must not reject the smaller actual window');
+ assert.equal(c.inputCandidate(binding).resumePosition,140);
+ assert.equal(c.bytes,bytes.length);assert.equal(c.reservedBytes,0);
+ const lease=c.acquireInput(binding,observed);assert.ok(lease);
+ assert.equal(capture(c,160),false,'an in-use entry still refuses replacement');lease.release();
+ const small=new PrivateResumeHlsCache({maxBytes:bytes.length,perFileBytes:bytes.length,recentRevalidation:true});
+ assert.equal(capture(small),false,'actual copy reservation remains enforced');
+ assert.equal(small.publicStatus().lastCaptureRejection,'reservation-budget');
+ assert.equal(small.bytes,0);assert.equal(small.reservedBytes,0);
+});
 async function disk(t,now=Date.now){
  const root=await fsp.mkdtemp(path.join(os.tmpdir(),'norva-native-resume-'));t.after(()=>fsp.rm(root,{recursive:true,force:true}));
  const config={root,purpose:'resume',maxBytes:8*1024**2,perOwnerBytes:2*1024**2,perFileBytes:1024**2,reserveFreeBytes:1,retentionMs:7*86400_000,now};
