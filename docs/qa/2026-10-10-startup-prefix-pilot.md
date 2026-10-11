@@ -1381,6 +1381,12 @@ Preuves locales ignorées : `continuity-audio-edge.safe.json`,
 `continuity-stage.safe.json`, `continuity-apply.remote.py.safe.json`,
 `continuity-lost-cache-hit.safe.json`, `continuity-lost-continuation.safe.json`,
 `continuity-ts-warm.safe.json`, `final-routing.remote.py.safe.json` et
-`continuity-profile-refresh.py.safe.json` dans
+`continuity-profile-refresh-9.safe.json`, `continuity-browser-summary.safe.json`,
+`continuity-ts-continuation.safe.json` et `continuity-ts-far-seek.safe.json` dans
 `.codex-artifacts/startup-cache-20261010/`. Configurations et accès privés
 restent hors Git.
+
+À la clôture vers 05:44 UTC, les deux Gateways et les deux réplicas Edge
+sont sains, sans session publique active ni pompe brute. Les admissions de
+fond sont actives et leurs travaux normaux ne sont pas interrompus. L'onglet
+de test est fermé ; les onglets de l'utilisateur sont conservés.
