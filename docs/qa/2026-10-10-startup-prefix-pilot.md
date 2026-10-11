@@ -1278,3 +1278,115 @@ Répertoire ignoré `.codex-artifacts/startup-cache-20261010/` :
 `final-profile.remote.py.safe.json` et `final-status.remote.py.safe.json`.
 Les fichiers privés contenant la configuration complète ou des accès restent
 hors Git et ne sont pas liés dans le rapport public.
+
+## Suivi public du 11 octobre : Lost, Minnal Murali et Vermines
+
+### Deux corrections distinctes, périmètre conservé
+
+PR765 (`7b7a20cd`, merge `4374548c`) supprime le forçage
+`clientAudioPassthrough=false` dans la préparation anticipée. Celle-ci conserve
+désormais le contrat audio ordinaire de la copie. Les deux réplicas Edge ont
+été déployés à 05:15 UTC, avec un seul fichier modifié et sans modification
+d'image ni d'environnement. 38 tests ciblés réussissent. Cette correction
+n'établit pas à elle seule un hit du préfixe public depuis zéro.
+
+PR766 (`3a716ef9`, merge `c902dbcc`) corrige la destruction d'une candidate
+HLS de reprise lorsque la vérification fraîche est indisponible. Une absence
+de réponse n'est pas une preuve de modification du fichier. La tentative
+échouée n'obtient aucune lease ; le broker ordinaire poursuit la lecture,
+tandis que la candidate conserve son expiration initiale. Un changement de
+cible reste invalidant. 29 tests ciblés et les contrats CI passent
+(6 376 réussis, 35 ignorés dans la suite générale).
+
+Le Gateway pilote a été déployé à 05:37:56 UTC avec l'image
+`sha256:46f3f5ef6c1edc01adc0c2b2832567a592e20bfb76dfd5ef270b50d18bc9f8ac`.
+Canary sans réseau fournisseur : santé, empreintes de tous les fichiers et
+encodage VAAPI réussis. Le Gateway principal, les routes et les Edge restent
+inchangés par ce second déploiement. Les admissions de fond ont été drainées
+et rétablies, sans forcer leurs leases. Les autorisations du pilote ne sont
+pas élargies. Le redémarrage vide les fenêtres en mémoire : les essais
+suivants reconstruisent donc leur cache par une lecture normale.
+
+### Lost — MKV MAX OTT
+
+Avant le redémarrage Gateway, départ à zéro : progression observée en
+11,485 s, préparation serveur 2,268 s, sans hit de préfixe startup.
+Après fermeture normale, reprise à 137 s : première image télémétrée en
+3,538 s et progression observée en 3,938 s. Le Gateway confirme
+`privateResumeWindowHit=true`, quatre échantillons frais acceptés, une
+validation de 2,219 s et 49 secondes de vidéo préparée devant la cible.
+La continuation est prête après 12,285 s.
+
+Deux sauts de dix secondes en lecture sont prêts en 0,295/0,278 s.
+Le média progresse ensuite jusqu'à la position absolue 319,416 s, soit plus
+de 133 secondes au-delà de la fin de la fenêtre réutilisée. Les blocs
+échantillonnés restent readyState=4, sans erreur vidéo. Cela valide cette
+reprise réelle, pas tous les démarrages : une tentative antérieure de Lost
+avait affiché une erreur malgré une préparation serveur terminée en 15,815 s.
+Sa cause publique précise reste ouverte. Son seul reçu pending résiduel a
+été expiré après vérification de l'absence de session Gateway correspondante.
+
+### Vermines — MP4 MAX OTT
+
+La première image froide est télémétrée en 28,780 s. Après fermeture normale,
+réouverture à 271 s : première image en 15,549 s, progression observée en
+15,987 s. Le transport confirme 17 235 968 octets conservés injectés, 184
+accès cache et 81 386 450 nouveaux octets fournisseur pendant la continuation.
+Les dernières plages sont largement au-delà des octets conservés.
+
+Sauts arrière/avant de dix secondes en lecture : 0,294/0,281 s. Les blocs
+échantillonnés progressent normalement de 310,230 à 428,859 s ; un contrôle
+ultérieur constate 629,731 s, toujours actif, readyState=4, sans erreur.
+Les intervalles non échantillonnés ne sont pas certifiés sans gel. L'interruption
+signalée au précédent essai n'est pas reproduite dans les blocs contrôlés ;
+aucun correctif spécifique à sa cause n'est revendiqué. La reprise reste
+trop lente malgré le cache : elle n'est pas annoncée comme réparée partout.
+
+### Minnal Murali — MPEG-TS Dino après PR766
+
+Première lecture après redémarrage à 127 s : préparation serveur 18,488 s.
+Fermeture normale après 41,534 s de progression locale, puis réouverture
+à 168 s : progression observée en 5,563 s. Préparation 2,943 s, validation
+fraîche 2,881 s, quatre échantillons acceptés. Le Gateway confirme un hit
+HLS, 8 Mio d'entrée réutilisés et 49,004 s de vidéo devant la reprise.
+La continuation est prête en 14,165 s. Deux sauts courts en lecture sont
+prêts en 0,275/0,272 s. Le premier bloc franchissant la fin du cache reste
+readyState=4 sans erreur ; contrôle prolongé consigné ci-dessous.
+
+La lecture continue jusqu'à 191,420 s localement (position absolue 356,429 s),
+soit environ 139 secondes au-delà du cache. Les blocs suivis de 117,502 à
+142,239 s, puis de 167,722 à 191,420 s progressent au rythme du temps réel,
+sans readyState sous 3 ni erreur. Après les sauts courts, plus de 157 s de
+média sont parcourues. Les pauses volontaires d'affichage des commandes sont
+distinguées des interruptions.
+
+Un saut éloigné par la timeline à 1309 s, au-delà de la plage chargée,
+demande encore **21,255 s** avant progression observée. Le serveur prépare
+en 17,459 s, sans hit de cache à cette position. Puis 29,612 s de média
+progressent avant fermeture normale. Le résultat ne permet donc pas de
+qualifier tous les sauts de rapides ; le cache n'offre pas une couverture
+du fichier entier.
+
+### Limites et preuves
+
+Les mesures UI sont des bornes d'observation, distinctes de la première
+image télémétrée. Elles utilisent précisément `#watch-video`. Les premiers
+relevés effectués sur un sélecteur générique `video` sont écartés, car il
+pouvait sélectionner un autre élément. Aucune écoute humaine ni certification
+de chaque image n'est revendiquée. Le préfixe startup de Minnal reste refusé
+lorsque le profil disponible est partiel ; il n'est pas promu artificiellement
+en profil complet. La sonde normale a rencontré son circuit fournisseur ouvert.
+
+Preuves locales ignorées : `continuity-audio-edge.safe.json`,
+`continuity-stage.safe.json`, `continuity-apply.remote.py.safe.json`,
+`continuity-lost-cache-hit.safe.json`, `continuity-lost-continuation.safe.json`,
+`continuity-ts-warm.safe.json`, `final-routing.remote.py.safe.json` et
+`continuity-profile-refresh-9.safe.json`, `continuity-browser-summary.safe.json`,
+`continuity-ts-continuation.safe.json` et `continuity-ts-far-seek.safe.json` dans
+`.codex-artifacts/startup-cache-20261010/`. Configurations et accès privés
+restent hors Git.
+
+À la clôture vers 05:44 UTC, les deux Gateways et les deux réplicas Edge
+sont sains, sans session publique active ni pompe brute. Les admissions de
+fond sont actives et leurs travaux normaux ne sont pas interrompus. L'onglet
+de test est fermé ; les onglets de l'utilisateur sont conservés.
