@@ -78,7 +78,7 @@ test('cancellation propagates and elapsed budget prevents more position reads', 
     const data = fixture(), controller = new AbortController(); controller.abort();
     await assert.rejects(seek(data, { signal: controller.signal }), { name: 'AbortError' });
     let clock = 0;
-    const { result } = await seek(data, { now: () => clock, read: async (a, b) => { clock += 4000; return data.subarray(a, b + 1); } });
+    const { result } = await seek(data, { maxMs: 6500, now: () => clock, read: async (a, b) => { clock += 4000; return data.subarray(a, b + 1); } });
     assert.equal(result.point, null); assert.equal(result.reason, 'budget'); assert.equal(result.reads, 2);
 });
 test('hints contain metadata only and remain bounded, private to the account and short lived', () => {
