@@ -237,6 +237,18 @@ const epgCache = new Map<string, { expiresAt: number; data: unknown }>();
 // presence, and counting it would starve the night enrichment windows.
 const PRESENCE_TOUCH_INTERVAL_MS = 60_000;
 const presenceTouchedAt = new Map<string, number>();
+function requestReportsViewerPresence(method: string, scope: string, id?: string, action?: string): boolean {
+  // History synchronization and inbox polling keep running on an untouched
+  // catalogue page. These database-only reads are not a new viewer action and
+  // must not extend the five-minute provider fence indefinitely. Boot, catalogue
+  // navigation and every mutation keep the existing first-play protection.
+  if (method === "GET" && !action && (
+    (!id && ["history", "content-events"].includes(scope)) ||
+    (scope === "device" && ["history", "content-events"].includes(id ?? ""))
+  )) return false;
+  if (scope === "device" && id === "heartbeat" && method === "POST" && !action) return false;
+  return true;
+}
 function touchUserPresence(db: SupabaseClient, userId: string) {
   try {
     const now = Date.now();
@@ -509,7 +521,7 @@ async function route(
     const device = await requireDevice(req, db);
     // Presence gate: any real device activity (not the idle heartbeat keepalive)
     // stands the user's probes down before their first play of the session.
-    if (id !== "heartbeat") touchUserPresence(db, device.user_id);
+    if (requestReportsViewerPresence(req.method, scope, id, action)) touchUserPresence(db, device.user_id);
     if (req.method === "GET" && id === "me") return { body: { device: sanitizeCloudDevice(device) } };
     // Self-unpair: the paired screen (e.g. a TV) revokes ITS OWN device token on
     // logout, so the account drops this screen and the token can't silently
@@ -642,7 +654,7 @@ async function route(
 
   // Presence gate: the user is actively using the app/site — stand their probes
   // down now, before the first play attempt of the session (see helper above).
-  touchUserPresence(db, user.id);
+  if (requestReportsViewerPresence(req.method, scope, id, action)) touchUserPresence(db, user.id);
 
   // Cold-start aggregation: a fresh app load otherwise fans out into ~7 separate
   // norva-cloud calls (profile, profiles, entitlements, sources, trial, …), each
