@@ -123,13 +123,26 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
     };
     // Fresh origin and graph, acquired using the same serialized broker. The
     // ffprobe subprocess only sees these already-received bytes, never a URL.
-    const header = await read(0, HEADER - 1);
+    if (signal?.aborted) throw Object.assign(Error('aborted'), { name: 'AbortError' });
+    let header = await read(0, 65536 - 1);
     result.reads++; result.bytes += header?.length || 0;
-    const head = scanTsWindow(0, header);
+    let head = Buffer.isBuffer(header) && header.length === 65536 ? scanTsWindow(0, header) : null;
+    let origin = head && await probeOrigin(header);
+    const originMatches = () => origin && head?.video.some(c => c.pid === origin.videoPid)
+        && head?.audio.some(c => c.pid === origin.audioPid);
+    // A complete small CURRENT header can identify this graph and clock.
+    // Dense/late program headers still expand through the same serialized
+    // broker. No stored header or incomplete response proves the origin.
+    if (!originMatches()) {
+        if (now() - began >= maxMs) return { ...result, reason: 'budget' };
+        if (signal?.aborted) throw Object.assign(Error('aborted'), { name: 'AbortError' });
+        header = await read(0, HEADER - 1);
+        result.reads++; result.bytes += header?.length || 0;
+        head = Buffer.isBuffer(header) && header.length === HEADER ? scanTsWindow(0, header) : null;
+        origin = head && await probeOrigin(header);
+    }
     if (head) hints?.observe?.({ start: 0, bytes: header });
-    const origin = head && await probeOrigin(header);
-    if (!origin || !head.video.some(c => c.pid === origin.videoPid)
-        || !head.audio.some(c => c.pid === origin.audioPid)) return { ...result, reason: 'origin-unverified' };
+    if (!originMatches()) return { ...result, reason: 'origin-unverified' };
     const signature = head.video[0].signature;
     const absoluteSeconds = seconds + origin.startSeconds;
     // AAC priming is far shorter than a second. Only the actual fresh ffprobe

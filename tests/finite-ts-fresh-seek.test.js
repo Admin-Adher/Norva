@@ -101,7 +101,8 @@ test('the exact old point is rediscovered in current bytes without a duration-se
     assert.equal(result.reason, 'fresh-witness'); assert.ok(result.point);
     assert.equal(ranges.length, 2);
     assert.equal(ranges[1][1] - ranges[1][0] + 1, 512 * 1024);
-    assert.equal(result.bytes, 786432);
+    assert.equal(ranges[0][1] + 1, 65536);
+    assert.equal(result.bytes, 589824);
     assert.ok(ranges.every(([a]) => a < data.length - 262144));
     assert.equal(result.point.packetOffset, handle.pointWitness(81.4).packetOffset);
 });
@@ -116,6 +117,23 @@ test('a dense source expands the same witness position when the small complete r
     assert.equal(ranges[1][0], ranges[2][0]);
     assert.equal(ranges[1][1] - ranges[1][0] + 1, 512 * 1024);
     assert.equal(ranges[2][1] - ranges[2][0] + 1, 2 * 1024 * 1024);
+});
+
+test('a small current header expands at zero when ffprobe cannot yet prove the origin', async () => {
+    const data=fixture();
+    const {result,ranges}=await seek(data,{probeOrigin:async bytes=>bytes.length<262144?null:origin()});
+    assert.equal(result.reason,'fresh-point');
+    assert.deepEqual(ranges.slice(0,2),[[0,65535],[0,262143]]);
+});
+
+test('partial headers and a cancelled origin expansion cannot authorize a seek or read another response', async () => {
+    const data=fixture();
+    const partial=await seek(data,{read:async(a,b)=>data.subarray(a,b-(a===0?0:-1))});
+    assert.equal(partial.result.point,null);assert.equal(partial.result.reason,'origin-unverified');
+    const controller=new AbortController(),ranges=[];
+    await assert.rejects(seek(data,{signal:controller.signal,probeOrigin:async()=>{controller.abort();return null;},
+        read:async(a,b)=>{ranges.push([a,b]);return data.subarray(a,b+1);}}),{name:'AbortError'});
+    assert.deepEqual(ranges,[[0,65535]]);
 });
 test('an insufficient witness response exceeding the scheduling budget cannot start a larger read', async () => {
     const data = fixture(), store = new TsSeekHints(), handle = store.begin(scope(data.length));
