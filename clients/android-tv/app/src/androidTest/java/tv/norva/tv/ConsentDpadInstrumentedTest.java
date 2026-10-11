@@ -70,8 +70,10 @@ public class ConsentDpadInstrumentedTest {
             assertEquals("Initial refusal focus", "\"denied\"", eval(view,"document.activeElement.getAttribute('data-consent')"));
             assertEquals("Background inert", "true", eval(view,"document.getElementById('modal').inert"));
             key(KeyEvent.KEYCODE_DPAD_RIGHT);
+            waitForChoice(view,"granted");
             assertEquals("Accept reachable", "\"granted\"", eval(view,"document.activeElement.getAttribute('data-consent')"));
             key(KeyEvent.KEYCODE_DPAD_LEFT);
+            waitForChoice(view,"denied");
             assertEquals("Decline reachable", "\"denied\"", eval(view,"document.activeElement.getAttribute('data-consent')"));
             capture(activity, view, "tv-consent-decline.png");
             // Give the existing artifact collector (5-second interval) time to copy the capture.
@@ -123,6 +125,7 @@ public class ConsentDpadInstrumentedTest {
             waitForChoice(view,"denied");
             assertEquals("Pairing consent opaque", "true", eval(view,"getComputedStyle(document.querySelector('.norva-consent__card')).backgroundColor!=='rgba(0, 0, 0, 0)'"));
             key(KeyEvent.KEYCODE_DPAD_RIGHT);
+            waitForChoice(view,"granted");
             assertEquals("Pairing Accept reachable", "\"granted\"", eval(view,"document.activeElement.getAttribute('data-consent')"));
             key(KeyEvent.KEYCODE_BACK);
             assertEquals("Pairing native Back closes consent", "false", eval(view,"!!document.querySelector('.norva-consent')"));

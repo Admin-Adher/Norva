@@ -7,15 +7,18 @@ R2 privé et la file globale des premières minutes, avec compression sans perte
 Elle raccorde aussi les captures **HLS et MP4 natif web de reprise** et la règle demandée A → B,
 avec suppression à partir de 90 % de la durée connue.
 
-**Tout reste désactivé, sans activation R2 payante.** Aucun vrai bucket, secret,
-migration de production, upload R2 ou changement de trajet fournisseur. Les
-tests de stockage utilisent Miniflare local ; la migration SQL tourne dans
-PGlite isolé. Aucun compte fournisseur n'est ouvert pour ces contrôles.
+**Production inchangée, R2 payant désactivé.** Aucun bucket Cloudflare payant,
+migration de production ou changement du relais fournisseur. Les tests de
+stockage utilisent Miniflare local ; la migration SQL tourne dans PGlite isolé.
+La première phase ci-dessous utilise des données isolées. La campagne du
+12 octobre, documentée en fin de rapport, ouvre ensuite des copies réelles
+autorisées, avec des claims Edge réels et le stockage local persistant.
 
 Le MP4 natif web utilise une archive de plages originales, distincte du graphe
-HLS. Les autres caches d'input seuls, les lectures natives Android/Windows et
-les profils incomplets restent hors de ce raccord. Aucun gain public de
-démarrage ou de fluidité n'est annoncé ici.
+HLS. Les fenêtres natives Android/Windows sont également raccordées et rejouées
+en isolation dans la suite de ce rapport. Les profils incomplets restent
+refusés. Ces preuves ne constituent pas un déploiement public ni une validation
+générale de fluidité.
 
 ## Première minute et file globale
 
@@ -335,3 +338,263 @@ Ces résultats clôturent la préparation locale, sans activation. La PR786 rest
 en brouillon, R2 payant désactivé, sans déploiement, migration ou nouveaux essais
 sur les connexions fournisseur. Les derniers changements de rapport et les
 commentaires de l'exemple d'environnement ne modifient pas le code testé.
+
+## Reprise du 12 octobre : émulateur Android et copies réelles
+
+Cette nouvelle campagne est autorisée sur les fichiers des catalogues du
+compte de test. Elle reste **isolée de la production** : vrai code Edge/Gateway,
+claims signés et admission de la source actuelle, mais endpoints de test privés.
+Le Worker de stockage s'exécute sous **Miniflare, avec SQLite/R2 sur disque local**.
+Aucun bucket Cloudflare payant, abonnement ou routage de production n'est activé.
+Les titres sont lus séquentiellement ; chaque clôture draine le transport avant
+la lecture suivante. La préparation globale en fond est désactivée dans ce banc.
+
+### Corrections démontrées
+
+- La revalidation native refusait une adresse de livraison dont le **chemin**
+  était renouvelé. Elle réutilise maintenant la politique de renouvellement
+  existante : même propriétaire/source/profil, même taille exacte, même hôte et
+  forme de requête, preuve encore valide et **quatre échantillons frais identiques**.
+  Changement d'hôte ou d'octets et option désactivée restent des refus.
+- La mesure du refus HTML Android comptait le démarrage à froid de l'Activity.
+  Le test mesure maintenant la limite au début réel de la réponse concernée.
+  Le délai de 2 000 ms, le refus sans nouvelle tentative automatique, la reprise
+  manuelle unique et le retour Back sont conservés.
+- Le test TS lance son horloge de lecture après la première Surface réellement
+  rendue. Les tolérances de PTS et de raccord restent inchangées.
+- Le test de consentement TV attend le focus réel du renderer WebView avant
+  d'envoyer les touches D-pad. L'idle du processus natif seul ne vidait pas cette
+  file d'entrée. Consentement explicite, refus, touche maintenue et Back restent
+  vérifiés.
+- Un remplacement natif A → B pouvait échouer avec `reservation-budget` même
+  pour une petite fenêtre, car il réservait deux fois le **maximum configuré**.
+  Il planifie désormais les intervalles complets sans copie et réserve deux fois
+  leur **taille sélectionnée réelle** avant toute copie. Le plafond global,
+  l'interdiction de remplacer une entrée utilisée et le refus si la réservation
+  réelle dépasse ce plafond sont inchangés. **56 tests ciblés réussis**.
+- La campagne web révèle ensuite une double réservation dans la capture HLS :
+  le maximum des segments et celui des intervalles source étaient additionnés,
+  alors que l'archive hydratée doit respecter un plafond par fichier unique.
+  Vidéo, sous-titres et intervalles source partagent désormais ce plafond ; les
+  intervalles sont planifiés avant copie, la mémoire temporaire reste réservée
+  deux fois, et une archive combinée trop grande est refusée. **95 tests ciblés
+  réussis**, dont relecture après hydratation et refus d'un dépassement combiné.
+  Ce défaut refusait B après la longue continuation de Lost et Minnal ; il ne
+  rendait pas leurs premières reprises défaillantes.
+
+### CI Android réparée
+
+Sur `320f4dae1e915bedd4a41a25dc94cdd81008905e`,
+[la matrice Android 38179180517](https://github.com/Admin-Adher/Norva/actions/runs/38179180517)
+réussit dans **les six configurations** : téléphone API 35, gestes et trois
+boutons, polices 1,0/1,3 ; TV API 34, polices 1,0/1,3.
+[Le contrôle de consentement TV 38179180532](https://github.com/Admin-Adher/Norva/actions/runs/38179180532)
+réussit aux deux tailles de police.
+[Build Norva 38179180606](https://github.com/Admin-Adher/Norva/actions/runs/38179180606)
+réussit : **6 544 tests, 39 ignorés**, SQL 50/50, Worker/SQLite/R2 local 15/15
+et les trois paquets Android/Windows. Ces résultats remplacent le blocage
+Android précédent ; ils ne valent pas validation sur un appareil physique.
+La correction ultérieure de réservation est testée sur le commit
+`48735863f54a3e8bf81b73f22988853b4b780ce8` ; sa CI reste distincte de cette matrice.
+
+### Replays Android des catalogues réels
+
+Émulateur Pixel 7 API 35 x86_64, WHPX, Surface Media3 native. Le runner opt-in
+charge le vrai PlayerActivity, relaie heartbeat/claims vers le vrai Edge isolé,
+vérifie la position décodée, effectue les sauts, puis Back et clôture explicite.
+L'intégration du catalogue WebView et de son drain de closes en attente n'est
+pas remplacée par une affirmation de validation : cette partie est distincte.
+
+| Copie réelle | Départ / reprise, première image | Saut arrière / avant | Continuation après le dernier saut |
+| --- | --- | --- | --- |
+| Jolt — MP4 | 27,5 / 12,4 s | 3,3 / 6,9 s | 143,5 s de vidéo sur 150 s d'observation ; **4 relevés de buffering** |
+| Minnal Murali — MPEG-TS | 7,7 / 17,3 s | 16,5 / 7,5 s | 148,3 s avancées ; aucun buffering échantillonné |
+| Lost on a Mountain in Maine — MKV | 7,7 / 6,7 s | 2,4 / 6,0 s | 149,2 s avancées ; aucun buffering échantillonné |
+| Between Father and Son [MULTI-SUB] — épisode MP4 | 12,6 / 12,9 s | 8,0 / 19,5 s | 131,8 s avancées sur environ 148 s ; aucun buffering échantillonné, mais progression inférieure au temps écoulé |
+
+Les trois reprises ont utilisé les fenêtres natives conservées. Les codecs
+observés par Media3 sont AVC/H.264 et audio AAC (`audio/mp4a-latm`). Aucune erreur
+Media3 n'est relevée ; des images perdues subsistent. Les échantillons à une
+seconde ne prouvent pas l'absence de toute micro-pause, ni la fluidité matérielle
+d'un téléphone physique, ni la qualité à l'écoute. Les lectures dépassent
+largement la fenêtre de reprise de 48 secondes.
+
+Le rejeu supplémentaire de l'épisode utilise le dernier runner opt-in, avec
+le protocole natif du client (`privateMediaCacheProtocol: 0`) et le parent série
+réel. **Un test instrumenté réussi, 257,45 s**. La continuation dépasse
+120 secondes de position vidéo après le dernier saut ; elle n'est pas annoncée
+parfaitement fluide : 23 images perdues et un écart entre horloge et progression
+restent présents. Preuve : `android-real-episode.log` et
+`durable-real-events.safe.json`.
+
+### Preuve web après redémarrage
+
+Le vrai WatchPage, cloudApi et le gestionnaire de session lisent Jolt MP4 avec
+les claims Edge isolés. Première lecture : **13,9 s**, sauts de **0,42 / 3,13 s**,
+puis plusieurs attentes, dont une de **6,48 s**. Ce premier essai reste défavorable.
+
+Après clôture et archivage B, le Gateway et le Worker local sont réellement
+redémarrés : RAM vide, SQLite/R2 conservés. Reprise vers 317 secondes :
+**6,95 s jusqu'à la première image**, puis **150,8 secondes de vidéo avancées**
+en environ 157 secondes depuis le clic, **sans événement waiting ni erreur**.
+Le compteur de réutilisation vaut un ; les quatre échantillons concordent
+malgré le chemin de livraison renouvelé (`accepted-path-renewal`). L'archive A
+est retirée pendant la progression sans interrompre le lease de lecture.
+
+Ce rejeu démontre la persistance et le correctif de renouvellement sur cette
+copie ; il ne transforme pas le premier essai avec pauses en essai fluide et
+ne démontre pas une garantie sur tous les fournisseurs. Le banc ne reproduit
+pas toute l'interface publique d'authentification et de catalogue.
+
+### Web MKV : reprise persistée et sauts
+
+Lost donne une première image en **4,59 s** lors de la lecture froide, mais
+la lecture effective attend **98,67 s** pour constituer sa réserve. Il serait
+incorrect de publier le seul délai de première image comme délai de démarrage.
+Cette réserve n'est pas réduite pour faire passer le banc.
+
+Après arrêt vers **41,74 s**, archivage et redémarrage du Gateway et du Worker,
+la RAM HLS est vide et le cache durable est retrouvé : `hits: 1`,
+`sampledHits: 1`, quatre échantillons concordants. Première image en **4,27 s**,
+lecture effective en **4,89 s**. Les sauts vers 46,32 puis 303,42 s demandent
+**0,022 / 0,113 s** ; les deux événements waiting associés valent
+0,019 / 0,109 s. Après le dernier saut, la vidéo progresse jusqu'à **432,47 s**,
+soit plus de **129 secondes** de continuation, sans nouvelle attente ni erreur.
+Le compteur navigateur indique **zéro image perdue** sur cette ouverture.
+Le saut avant quitte la fenêtre archivée initiale ; les données préparées
+depuis la source pendant la lecture restent également disponibles.
+
+Trois tentatives antérieures du banc étaient refusées avant création de
+session. Le code d'erreur isolé était `MEDIA_CACHE_PRODUCER_CONTROL_UNAVAILABLE` :
+la configuration héritée demandait un producteur de cache partagé, absent du
+Gateway privé. Le banc Edge a été corrigé pour désactiver **ce cache partagé
+uniquement**, déjà hors du périmètre de cette preuve. Cache privé de reprise,
+claims, revalidation et admission restent actifs. Aucun réglage de production
+n'est changé ; ces tentatives ne prouvent pas une panne du service public.
+
+### Web MPEG-TS : cache persistant, continuation encore imparfaite
+
+Minnal Murali : départ à zéro, première image **3,94 s**, lecture effective
+**10,13 s**, puis arrêt vers **68,76 s** et archivage. Après redémarrage
+Gateway/Worker avec RAM vide : première image **5,21 s**, lecture effective
+**5,82 s**. La position reprend correctement, à la différence du rejeu Windows.
+
+Sauts vers 87,09 puis 224,65 s en **0,030 / 0,011 s**. Les attentes associées
+sont de 0,026 / 0,008 s, mais une nouvelle attente de **5,55 s** survient environ
+douze secondes après le saut avant. La lecture atteint ensuite **408,13 s**,
+soit plus de **183 secondes de progression** depuis cette cible, sans erreur
+ni image perdue dans le compteur navigateur. Ce cas valide la réutilisation
+persistante et le franchissement du cache ; il ne valide pas une continuité
+sans interruption.
+
+Preuves de la campagne sous `.codex-artifacts/startup-cache-20261010/` :
+`durable-real-android-web-before.safe.json`, `durable-real-web-jolt.safe.json`,
+`android-real-mkv-ts.log`, `android-tv-consent-focus.log`,
+`native-B-budget.local.log` et `durable-replays-summary.safe.json`.
+
+Les validations supplémentaires Windows, web MKV/TS et épisode sont consignées
+dans la suite de cette section. La PR786 reste en brouillon et R2 payant désactivé.
+
+### Windows natif : preuves et refus de validation MPEG-TS
+
+Le banc utilise l'exécutable natif du paquet CI de `c60b118b`, avec les vrais
+modules IPC/controller/input de la branche, une fenêtre vidéo LibVLC intégrée
+et les claims Edge réels isolés. Il ne remplace pas la validation du catalogue
+et du login du portable distribué. Les pauses provoquées pour afficher les
+commandes sont exclues des fenêtres de continuation indiquées ci-dessous.
+
+| Copie | Départ / reprise, première image affichée | Résultat après manipulation |
+| --- | --- | --- |
+| Jolt — MP4 | 47,64 / 13,34 s | Après le saut vers 214,8 s, seulement 56,7 s de vidéo avancent pendant 149,3 s sans intervention ; 64 images perdues supplémentaires. **Non fluide.** |
+| Lost — MKV | 12,63 / 7,92 s | Reprise réelle vers 40,3 s après redémarrage Gateway/Worker, saut arrière puis avant vers 231,7 s ; plus de 203 s de continuation, aucune image perdue dans les compteurs. |
+| Minnal — MPEG-TS | 5,70 / 7,20 s | Le cache est retrouvé après redémarrage, mais la seconde lecture repart à zéro au lieu de 84,5 s. Durée LibVLC nulle ; le bouton avant revient également à zéro. **Reprise et sauts non validés.** |
+
+La distinction est essentielle : un `inputHit` ne prouve pas que le lecteur
+applique correctement la position de reprise. Sur Minnal, le chemin de
+livraison renouvelé passe les quatre échantillons, mais le défaut de position
+est en aval. Le code natif applique initialement la reprise sur un événement
+Playing lorsque `IsSeekable` est vrai, puis la remet à zéro ; les commandes
+bornent leur cible à `player.Length - 500`. Avec une longueur nulle, cette
+dernière borne devient zéro. Ces observations sont conservées, sans prétendre
+avoir réparé la recherche temporelle de LibVLC sur cette copie.
+
+L'essai d'agrégation des lectures natives est écarté : Jolt reste à environ
+67 s et sa continuité n'est pas meilleure. `desktop/native-input.js` et son
+test sont rétablis au code existant ; aucun réglage expérimental de transport
+n'est conservé dans la PR. La correction de réservation B reste indépendante.
+
+Preuves : `durable-windows-baseline.safe.json`, `durable-windows.safe.json` et,
+pour l'expérience écartée seulement, `durable-windows-coalesced.safe.json`.
+Le signal de première image de Jolt est calculé sur `displayedPictures > 0`,
+pas sur son premier paquet vidéo décodé à 11,32 s.
+
+### Nouvelle archive HLS B : créée et réutilisée, fluidité non validée
+
+Après le correctif du plafond combiné, Lost repart sans l'ancienne archive B,
+qui avait été refusée : première image **13,95 s**, lecture effective **113,78 s**.
+Il avance jusqu'à environ 518 s, puis la fermeture conserve **15 703 500 octets**,
+avec un stockage réussi et **aucun rejet de réservation**. Le Gateway et le
+Worker local sont arrêtés/redémarrés, la RAM passant d'une entrée à zéro.
+
+Cette nouvelle archive est retrouvée : `hits: 1`, `sampledHits: 1`, taille et
+cible identiques, quatre échantillons frais concordants. Première image en
+**6,61 s**, lecture effective en **7,30 s**. Le cache A est retiré de la RAM
+pendant la progression, sans interrompre son lease.
+
+Ce rejeu révèle cependant **44,32 s d'attente**, puis une autre attente de
+**21,51 s** clôturée par le saut arrière. Ce dernier demande **0,075 s** ;
+le saut avant hors des données disponibles demande **78,64 s**. Le correctif
+de stockage ne valide donc pas une continuation fluide, ni des sauts rapides
+hors cache. Ces résultats restent dans le bilan, même si les essais précédents
+de Lost étaient meilleurs. Aucun seuil de réserve n'est abaissé pour masquer
+ces attentes. Preuve : tentative web 9 dans `durable-real-events.safe.json`.
+
+Après cette longue préparation, la continuation dépasse **164 secondes de
+position vidéo** depuis la cible du saut avant, sans nouvelle attente ni erreur
+dans les relevés. À la fermeture, une nouvelle B de **24 723 552 octets** est
+conservée, avec zéro rejet de capture. Le problème de renouvellement de l'archive
+est donc corrigé sur ce rejeu ; ses pauses et son saut long restent des échecs
+de performance.
+
+### Suite des contrôles Android et diagnostics CI
+
+Le contrôle du bouton Back natif après retour au premier plan attend désormais
+le **focus réel de la fenêtre** avant d'envoyer le vrai Back. La fermeture doit
+toujours intervenir dans les trois secondes ; le test ne remplace pas Back
+par un appel direct au code de fermeture. Rejeu local : **1 test réussi**.
+
+La matrice du commit `db61106d` comporte ensuite deux interruptions du runner
+téléphone : seulement **11/88** et **22/88** tests reçus, sans assertion d'échec.
+Le flux logcat ADB se termine avec le code 255 alors que l'émulateur reste vivant.
+Les traces disponibles n'établissent pas la cause de cette interruption.
+Le script conserve maintenant aussi le buffer logcat du guest par une nouvelle
+commande à la sortie en échec. Il conserve le statut d'échec original, sans
+relancer les tests ni transformer une interruption en réussite.
+
+Sur `41169195`, [Build Norva 38183036642](https://github.com/Admin-Adher/Norva/actions/runs/38183036642)
+réussit : **6 547 tests, 39 ignorés**, SQL 50/50, Worker SQLite/R2 local 15/15,
+et paquets Android/Windows. Le contrôle TV séparé échoue à police 1,3 sur le
+focus du bouton d'acceptation après ouverture du consentement de pairing.
+Le même test attend maintenant l'application des touches Right/Left par le
+renderer avant l'assertion ; assertions de focus, choix explicite et Back
+restent identiques. Rejeu local initial : **1 test réussi en 15,52 s**.
+Second rejeu local à police **1,3 : 1 test réussi en 15,70 s**, puis police
+remise à 1,0 sur cet émulateur de test.
+La matrice Android et la validation de cette dernière modification restent
+suivies séparément des résultats du build.
+
+### Clôture de la campagne réelle
+
+Les **18 sessions** du dernier banc ont toutes un accusé de clôture. À l'arrêt
+final, Gateway privé : zéro session, zéro transport brut et zéro job durable.
+Les trois conteneurs créés pour cette preuve sont arrêtés, les fichiers de
+diagnostic temporaires sont remplacés par leurs sources normales, et les données
+SQLite/R2 locales sont conservées. Le bridge, sa connexion SSH et l'émulateur
+`norva-real-35` sont fermés ; aucune fenêtre de test Windows ne reste ouverte.
+
+Contrôle du **12 octobre à 01:23 Paris** : les deux Gateways répondent `ok`, avec
+zéro session et transport brut ; les deux Edges ont un healthcheck sain. Les
+deux paramètres d'activation R2 sont faux sur les deux Gateways publics.
+Preuve : `durable-real-cleanup.safe.json`. Production inchangée, **R2 payant
+désactivé**, PR786 en brouillon. Les refus et défauts de lecture restants empêchent
+de conclure que le cache est validé uniformément sur web, Android et Windows.

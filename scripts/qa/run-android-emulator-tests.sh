@@ -94,6 +94,12 @@ finish_captures() {
     wait "$hang_monitor_pid" 2>/dev/null || true
   fi
   collect_captures
+  if (( test_status != 0 )); then
+    # A long-lived adb logcat stream can close while the emulator remains alive.
+    # Capture the retained guest buffer through a fresh command as well. This
+    # is evidence only: keep the original test exit status and never retry it.
+    record_diagnostic failure-logcat adb logcat -b all -d -v threadtime
+  fi
   record_diagnostic process-exit-info adb shell dumpsys activity exit-info "tv.norva.${platform}"
   record_diagnostic host-kernel sudo dmesg --ctime
   # Preserve the emulator's own Crashpad evidence; adb logs cannot explain a
