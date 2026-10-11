@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const { PrivateResumeHlsCache } = require('../services/media-gateway/src/private-resume-hls-cache');
 const { revalidateNativeRecentInput } = require('../services/media-gateway/src/native-mp4-recent-input');
+const { recentResumeTargetParts } = require('../services/media-gateway/src/recent-resume-validation');
 
 for (const changed of ['none', 'bytes', 'target', 'partial']) test(`native recent input requires four fresh ranges, ${changed}`, async t => {
     const N=65536, size=8*N, target='c'.repeat(64), data=Buffer.alloc(size, 7);
@@ -34,4 +35,29 @@ test('native input cache miss makes no provider request', async()=>{
     const cache=new PrivateResumeHlsCache({recentRevalidation:true});let opened=0;
     assert.equal(await revalidateNativeRecentInput({cache,binding:null,createBroker:()=>{opened++;}}),null);
     assert.equal(opened,0);
+});
+
+for (const changed of ['path', 'host', 'bytes', 'disabled']) test(`native renewed delivery still requires owned four-sample validation: ${changed}`, async t=>{
+    const N=65536,size=8*N,data=Buffer.alloc(size,7),target='c'.repeat(64);
+    const binding={ownerKey:'a'.repeat(64),sourceUrlHash:'b'.repeat(64),profileHash:'d'.repeat(64),fileSizeBytes:size};
+    const cache=new PrivateResumeHlsCache({recentRevalidation:true,allowDeliveryPathRenewal:changed!=='disabled',perFileBytes:1024*1024});
+    const before=recentResumeTargetParts('https://delivery.invalid/previous?cap=old');
+    const current=recentResumeTargetParts(`https://${changed==='host'?'other.invalid':'delivery.invalid'}/renewed?cap=new`);
+    const samples=[0,N,2*N,3*N].map(start=>({start,payload:Buffer.from(data.subarray(start,start+N))}));
+    assert.equal(cache.captureInput({binding,observed:{fileSizeBytes:size,effectiveUrlIdentitySha256:target,targetParts:before,samples},inputWindows:[{start:0,payload:data}]}),true);
+    let requests=0,closed=false;
+    const server=http.createServer((req,res)=>{requests++;const [start,end]=req.headers.range.slice(6).split('-').map(Number);
+        const bytes=Buffer.from(data.subarray(start,end+1));if(changed==='bytes'&&start===N)bytes[0]^=1;
+        res.writeHead(206,{'Content-Length':bytes.length});res.end(bytes);
+    });
+    await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+    t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+    const result=await revalidateNativeRecentInput({cache,binding,createBroker:async(signal,onIdentity)=>{
+        onIdentity({effectiveUrlIdentitySha256:'e'.repeat(64),targetParts:current});
+        return {inputUrl:`http://127.0.0.1:${server.address().port}/file`,close:async()=>{closed=true;},takeFreshValidatedHeader:()=>({fresh:true})};
+    }});
+    assert.equal(closed,true);
+    assert.equal(requests,['path','bytes'].includes(changed)?4:1);
+    if(changed==='path') {assert.ok(result);assert.deepEqual(result.snapshot.windows[0].payload,data);result.lease.release();}
+    else assert.equal(result,null);
 });

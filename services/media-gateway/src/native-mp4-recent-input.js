@@ -1,12 +1,15 @@
 'use strict';
-const { validateRecentResume } = require('./recent-resume-validation');
+const { validateRecentResume, recentResumeTargetEligible } = require('./recent-resume-validation');
 
 async function revalidateNativeRecentInput({ cache, persistence = null, binding, scope, signal, createBroker } = {}) {
     const plan = binding && cache.inputRevalidationPlan(binding);
     if (!plan) return null;
     let identity = null, handoff = null;
     const samples = await validateRecentResume({ plan, signal,
-        acceptIdentity: () => Boolean(identity && identity.effectiveUrlIdentitySha256 === plan.target),
+        // A renewed delivery path may finish the four fresh checks under the
+        // same owner/source and host policy. Only acquireInput can authorize
+        // old bytes, after all four digests and the exact size match.
+        acceptIdentity: () => Boolean(identity && recentResumeTargetEligible(plan, identity)),
         onFreshValidatedHeader: (broker, payload) => { handoff = broker.takeFreshValidatedHeader(payload); },
         createBroker: validationSignal => createBroker(validationSignal, current => { identity = current; }, scope, plan),
     });

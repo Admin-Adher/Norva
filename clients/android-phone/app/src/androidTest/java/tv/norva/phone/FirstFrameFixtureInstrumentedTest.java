@@ -278,6 +278,7 @@ public final class FirstFrameFixtureInstrumentedTest {
         byte[] body = "<!DOCTYPE html><html><body>Service unavailable</body></html>"
                 .getBytes(StandardCharsets.UTF_8);
         try (FixtureHttpServer origin = new FixtureHttpServer(body, "text/html")) {
+            origin.allowResponse = new CountDownLatch(1);
             target.startActivity(new Intent(target, PlayerActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     .putExtra(PlayerActivity.EXTRA_URL, origin.url())
@@ -287,11 +288,16 @@ public final class FirstFrameFixtureInstrumentedTest {
                     .putExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_TOKEN, token));
             activity = instrumentation.waitForMonitorWithTimeout(monitor, 5000);
             assertNotNull(activity);
+            long requestDeadline = SystemClock.elapsedRealtime() + 5000;
+            while (origin.requests.get() == 0 && SystemClock.elapsedRealtime() < requestDeadline) SystemClock.sleep(25);
+            assertEquals("One initial provider request is required", 1, origin.requests.get());
+            instrumentation.waitForIdleSync();
+            origin.allowResponse.countDown();
             assertTrue("HTML refusal did not become terminal within 5 seconds", terminal.await(5, TimeUnit.SECONDS));
             assertEquals("terminal", result.get().getStringExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_OUTCOME));
-            long refusalDelay = terminalAt.get() - origin.firstRequestAt.get();
+            long refusalDelay = terminalAt.get() - origin.firstResponseAt.get();
             assertTrue("HTML response to terminal took " + refusalDelay + "ms",
-                    origin.firstRequestAt.get() > 0 && refusalDelay >= 0 && refusalDelay < 2000);
+                    origin.firstResponseAt.get() > 0 && refusalDelay >= 0 && refusalDelay < 2000);
             SystemClock.sleep(2000);
             assertEquals("Provider refusal was retried automatically", 1, origin.requests.get());
             final Activity opened = activity;

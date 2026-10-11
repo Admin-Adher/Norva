@@ -54,7 +54,7 @@ public final class TsPrerollExperimentTest {
   Instrumentation.ActivityMonitor monitor=ins.addMonitor(PlayerActivity.class.getName(),null,false);
   Activity activity=null; AtomicReference<ExoPlayer> ref=new AtomicReference<>();
   AtomicReference<PlaybackException> error=new AtomicReference<>();
-  CountDownLatch frames=new CountDownLatch(1); long[] m={-1,-1,-1,-1,-1};
+  CountDownLatch frames=new CountDownLatch(1); long[] m={-1,-1,-1,-1,-1,-1};
   AtomicInteger count=new AtomicInteger(); long[] started={0};
   AtomicLong delivered=new AtomicLong();
   try (FirstFrameFixtureInstrumentedTest.FixtureHttpServer server = new FirstFrameFixtureInstrumentedTest.FixtureHttpServer(bytes,"video/mp2t")) {
@@ -72,7 +72,13 @@ public final class TsPrerollExperimentTest {
      if(c==1){m[2]=SystemClock.elapsedRealtime()-started[0];m[3]=pts;frames.countDown();}
     });
     p.addListener(new Player.Listener(){
-     @Override public void onRenderedFirstFrame(){m[4]=p.getCurrentPosition();}
+     @Override public void onRenderedFirstFrame(){
+      if(m[4]>=0)return;
+      // Hold the seek clock until the Surface callback has been delivered.
+      // A busy emulator can deliver this callback after audio has already
+      // advanced; that is not a different first decoded source position.
+      m[4]=p.getCurrentPosition();m[5]=SystemClock.elapsedRealtime()-started[0];p.play();
+     }
      @Override public void onPlayerError(PlaybackException e){error.set(e);frames.countDown();}
     });
     ExtractorsFactory baseline=()->new Extractor[]{new TsExtractor()};
@@ -82,14 +88,14 @@ public final class TsPrerollExperimentTest {
     started[0]=SystemClock.elapsedRealtime();
     if(fixture.equals("production")) p.setMediaItem(MediaItem.fromUri(server.url()),resume);
     else p.setMediaSource(source,resume);
-    p.prepare();p.play();
+    p.setPlayWhenReady(false);p.prepare();
    });
    assertTrue("No second frame",frames.await(35,TimeUnit.SECONDS));assertNull(error.get());
    ins.runOnMainSync(()->{});
    Log.i("NorvaTsPreroll","fixture="+fixture+" rate="+rate+" bytes="+delivered.get()+" resume="+resume+" preroll="+preroll+" firstMs="+m[0]+" secondMs="+m[2]+" firstPts="+m[1]+" secondPts="+m[3]+" positionMs="+m[4]);
    assertTrue("Actual first rendered callback missing",m[4]>=0);
    assertTrue("Requested timeline position lost",Math.abs(m[4]-resume)<750);
-   if(preroll)assertTrue("Pre-roll still waits for a future keyframe",m[2]-m[0]<1000);
+   if(preroll)assertTrue("Pre-roll still waits for a future keyframe after play",m[5]>=0 && m[2]-m[5]<1000);
    if(preroll)assertTrue("Decoded video does not match requested position",Math.abs(m[1]/1000-resume)<750);
   } finally {
    final Activity a=activity;
