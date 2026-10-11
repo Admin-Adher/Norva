@@ -16178,7 +16178,10 @@ async function runStartupCachePreparation(req: Request, db: SupabaseClient): Pro
     const audio = target.profile.audioTracks as JsonRecord[];
     const selected = audio.find(track => track.default === true) ?? audio[0];
     const hints = gatewayPlaybackHints({ ...recordOrEmpty(target.resolved.playbackHint),
-      codecProfile: target.profile, seekOffset: 0, audioStreamIndex: selected.index, clientAudioPassthrough: false });
+      // Preserve the ordinary catalogue audio contract. Forcing passthrough
+      // off here creates a different private cache binding on every browser
+      // opening, even when the selected source track is already safe AAC.
+      codecProfile: target.profile, seekOffset: 0, audioStreamIndex: selected.index });
     const session = { ownerKey, sourceUrl: target.targetUrl, playbackSessionId: crypto.randomUUID(),
       mode: "transcode", seekOffset: 0, expiresAt: new Date(Date.now() + 180_000).toISOString(),
       playbackHint: { ...hints, streamType: itemType === "movie" ? "movie" : "series" }, ...hints,
