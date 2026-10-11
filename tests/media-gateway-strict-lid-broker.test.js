@@ -191,6 +191,32 @@ function brokerHarness(diagnosticLogs = null) {
   );
 }
 
+test('native MP4 finishes metadata as a complete cached response before reading media', async t => {
+  const N=65536, data=Buffer.alloc(8*N), metadataEnd=3*N+123, ranges=[];
+  data.writeUInt32BE(20,0);data.write('ftyp',4);
+  data.writeUInt32BE(metadataEnd-20,20);data.write('moov',24);
+  data.writeUInt32BE(data.length-metadataEnd,metadataEnd);data.write('mdat',metadataEnd+4);
+  const upstream=http.createServer((req,res)=>{
+    const [start,end]=req.headers.range.slice(6).split('-').map(Number);ranges.push([start,end]);
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`,'Content-Length':end-start+1,ETag:'"same"'});
+    res.end(data.subarray(start,end+1));
+  });
+  await new Promise(resolve=>upstream.listen(0,'127.0.0.1',resolve));
+  const broker=await brokerHarness().createStrictLidBroker({
+    sourceUrl:`http://127.0.0.1:${upstream.address().port}/file`,fileSizeBytes:data.length,
+    pathPrefix:'finite-mkv-seek',finiteWindowBytes:4*N,finiteWarmupWindowBytes:N,
+    finiteCacheBytes:8*N,finiteMp4Coverage:true,completedReleaseDelayMs:0,
+  });
+  t.after(async()=>{await broker.close();upstream.closeAllConnections();await new Promise(resolve=>upstream.close(resolve));});
+  const response=await fetch(broker.inputUrl,{headers:{Range:`bytes=0-${data.length-1}`}});
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()),data);
+  assert.deepEqual(ranges.slice(0,2),[[0,N-1],[N,metadataEnd-1]]);
+  const count=ranges.length;
+  const cached=await fetch(broker.inputUrl,{headers:{Range:`bytes=0-${metadataEnd-1}`}});
+  assert.deepEqual(Buffer.from(await cached.arrayBuffer()),data.subarray(0,metadataEnd));
+  assert.equal(ranges.length,count);
+});
+
 test('MP4 coverage reads the real bounded broker cache without provider I/O and follows eviction', async t => {
   const N=65536, data=Buffer.alloc(3*N), words=(...xs)=>{const b=Buffer.alloc(xs.length*4);xs.forEach((x,i)=>b.writeUInt32BE(x,i*4));return b;};
   const box=(name,...parts)=>{const body=Buffer.concat(parts),head=Buffer.alloc(8);head.writeUInt32BE(body.length+8);head.write(name,4);return Buffer.concat([head,body]);};

@@ -6432,6 +6432,13 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     // only its missing tail instead of redownloading the prefix.
                     alignToWindowEnd: !boundedTail && context.finiteAlignFirstWindow && regularProviderWindowsCompleted === 0,
                 });
+                // Finish the complete metadata response before speculatively
+                // entering media bytes. Chromium may abandon that continuation
+                // for its resume cue; a complete moov window remains reusable.
+                // This only bounds I/O on the existing native MP4 pilot route.
+                const metadataEnd = context.mp4CacheCoverage ? context.mp4SizeEvidence?.metadataEnd() : null;
+                if (metadataEnd > finiteWindowRange.start && metadataEnd <= finiteWindowRange.end)
+                    finiteWindowRange.end = metadataEnd - 1;
                 const cached = finiteMkvSeekCacheLookup(context, finiteWindowRange, {
                     allowPrefix: true,
                 });
