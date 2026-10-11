@@ -19,6 +19,23 @@ async function harness(t,options={}) {
  const capture=()=>startup.capture({binding,observed,actualStartOffset:0,playlist,preparationBody:body,readAsset:async()=>Buffer.alloc(256,7)});
  return {root,disk,cache,startup,config,makeCache,capture,setNow:n=>{now=n;}};
 }
+
+test('seven-day retention restores an aged strong candidate only after a fresh matching identity',async t=>{
+ const h=await harness(t,{retentionMs:7*86400_000});assert.equal(await h.capture(),true);h.setNow(2*86400_000);
+ const next=new StartupCacheDiskStore(h.config);await next.initialize();assert.equal(next.status().entries,1);
+ const startup=createPrivateStartupCache(h.makeCache(),next);assert.equal(await startup.restore(binding),true);
+ const lease=startup.acquire(binding,0,observed);assert.ok(lease);lease.release();
+ h.setNow(8*86400_000);const expired=new StartupCacheDiskStore(h.config);await expired.initialize();assert.equal(expired.status().entries,0);
+});
+
+test('seven-day storage never renews the short sampled-file proof',async t=>{
+ const h=await harness(t,{retentionMs:7*86400_000});h.cache.recentRevalidation=true;
+ const samples=Array.from({length:4},(_,i)=>({start:i*65536,payload:Buffer.alloc(65536,i)}));
+ assert.equal(await h.startup.capture({binding,observed:{fileSizeBytes:1e7,effectiveUrlIdentitySha256:target,samples},
+  actualStartOffset:0,playlist,preparationBody:body,readAsset:async()=>Buffer.alloc(256,7)}),true);
+ h.setNow(86400_000);const next=new StartupCacheDiskStore(h.config);await next.initialize();
+ assert.equal(next.status().entries,1);assert.equal(await next.get(startupBinding(binding)),null);
+});
 test('disk prefix survives a new cache and store instance but still needs fresh identity checks',async t=>{
  const h=await harness(t);assert.equal(await h.capture(),true);
  const next=new StartupCacheDiskStore(h.config);await next.initialize();

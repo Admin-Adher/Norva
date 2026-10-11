@@ -19,11 +19,13 @@ const recordBytes = m => m.recordBytes ?? (m.storage?.bytes ?? m.bytes);
 class StartupCacheDiskStore {
     constructor({ root, maxBytes = 32 * 1024 ** 3, perOwnerBytes = 2 * 1024 ** 3,
         perFileBytes = 64 * 1024 ** 2, maxEntries = 8192, reserveFreeBytes = 32 * 1024 ** 3,
-        now = Date.now } = {}) {
+        retentionMs = 0, purpose = 'startup', now = Date.now } = {}) {
         if (!path.isAbsolute(root || '') || ![maxBytes, perOwnerBytes, perFileBytes, maxEntries, reserveFreeBytes]
-            .every(n => Number.isSafeInteger(n) && n > 0) || perFileBytes > perOwnerBytes || perOwnerBytes > maxBytes)
+            .every(n => Number.isSafeInteger(n) && n > 0) || perFileBytes > perOwnerBytes || perOwnerBytes > maxBytes
+            || !Number.isSafeInteger(retentionMs) || retentionMs < 0 || retentionMs > 7*86400_000
+            || !['startup','resume'].includes(purpose))
             throw Error('STARTUP_DISK_CONFIG_INVALID');
-        Object.assign(this, { root, maxBytes, perOwnerBytes, perFileBytes, maxEntries, reserveFreeBytes, now });
+        Object.assign(this, { root, maxBytes, perOwnerBytes, perFileBytes, maxEntries, reserveFreeBytes, retentionMs, purpose, now });
         this.index = new Map(); this.revoked = new Map(); this.pending = Promise.resolve();
         this.stats = { stores: 0, restores: 0, rejected: 0, evictions: 0 }; this.initialized = false;
     }
@@ -69,9 +71,16 @@ class StartupCacheDiskStore {
         if (m?.protocol !== 1 || !validBinding(m.binding)
             || !hex(m.preparationKey) || !Number.isSafeInteger(m.createdAt) || m.createdAt > this.now()
             || m.createdAt <= (this.revoked.get(m.binding.ownerKey) ?? -1)
-            || !Number.isSafeInteger(m.expiresAt) || m.expiresAt <= this.now()
+            || !Number.isSafeInteger(m.expiresAt) || m.expiresAt <= m.createdAt
             || m.expiresAt > m.createdAt + (m.recentProof ? 600_000 : 1_800_000)
-            || m.start !== 0 || !Number.isFinite(m.end) || !(m.end >= 60 && m.end <= 90) || m.ended !== false
+            || !Number.isSafeInteger(m.retainedUntil ?? m.expiresAt)
+            || (m.retainedUntil ?? m.expiresAt) < m.expiresAt
+            || (m.retainedUntil ?? m.expiresAt) > m.createdAt + Math.max(this.retentionMs, m.recentProof ? 600_000 : 1_800_000)
+            || (m.retainedUntil ?? m.expiresAt) <= this.now()
+            || (m.purpose || 'startup') !== this.purpose || !Number.isFinite(m.start) || m.start<0
+            || !Number.isFinite(m.end) || m.ended !== false
+            || (this.purpose==='startup' ? m.start!==0 || !(m.end>=60 && m.end<=90)
+                : !(m.end>m.start && m.end-m.start<=150))
             || !(hex(m.identity) || m.recentProof?.kind === 'sampled-recent-v1')
             || !Number.isSafeInteger(m.bandwidth) || m.bandwidth <= 0
             || !Number.isSafeInteger(m.bytes) || m.bytes < 1 || m.bytes > this.perFileBytes
@@ -108,7 +117,7 @@ class StartupCacheDiskStore {
             || m.inputWindows.some(w=>!Number.isSafeInteger(w.start) || w.start<0 || w.start+w.length>m.binding.fileSizeBytes)
             || m.segments.some(s=>!/^resume-\d+\.ts$/.test(s?.name) || !m.assets.some(a=>a.name===s.name)
                 || !Number.isFinite(s.duration) || !(s.duration>0 && s.duration<=30))
-            || Math.abs(m.segments.reduce((n,s)=>n+s.duration,0)-m.end)>0.001) return false;
+            || Math.abs(m.segments.reduce((n,s)=>n+s.duration,0)-(m.end-m.start))>0.001) return false;
         return new Set(m.segments.map(s=>s.name)).size === m.segments.length
             && m.subtitlePlaylists.every(row => Array.isArray(row) && row.length === 2
                 && /^subtitle_\d+\.m3u8$/.test(row[0]) && Array.isArray(row[1])
@@ -145,21 +154,58 @@ class StartupCacheDiskStore {
     }
     async get(binding) {
         const m = this.metadata(binding);
-        if (!m) return null;
+        // An aged sampled proof remains archived, but cannot become a lease.
+        // Only a strong validator can be freshly matched after its short TTL.
+        if (!m || (m.recentProof && m.expiresAt <= this.now())) return null;
         try {
             const stored = await this.readFile(path.join(this.root,m.directory,'payload.bin'), this.perFileBytes);
             if (stored.length !== (m.storage?.bytes ?? m.bytes)) throw Error('incomplete-storage');
-            const payload = m.storage?.codec === 'gzip'
-                ? await gunzip(stored, { maxOutputLength: m.bytes }) : stored;
-            if (payload.length !== m.bytes) throw Error('incomplete-payload');
-            for (const p of [...m.assets,...m.inputWindows])
-                if (hash(payload.subarray(p.offset,p.offset+p.length))!==p.digest) throw Error('corrupt-payload');
+            const entry = await this.decode(binding, m, stored);
             if (this.metadata(binding)!==m) return null;
             this.stats.restores++;
-            return { ...m, assets: new Map(m.assets.map(a=>[a.name,payload.subarray(a.offset,a.offset+a.length)])),
-                inputWindows: m.inputWindows.map(w=>({start:w.start,payload:payload.subarray(w.offset,w.offset+w.length)})),
-                subtitlePlaylists: new Map(m.subtitlePlaylists), leases:0,live:true,capturePurpose:'startup' };
-        } catch (_) { this.index.delete(keyFor(binding)); await this.removeDirectory(m.directory); this.stats.rejected++; return null; }
+            return entry;
+        } catch (_) {
+            if (this.index.get(keyFor(binding)) === m) this.index.delete(keyFor(binding));
+            await this.removeDirectory(m.directory); this.stats.rejected++; return null;
+        }
+    }
+    async decode(binding, m, stored) {
+        if (!this.validManifest(m) || keyFor(m.binding) !== keyFor(binding)
+            || !Buffer.isBuffer(stored) || stored.length !== (m.storage?.bytes ?? m.bytes)
+            || (m.recentProof && m.expiresAt <= this.now())) return null;
+        const payload = m.storage?.codec === 'gzip'
+            ? await gunzip(stored, { maxOutputLength: m.bytes }) : stored;
+        if (payload.length !== m.bytes) throw Error('incomplete-payload');
+        for (const p of [...m.assets,...m.inputWindows])
+            if (hash(payload.subarray(p.offset,p.offset+p.length))!==p.digest) throw Error('corrupt-payload');
+        return { ...m, archived: m.expiresAt <= this.now(),
+            // This interval exposes a candidate for a fresh check, never a lease.
+            expiresAt: m.expiresAt > this.now() ? m.expiresAt
+                : Math.min(m.retainedUntil ?? m.expiresAt, this.now()+30_000),
+            assets: new Map(m.assets.map(a=>[a.name,payload.subarray(a.offset,a.offset+a.length)])),
+            inputWindows: m.inputWindows.map(w=>({start:w.start,payload:payload.subarray(w.offset,w.offset+w.length)})),
+            subtitlePlaylists: new Map(m.subtitlePlaylists), leases:0,live:true,capturePurpose:this.purpose };
+    }
+    async export(binding) {
+        const m = this.metadata(binding);
+        if (!m) return null;
+        const { directory, recordBytes: size, ...manifest } = m;
+        const file = path.join(this.root, directory, 'payload.bin');
+        const digest = crypto.createHash('sha256');
+        let bytes = 0;
+        const handle = await fsp.open(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+        try {
+            const before = await handle.stat();
+            if (!before.isFile() || before.nlink !== 1 || before.size > this.perFileBytes) throw Error('invalid-file');
+            for await (const chunk of handle.createReadStream({ autoClose: false })) {
+                bytes += chunk.length; if (bytes > this.perFileBytes) throw Error('invalid-file');
+                digest.update(chunk);
+            }
+            const after = await handle.stat();
+            if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ino !== after.ino) return null;
+        } finally { await handle.close(); }
+        if (bytes !== (m.storage?.bytes ?? m.bytes) || this.metadata(binding) !== m) return null;
+        return { manifest: JSON.parse(JSON.stringify(manifest)), file, bytes, digest: digest.digest('hex') };
     }
     put(entry, preparationKey, isCurrent = () => true) {
         const run = () => this.write(entry, preparationKey, isCurrent).catch(() => {
@@ -169,7 +215,8 @@ class StartupCacheDiskStore {
         this.pending = result.catch(()=>false); return result;
     }
     async write(entry, preparationKey, isCurrent) {
-        if (!this.initialized || !entry.live || !isCurrent() || entry.createdAt <= (this.revoked.get(entry.binding.ownerKey) ?? -1)) return false;
+        if (!this.initialized || entry.capturePurpose!==this.purpose || !entry.live || !isCurrent()
+            || entry.createdAt <= (this.revoked.get(entry.binding.ownerKey) ?? -1)) return false;
         const parts = [...entry.assets].map(([name,payload])=>({name,payload}));
         parts.push(...entry.inputWindows.map(w=>({start:w.start,payload:w.payload})));
         let at=0;
@@ -180,6 +227,8 @@ class StartupCacheDiskStore {
             recentProof:entry.recentProof,targetParts:entry.targetParts,bandwidth:entry.bandwidth,bytes:at,
             segments:entry.segments,subtitlePlaylists:[...entry.subtitlePlaylists],
             assets:descriptors.slice(0,entry.assets.size),inputWindows:descriptors.slice(entry.assets.size)};
+        if(this.purpose==='resume')manifest.purpose='resume';
+        if (this.retentionMs) manifest.retainedUntil = Math.max(entry.expiresAt, entry.createdAt+this.retentionMs);
         if (!this.validManifest(manifest)) return false;
         // Count the manifest as well as media against the disk quotas. The
         // small margin includes storage metadata added after compression.

@@ -12,7 +12,7 @@ stockage R2 payant.** Aucun bucket, secret, abonnement ou quota Cloudflare n'est
 créé ou modifié. Les montants ci-dessous sont des scénarios, pas un budget accepté.
 
 **Cette étude ne déploie pas R2 ni une file couvrant tout le catalogue.** Le
-stockage persistant local et sa compression sans perte sont développés dans
+stockage persistant local, le transport R2 privé, la file globale et la compression sans perte sont développés dans
 la branche `codex/global-startup-durable-20261011`, encore non déployée. La
 file opérateur actuellement déployée contient toujours deux fichiers. Aucun
 coût R2 supplémentaire ni changement de trajet fournisseur n'est engagé.
@@ -165,12 +165,12 @@ Le réencodage se fait après réception de données : il ne réduit pas les oct
 à recevoir du fournisseur pour préparer la minute. R2 ne compense pas une
 source durablement trop lente après cette minute.
 
-## Persistance et validité : point à résoudre avant une conservation longue
+## Persistance et validité : intégration préparée, inactive
 
 Le prototype local stocke atomiquement média et manifeste, conserve les
 révocations, refuse les écritures interrompues et les données corrompues, et
 restaure les données dans le budget mémoire existant. La compression d'archive
-ne change pas un octet après décompression. **114 tests ciblés réussis**, dont
+ne change pas un octet après décompression. Le premier étage avait **114 tests ciblés réussis**, dont
 la révocation pendant le flush, les quotas par propriétaire après redémarrage,
 la taille des manifestes et la revalidation des preuves partielles.
 
@@ -182,15 +182,48 @@ constitue pas un rejeu du lecteur public ou une validation R2 réelle.
 Le plan de raccordement privé R2, les admissions, l'ordre de priorité et les
 conditions d'activation sont détaillés dans
 [`ops/hetzner/media/startup-cache-durable-plan.md`](../../ops/hetzner/media/startup-cache-durable-plan.md).
-Le transport R2 pour les préfixes et la file globale ne sont **pas encore
-implémentés**. Le prototype local est conservé en brouillon, désactivé par défaut.
+Le transport R2 privé, son index transactionnel commun, la file globale et
+le raccord des reprises HLS sont désormais **implémentés dans la branche**, en
+brouillon et désactivés. Les preuves et limites actuelles sont dans le
+[rapport d'intégration](2026-10-11-private-cache-r2-integration.md).
 
-Il n'étend pas la validité actuelle : **10 minutes** pour les preuves partielles
-et **30 minutes** pour les identités fortes. Il conserve donc le cache après
-un redémarrage dans sa fenêtre initiale, sans promettre une réutilisation durable
-des copies sur plusieurs jours. Il faudra distinguer la rétention des objets
-de la preuve fraîche autorisant leur lecture, sans traiter quatre échantillons
-comme un hash du fichier entier.
+La rétention des objets peut atteindre sept jours ; elle est distincte de la
+preuve fraîche autorisant leur lecture. Une identité forte peut être vérifiée
+à nouveau avant utilisation d'une archive de plusieurs jours. La preuve par
+quatre échantillons reste limitée à **10 minutes**, et ne devient pas un hash
+du fichier entier. Les routes MP4 natives par plages restent à raccorder.
+
+## Dimensionnement des fenêtres de reprise
+
+Les reprises ne sont pas préparées pour tout le catalogue. Une seule fenêtre
+durable par propriétaire et fichier est conservée après un arrêt, puis
+remplacée à la prochaine position. A est supprimé après progression, B est
+enregistré au nouvel arrêt ; à **90 % ou plus**, aucun nouveau cache de reprise.
+La première minute reste distincte. Le trafic de stockage est donc lié aux
+arrêts réellement effectués, pas aux 1,53 million de coordonnées de catalogue.
+
+À titre de scénario, une fenêtre de 48 secondes à 2 Mbit/s plus 5 % représente
+**12,6 Mo** de média. Pour 41 comptes :
+
+| Fenêtres conservées par compte | Fenêtres totales | Média | Stockage R2 Standard mensuel |
+| --- | ---: | ---: | ---: |
+| 5 | 205 | 2,58 Go | ~0,04 $ |
+| 20 | 820 | 10,33 Go | ~0,15 $ |
+| 100 | 4 100 | 51,66 Go | ~0,77 $ |
+
+Ce sont des hypothèses de débit, de durée et d'usage, sans réduction gzip
+supposée. Le segment précédent peut allonger la fenêtre ; la borne technique
+est 150 secondes, avec limites de mémoire et de taille par capture. Les
+en-têtes d'input (jusqu'à 8 Mio) et sous-titres (jusqu'à 4 Mio), manifestes,
+staging et opérations ajoutent du stockage ou du coût. Les Workers/Durable
+Objects facturent également leur travail et leurs métadonnées selon le plan.
+Ces montants ne sont pas un budget accepté et ne justifient aucune activation.
+
+Sur un extrait réel conservé de 12 secondes, l'archive gzip passe de **599 908
+à 527 028 octets** : **12,15 %** économisés. Compression 9,59 ms, restauration
+1,79 ms dans ce contrôle. Les octets et les sorties de décodage audio/vidéo sont
+identiques, sans erreur de décodage. Un seul extrait ne permet pas d'appliquer
+ce pourcentage à tous les films ; un média déjà très compressé peut peu gagner.
 
 Régénérer toutes les captures toutes les dix minutes serait irréaliste. Une
 simple relecture de quatre échantillons de 64 Kio sur tout le catalogue représente

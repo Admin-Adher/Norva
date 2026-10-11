@@ -1,0 +1,27 @@
+# Preparation only. This file is never selected by a deployment workflow.
+# No R2 bucket, Durable Object or paid service is created by repository tests.
+name = "norva-startup-cache-private"
+main = "src/index.mjs"
+compatibility_date = "2026-06-01"
+workers_dev = false
+
+[vars]
+STARTUP_PREFIX_R2_ENABLED = "false"
+STARTUP_PREFIX_R2_ACTIVATION_APPROVED = "false"
+# An activation also requires explicit positive global/owner byte and object
+# quotas, a dedicated service token and a dedicated manifest HMAC secret.
+STARTUP_PREFIX_MAX_BYTES = "0"
+STARTUP_PREFIX_OWNER_MAX_BYTES = "0"
+STARTUP_PREFIX_MAX_OBJECTS = "0"
+
+[[r2_buckets]]
+binding = "STARTUP_PREFIX_BUCKET"
+bucket_name = "norva-startup-prefix-private"
+
+[[durable_objects.bindings]]
+name = "STARTUP_PREFIX_LEDGER"
+class_name = "StartupPrefixLedger"
+
+[[migrations]]
+tag = "startup-prefix-v1"
+new_sqlite_classes = ["StartupPrefixLedger"]

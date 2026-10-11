@@ -30,10 +30,12 @@ function createPrivateStartupCache(cache, disk = null) {
         },
         remainingSeconds(body) {
             const key = preparationKey(body), binding = prepared.get(key) || disk?.bindingForPreparation(key);
+            const stored=binding && disk?.metadata(binding);
+            if (stored?.identity && stored.retainedUntil)
+                return Math.max(0,Math.floor((stored.retainedUntil-cache.now())/1000));
             const entry = binding && cache.candidate(binding, 0);
             if (!entry) {
                 prepared.delete(key);
-                const stored=binding && disk?.metadata(binding);
                 return stored ? Math.max(0,Math.floor((stored.expiresAt-cache.now())/1000)) : 0;
             }
             return Math.max(0, Math.floor((entry.expiresAt - cache.now()) / 1000));
@@ -43,6 +45,10 @@ function createPrivateStartupCache(cache, disk = null) {
             if (!disk || !binding) return false;
             const scoped=startupBinding(binding);
             return await cache.restoreStartup(scoped,()=>disk.get(scoped));
+        },
+        async remainingSecondsAsync(body, signal) {
+            if (disk?.lookupPreparation) await disk.lookupPreparation(preparationKey(body), body.ownerKey, signal);
+            return this.remainingSeconds(body);
         },
         async revokeOwner(ownerKey) {
             for (const [key,binding] of prepared) if (binding.ownerKey===ownerKey) prepared.delete(key);
@@ -64,6 +70,10 @@ function createPrivateStartupCache(cache, disk = null) {
                 || (Number.isSafeInteger(observed.fileSizeBytes) && observed.fileSizeBytes > 0
                     && observed.fileSizeBytes !== binding?.fileSizeBytes));
             if (!lease && candidate && definiteObservation && disk) disk.discard(scoped).catch(()=>{});
+            if (lease && candidate.archived && candidate.identity) {
+                candidate.expiresAt = Math.min(candidate.retainedUntil, cache.now()+cache.ttlMs);
+                candidate.archived = false;
+            }
             if (lease) stats.hits++;
             return lease;
         },
@@ -74,7 +84,7 @@ function createPrivateStartupCache(cache, disk = null) {
             if (stored && disk) {
                 const entry=cache.candidate(startupBinding(args.binding),0);
                 durable=Boolean(entry && args.preparationBody
-                    && await disk.put(entry,preparationKey(args.preparationBody),args.isCurrent || (()=>true)));
+                    && await disk.put(entry,preparationKey(args.preparationBody),args.isCurrent || (()=>true),args.signal));
                 if (!durable && entry) {
                     for (const [key, current] of cache.entries) if (current === entry) cache.drop(key, entry);
                 }

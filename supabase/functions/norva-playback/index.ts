@@ -645,6 +645,9 @@ async function handleRequest(req: Request): Promise<Response> {
     if (req.method === "POST" && segments[0] === "startup-cache" && segments[1] === "prepare" && !segments[2]) {
       return json(req, await runStartupCachePreparation(req, supabase));
     }
+    if (req.method === "POST" && segments[0] === "startup-cache" && segments[1] === "queue" && !segments[2]) {
+      return json(req, await runStartupCacheQueue(req, supabase));
+    }
     if (req.method === "POST" && segments[0] === "startup-cache" && segments[1] === "control" && !segments[2]) {
       return json(req, await runStartupCacheControl(req, supabase));
     }
@@ -16049,6 +16052,34 @@ function startupCacheOwnerAllowed(ownerKey: string): boolean {
   return owners.includes(ownerKey);
 }
 
+async function runStartupCacheQueue(req: Request, db: SupabaseClient): Promise<JsonRecord> {
+  const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
+  const supplied = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  if (!expected || supplied !== expected) throw new HttpError(401, "Unauthorized");
+  if (Deno.env.get("PRIVATE_STARTUP_CACHE_GLOBAL_QUEUE_ENABLED") !== "true"
+    || Deno.env.get("PRIVATE_STARTUP_CACHE_ALL_AUTHENTICATED_OWNERS") !== "true"
+    || Deno.env.get("PRIVATE_STARTUP_CACHE_ENABLED") !== "true")
+    return { protocol: 1, enabled: false, job: null };
+  const body = recordOrEmpty(await req.json().catch(() => ({})));
+  if (body.action === "claim" && Object.keys(body).length === 1) {
+    const { data, error } = await db.rpc("claim_startup_prefix_queue");
+    if (error) throw new HttpError(503, "Startup queue unavailable");
+    return { protocol: 1, enabled: true, job: data ?? null };
+  }
+  if (body.action === "ack" && exactJsonKeys(body,
+    ["action", "leaseId", "prepared", "providerDrained", "retrySeconds"])
+    && PLAYBACK_SESSION_UUID_PATTERN.test(stringOr(body.leaseId, ""))
+    && typeof body.prepared === "boolean" && typeof body.providerDrained === "boolean"
+    && Number.isInteger(body.retrySeconds) && Number(body.retrySeconds) >= 30 && Number(body.retrySeconds) <= 604800) {
+    const { data, error } = await db.rpc("ack_startup_prefix_queue", {
+      p_lease_id: body.leaseId, p_prepared: body.prepared, p_provider_drained: body.providerDrained,
+      p_retry_seconds: body.retrySeconds });
+    if (error) throw new HttpError(503, "Startup queue unavailable");
+    return { protocol: 1, acknowledged: data === true };
+  }
+  throw new HttpError(400, "Invalid startup queue request");
+}
+
 async function vodPlaybackIdentityKey(sourceId: unknown, itemType: unknown, itemId: unknown,
   variantId: unknown, targetUrl: string): Promise<string> {
   return await sha256Hex(JSON.stringify([
@@ -16183,7 +16214,7 @@ async function runStartupCachePreparation(req: Request, db: SupabaseClient): Pro
     || !PLAYBACK_SESSION_UUID_PATTERN.test(userId) || !PLAYBACK_SESSION_UUID_PATTERN.test(sourceId)
     || !["movie", "episode", "series"].includes(itemType) || !itemId || itemId.length > 200) throw new HttpError(400, "Invalid startup preparation");
   const ownerKey = await sha256Hex(userId);
-  if (!startupCacheOwnerAllowed(ownerKey)) return { protocol: 1, prepared: false, reason: "pilot-disabled" };
+  if (!startupCacheOwnerAllowed(ownerKey)) return { protocol: 1, prepared: false, providerDrained: true, reason: "pilot-disabled" };
   let target: Awaited<ReturnType<typeof startupCacheTarget>>;
   try { target = await startupCacheTarget(db, userId, sourceId, itemType, itemId); }
   catch (error) {
@@ -16193,7 +16224,7 @@ async function runStartupCachePreparation(req: Request, db: SupabaseClient): Pro
       return await refreshStartupCacheMovieProfile(db, userId, sourceId, itemId);
     }
     if (error instanceof HttpError && [404, 409].includes(error.status))
-      return { protocol: 1, prepared: false, reason: "exact-file-evidence-unavailable" };
+      return { protocol: 1, prepared: false, providerDrained: true, reason: "exact-file-evidence-unavailable" };
     throw error;
   }
   // This pilot produces HLS assets. Browser-native MP4 sessions never consult
@@ -16208,31 +16239,31 @@ async function runStartupCachePreparation(req: Request, db: SupabaseClient): Pro
     && useNativeMp4Gateway({ sourceId, itemType, container: nativeContainer,
       enabled: Deno.env.get("NORVA_NATIVE_MP4_GATEWAY_ENABLED") !== "false" })
     && browserNativeMp4Proof(target.resolved.playbackHint)) {
-    return { protocol: 1, prepared: false, reason: "native-mp4-prefix-unavailable" };
+    return { protocol: 1, prepared: false, providerDrained: true, reason: "native-mp4-prefix-unavailable" };
   }
-  if (!target.accountKey) return { protocol: 1, prepared: false, reason: "account-unidentified" };
+  if (!target.accountKey) return { protocol: 1, prepared: false, providerDrained: true, reason: "account-unidentified" };
   await assertProviderCircuitClosed(target.accountHash, db);
   const identityKey = (await resolveSourceIdentity(sourceId, userId, db)).key;
   const leaseOwner = `startup-cache:${crypto.randomUUID()}`;
   let accountClaimed = false, fileClaimed = false, releaseSafe = true;
   try {
     const { data: busy, error } = await db.rpc("provider_account_busy", { p_key: target.accountKey });
-    if (error || typeof busy !== "boolean") return { protocol: 1, prepared: false, reason: "activity-unavailable" };
-    if (busy) return { protocol: 1, prepared: false, reason: "account-presence" };
-    if (await userHasLiveSession(db, userId)) return { protocol: 1, prepared: false, reason: "viewer-active" };
-    if (await accountPregenActive(db, userId, sourceId)) return { protocol: 1, prepared: false, reason: "background-job-active" };
+    if (error || typeof busy !== "boolean") return { protocol: 1, prepared: false, providerDrained: true, reason: "activity-unavailable" };
+    if (busy) return { protocol: 1, prepared: false, providerDrained: true, reason: "account-presence" };
+    if (await userHasLiveSession(db, userId)) return { protocol: 1, prepared: false, providerDrained: true, reason: "viewer-active" };
+    if (await accountPregenActive(db, userId, sourceId)) return { protocol: 1, prepared: false, providerDrained: true, reason: "background-job-active" };
     const account = await db.rpc("claim_provider_account_language_validation", {
       p_provider_account_hash: target.accountHash, p_lease_owner: leaseOwner, p_ttl_seconds: 180 });
     accountClaimed = !account.error && account.data === true;
-    if (!accountClaimed) return { protocol: 1, prepared: false, reason: "account-reserved" };
+    if (!accountClaimed) return { protocol: 1, prepared: false, providerDrained: true, reason: "account-reserved" };
     const file = await db.rpc("claim_provider_file_probe", {
       p_identity_key: identityKey, p_lease_owner: leaseOwner, p_ttl_seconds: 180 });
     fileClaimed = !file.error && file.data === true;
-    if (!fileClaimed) return { protocol: 1, prepared: false, reason: "provider-reserved" };
+    if (!fileClaimed) return { protocol: 1, prepared: false, providerDrained: true, reason: "provider-reserved" };
     const permit = { userId, sourceId, itemType, itemId, variantId: target.variantId || null, leaseOwner, identityKey,
       accountHash: target.accountHash, sourceRevision: target.revision,
       profileFingerprint: target.profileFingerprint, targetHash: await sha256Hex(target.targetUrl) };
-    if (!await startupCachePermitCurrent(db, permit)) return { protocol: 1, prepared: false, reason: "activity-changed" };
+    if (!await startupCachePermitCurrent(db, permit)) return { protocol: 1, prepared: false, providerDrained: true, reason: "activity-changed" };
     const runtime = await getRuntimeConfig(db), route = await mediaGatewayRouteForHlsPlaybackUser(runtime, userId);
     if (!route) throw new HttpError(503, "Gateway unavailable");
     const audio = target.profile.audioTracks as JsonRecord[];
@@ -16260,7 +16291,7 @@ async function runStartupCachePreparation(req: Request, db: SupabaseClient): Pro
     const result = recordOrEmpty(await response.json());
     releaseSafe = result.protocol === 1 && result.providerDrained === true;
     if (!releaseSafe) throw new HttpError(503, "Startup preparation cleanup is unconfirmed");
-    return { protocol: 1, prepared: result.prepared === true, seconds: result.prepared === true ? 60 : 0,
+    return { protocol: 1, prepared: result.prepared === true, providerDrained: true, seconds: result.prepared === true ? 60 : 0,
       refreshAfterSeconds: boundedInt(result.refreshAfterSeconds, 60, 30, 300),
       reason: stringOr(result.reason, "not-prepared") };
   } finally {

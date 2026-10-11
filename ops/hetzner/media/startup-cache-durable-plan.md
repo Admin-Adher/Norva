@@ -1,112 +1,131 @@
-# Première minute : préparation d'une conservation privée durable
+# Cache privé durable : première minute et fenêtres de reprise
 
-## Périmètre et état
+## État et autorisation
 
-L'utilisateur a demandé de préparer la solution **sans activer de stockage R2
-payant**. Aucun déploiement Cloudflare, achat, upload R2 ou secret nouveau n'est
-autorisé par ce plan. La production et la file actuelle de deux fichiers restent
-inchangées. Le chiffrage et les limites des dates sont dans
-[`docs/qa/2026-10-11-startup-cache-storage-estimate.md`](../../../docs/qa/2026-10-11-startup-cache-storage-estimate.md).
+L'utilisateur demande la préparation **sans activer de stockage R2 payant**.
+La PR786 reste en brouillon. Aucun bucket, secret, déploiement Cloudflare,
+migration en production ou transfert vers un vrai R2 n'a été réalisé.
+La file opérateur déployée contient toujours deux fichiers. Le code est
+raccordé dans la branche, avec les options désactivées par défaut.
 
-La branche prépare un premier étage local : `StartupCacheDiskStore`, facultatif,
-qui stocke les préfixes HLS déjà validés. Il est désactivé si
-`PRIVATE_STARTUP_CACHE_DISK_DIR` est absent. Les manifestes ne conservent aucune
-URL fournisseur, aucun mot de passe ni l'indication opaque de livraison.
+Le [rapport d'intégration](../../../docs/qa/2026-10-11-private-cache-r2-integration.md)
+décrit les tests et limites. Le [chiffrage](../../../docs/qa/2026-10-11-startup-cache-storage-estimate.md)
+distingue copies de catalogue, œuvres et fenêtres de reprise.
 
-Les limites par défaut sont 32 Gio de média et manifestes, 2 Gio par propriétaire,
-64 Mio décodés par entrée, 8 192 entrées et 32 Gio de disque libre protégé.
-`PRIVATE_STARTUP_CACHE_DISK_MAX_BYTES` et
-`PRIVATE_STARTUP_CACHE_DISK_OWNER_BYTES` règlent les deux quotas de stockage.
-Le dossier doit être un volume privé persistant, distinct des sorties FFmpeg
-temporaires. Ne pas activer ce dossier dans les services actuels sur la seule
-base de ce plan : un canary complet reste nécessaire.
+## Transport, compression et quotas
 
-Le média est écrit et synchronisé avant publication atomique du manifeste.
-Les écritures incomplètes, les fichiers corrompus et les révocations sont
-refusés. Les quotas sont appliqués aussi pendant la restauration du répertoire.
-La compression gzip est conservée seulement si elle gagne au moins 3 % ; la
-décompression est bornée et chaque bloc restitué vérifié par son digest.
-Les pistes, paquets, cadence et horloges du média sont conservés exactement.
+`StartupCacheDiskStore` prépare une archive bornée. Gzip niveau 6 est essayé
+sur chaque capture ; il est conservé s'il économise au moins 3 %, sinon les
+mêmes octets sont stockés sans recompression. Aucun réencodage audio/vidéo
+supplémentaire, suppression de piste ou de cue. Décompression bornée et
+vérification SHA-256 de chaque bloc restitué.
 
-## Raccordement R2 à réaliser
+`StartupCacheR2Store` transmet média et manifeste signé, en deux objets. Le
+Worker privé `workers/startup-cache` publie le manifeste après le média.
+Aucune URL fournisseur, mot de passe ou indication opaque de livraison dans
+les archives. Le navigateur n'accède pas directement au bucket : claims
+Norva, contrôle de propriété et revalidation du fichier restent nécessaires.
 
-1. Réutiliser les conventions de transport authentifié et de checksum du
-   client `privateMediaCacheStoreClient.js` et du Worker `workers/media-cache`.
-   **Le protocole de cache HLS complet ne peut pas être réutilisé tel quel** :
-   il exige une preuve de fin de source. Une minute partielle ne doit jamais
-   être publiée comme un film complet ou sous son identité globale partagée.
-2. Ajouter un protocole distinct de préfixe privé : manifeste signé avec une
-   clé dédiée, protocole/version explicites, propriétaire, révision de source,
-   fichier, choix de pistes, durée couverte et taille décodée. Utiliser des
-   clés opaques dérivées de ces liaisons et du contenu, sans accès fournisseur.
-3. Regrouper le média et ses petits fichiers en un objet borné, puis publier
-   le manifeste en dernier. Deux objets par capture évitent un upload par
-   petit segment. Une écriture interrompue laisse un objet orphelin non lisible,
-   à supprimer par un nettoyage borné et vérifiable.
-4. Conserver un index privé durable et un journal transactionnel des réservations
-   de quota, commun aux Gateways. Une limite locale à chaque processus ou les
-   seuls compteurs du Worker ne constituent pas un plafond global de dépense.
-   Compter média compressé, manifestes, variantes, écritures en cours et orphelins.
-5. Utiliser un bucket média privé et des permissions dédiées. Ne pas utiliser
-   `norva-db-backups`, ses clés, son budget ou ses politiques de sauvegarde.
-   L'API interne reste inaccessible au navigateur ; les lectures passent par
-   les claims Norva et les contrôles de propriété/révocation existants.
-6. Lire R2 dans une réservation du budget mémoire existant, décompresser avec
-   borne stricte, vérifier le manifeste et les blocs, puis revalider le fichier
-   actuel avant toute autorisation de lecture. Un échec R2 est un cache manqué,
-   avec un repli ordinaire borné et sans ouverture concurrente du fournisseur.
-7. Raccorder la suppression du compte et de la source au retrait de l'index,
-   aux tombstones et au nettoyage des objets. Une révocation interdit
-   immédiatement la lecture ; la suppression physique peut être asynchrone
-   mais reste suivie et comptabilisée dans le quota.
+Un Durable Object commun aux deux Gateways réserve transactionnellement les
+octets et objets, incluant manifestes et écritures en cours. Quotas globaux
+et par propriétaire positifs et explicites ; l'exemple les fixe à zéro.
+Le nettoyage libère le quota après suppression R2 confirmée. Une opération
+d'écriture dont la fin est inconnue conserve son quota ; une récupération
+opérateur peut être nécessaire après interruption. Une erreur R2 n'autorise
+pas de repli vers un ancien staging local potentiellement révoqué ailleurs.
 
-La rétention des objets et la validité de la preuve de fichier doivent être
-distinctes avant un archivage de plusieurs jours. Le prototype conserve encore
-la fenêtre initiale de 10 minutes pour les échantillons, ou 30 minutes pour une
-identité forte. Un redémarrage ne la prolonge pas. Quatre échantillons ne sont
-pas une empreinte du fichier entier ; une conservation longue exige une
-politique de revalidation supplémentaire et sa validation sur copies changeantes.
+Le staging local est supprimé après publication R2. Par défaut : 32 Gio / 2 Gio
+par propriétaire pour les préfixes, 1 Gio / 128 Mio par propriétaire pour les
+reprises, avec une réserve de 32 Gio libres dans les vérifications disque.
+Les limites locales s'additionnent ; le quota R2 est commun. Les snapshots en
+transit restent réservés dans le budget mémoire existant, sans copie illimitée.
 
-## File globale et priorité à réaliser
+## Conservation et revalidation
 
-- Parcourir les catalogues visibles par pages bornées. Les coordonnées sont
-  propriétaire/source/type/identifiant ; elles ne désignent pas une œuvre unique.
-  Persister curseur, génération, tentative et état d'acquittement pour pouvoir
-  reprendre après redémarrage sans perdre ni dupliquer une acquisition.
-- Prioriser les reprises demandées récemment, puis les films sortis cette année
-  et les épisodes dont la diffusion récente est vérifiée, puis l'année précédente.
-  Utiliser l'année canonique ; la métadonnée est un secours seulement en son absence.
-  Une contradiction ne promeut pas la copie. La date d'import ne prouve aucune sortie.
-- Une année de série ne suffit pas à dater un épisode. Conserver une classe
-  « date inconnue » et prévoir une part du travail pour les œuvres anciennes ou
-  mal documentées, afin qu'elles ne soient pas exclues indéfiniment.
-- Alterner comptes et sources. Un compte occupé est reporté, puis un autre compte
-  libre peut être examiné. Ne pas ajouter une connexion fournisseur pour compenser
-  sa lenteur. Limiter aussi CPU, encodages, I/O et mémoire au niveau du serveur.
-- Réutiliser `startup-cache/prepare` : droits actuels, génération, profil exact,
-  présence, activité et admissions atomiques. Ne jamais contourner le contrôle
-  de présence en supprimant les leases. L'utilisateur préempte le travail ; la
-  nouvelle lecture attend le drainage positif de la connexion de préparation.
-- Un fichier sans profil complet, un épisode sans ligne exacte ou la route MP4
-  native sont reportés avec une raison fixe. Le préfixe HLS ne crée pas un cache
-  MP4 natif. Ces cas doivent être raccordés avant de promettre « tous les formats ».
-- Une capture complète est acquittée seulement après publication durable et
-  confirmation du drainage. Une erreur de transport ne déclenche pas une autre
-  acquisition à l'aveugle. Aucune progression ni historique de visionnage n'est écrit.
+Rétention facultative jusqu'à sept jours, distincte de la validité de la preuve.
+Une archive portant ETag fort, taille exacte et identité de livraison peut
+redevenir candidate après redémarrage ; une lease exige encore une vérification
+actuelle concordante. La candidature provisoire est bornée à 30 secondes.
 
-## Conditions avant activation ultérieure
+La preuve par quatre échantillons conserve sa validité de dix minutes. Elle
+n'est pas une empreinte du fichier entier et ne certifie pas une réutilisation
+sur plusieurs jours. Une telle archive ancienne reste refusée. Les fournisseurs
+sans ETag fort ou taille fiable limitent donc la couverture réelle.
 
-- Choix explicite de quota et coût ; stockage et opérations inclus. Aucune
-  activation automatique payante à partir d'une variable d'environnement seule.
-- Contrôle CI sur le commit exact ; canary Gateway et Worker isolés ; restauration
-  après redémarrage et coupure d'écriture ; révocation, source modifiée et quotas.
-- Tests publics sur MKV, MPEG-TS et les routes MP4 réellement raccordées : départ
-  à zéro, reprise, sauts, changements de pistes et plusieurs minutes au-delà du
-  cache. Mesurer première image **et** progression effective, pauses et images perdues.
-- Vérification à l'écoute et des sous-titres. Aucun réencodage avec perte au raccord
-  avant validation sur des codecs, résolutions, cadences et pistes variés.
-- Déploiement progressif avec arrêt réversible du préchargement. Conserver le
-  chemin de lecture ordinaire et observer quotas, orphelins et priorité utilisateur.
+## File globale de première minute
 
-Cette préparation ne promet pas un débit futur suffisant : la première minute
-absorbe une variation temporaire, puis la livraison doit soutenir la lecture.
+La migration `20261011203000_startup_prefix_global_queue.sql` ajoute des
+curseurs durables par source et une file bornée à 8 192 coordonnées. Films et
+épisodes exacts de tous les comptes visibles sont énumérés par pages de 64,
+avec reprise après redémarrage. Sources supprimées, invisibles ou générations
+obsolètes sont refusées. Le curseur ne repart pas du début de l'année récente
+chaque fois qu'une classe ancienne est en cours de parcours.
+
+Quatre pages concernent l'année actuelle, une l'année précédente et une les
+dates anciennes/inconnues. L'année canonique prime ; `metadata.year` n'est
+utilisé pour un film qu'en son absence. Une date de diffusion explicite date
+un épisode : année de série et date d'import ne la remplacent pas. Comptes
+et sources alternent ; les catalogues anciens restent parcourus.
+
+L'Edge de service et le worker opérateur réutilisent `startup-cache/prepare` :
+présence, activité, admissions fournisseur atomiques, profil exact et droits
+actuels. Une lecture utilisateur préempte le travail ; son démarrage attend
+le drainage positif du transport. Le travail n'est acquitté qu'après ce
+même drainage. Une réponse ambiguë suspend la boucle et laisse expirer sa
+réservation ; aucune autre acquisition n'est lancée à l'aveugle. Aucun
+historique de visionnage n'est écrit.
+
+## Reprises : A → B et fin de VOD
+
+`PrivateResumePersistence` raccorde les captures HLS ordinaires au même
+stockage, dans un espace distinct, avec une option propre. Données déjà lues
+uniquement : aucune deuxième connexion fournisseur ni deuxième décodage complet.
+
+- Sans avancée de position, A reste disponible.
+- Une position authentifiée ayant avancé retire A des reprises futures et du
+  stockage. La lease locale déjà utilisée continue à servir ses segments :
+  la suppression ne coupe pas la lecture.
+- À l'arrêt explicite, B est capturé après drainage de la source et de l'encodeur.
+  Son archivage est asynchrone ; la fermeture de session et le slot fournisseur
+  n'attendent pas l'upload R2.
+- À **90 % ou plus** de la durée serveur connue, aucune nouvelle fenêtre n'est
+  archivée et l'ancienne est supprimée. La première minute reste distincte.
+- Une seule fenêtre durable par propriétaire et fichier ; un changement de
+  piste remplace l'ancien snapshot. Les pistes restent exactement conservées.
+- Une barrière durable refuse la republication tardive de A après suppression.
+  Le quota n'est libéré qu'après confirmation de la suppression physique.
+- Durée inconnue : pas de nouvel archivage long de reprise. Le cache mémoire
+  ordinaire conserve ses règles lorsque ce raccord est désactivé.
+
+## Configuration inactive
+
+Voir `startup-cache-storage.env.example` et `workers/startup-cache/wrangler.example.toml`.
+Ne pas les utiliser pour déployer maintenant.
+
+- Gateway : `PRIVATE_STARTUP_CACHE_R2_ENABLED` et
+  `PRIVATE_STARTUP_CACHE_R2_ACTIVATION_APPROVED`, URL privée, bearer dédié,
+  clé HMAC dédiée, staging et rétention explicitement configurés.
+- Reprises : `PRIVATE_RESUME_CACHE_PERSISTENCE_ENABLED`, dossier distinct et
+  `PRIVATE_RESUME_CACHE_RETENTION_SECONDS`, avec le contrôle du propriétaire actuel.
+- Worker : deux options d'activation, quotas positifs, bucket privé et DO dédiés.
+  Ne pas réutiliser le bucket de sauvegarde, ses secrets ni ses budgets.
+- File : `NORVA_STARTUP_CACHE_GLOBAL_QUEUE_ENABLED` dans Edge et worker,
+  préchargement et tous les propriétaires authentifiés explicitement autorisés
+  côté Edge/Gateway. Par défaut, file locale historique.
+
+## Avant une activation ultérieure
+
+1. Budget accepté incluant R2, requêtes, Worker/DO, préparation et staging.
+2. CI du commit exact et canary public isolé avec claims réels. Les tests locaux
+   Miniflare/PGlite ne valident ni la configuration Cloudflare ni la charge réelle.
+3. MKV, MPEG-TS et MP4 sur route HLS : départ, reprise, sauts, pistes, continuation
+   au-delà du cache, suppression à 90 %, redémarrage et révocation.
+4. La route **MP4 native par plages d'octets** et les caches conservant seulement
+   l'input ne sont pas raccordés à ces archives HLS : travail distinct nécessaire.
+5. Invalidations de source et de compte, livraison changeante, durée absente et
+   preuves échantillonnées à valider sur copies réelles.
+6. Écoute et sous-titres réels. L'égalité des octets prouve la transparence de gzip,
+   pas la qualité du lecteur ou d'un encodage précédent.
+
+La minute préparée absorbe une variation temporaire de débit ; elle ne compense
+pas durablement une livraison inférieure au débit nécessaire à la vidéo.

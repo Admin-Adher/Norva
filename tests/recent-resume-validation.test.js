@@ -196,7 +196,8 @@ for (const hit of [false,true]) test(`Gateway recreates indexed input after samp
     const run=vm.runInNewContext('('+source.slice(start,end)+')',{
         AbortController,Date,Error,Number,
         privateResumeHlsBindingForSession:()=>binding,privateResumeFormat:()=> 'mkv',canUseRecentResumeSamples:()=>true,
-        privateResumeHlsCache:{hasCandidate:()=>true,revalidationPlan:()=>({kind:'sampled-recent-v1'}),
+        privateResumeDuration:()=>1000,
+        privateResumePersistence:{restore:async()=>false,hasCandidate:()=>true,revalidationPlan:()=>({kind:'sampled-recent-v1'}),
             acquire:()=>{calls.push('acquire');return hit?{start:10,end:70,aheadSeconds:50,
                 inputSnapshot:()=>({windows:[]}),validationMode:'sampled-recent-v1'}:null;}},
         revalidateRecentResumeSession:async()=>{calls.push('validation-drained');return observed();},
@@ -247,7 +248,8 @@ test('early validated cache leases are released if input preparation fails or th
         const lease={validationMode:'sampled-recent-v1',release:()=>released++,inputSnapshot:()=>{throw Error('RESUME_CACHE_REVOKED');}};
         const run=vm.runInNewContext('('+source.slice(start,end)+')',{
             Date,Number,Boolean,privateResumeHlsBindingForSession:()=>binding,privateResumeFormat:()=> 'mpegts',canUseRecentResumeSamples:()=>true,
-            privateResumeHlsCache:{hasCandidate:()=>true,revalidationPlan:()=>({kind:'sampled-recent-v1'}),acquire:()=>lease},
+            privateResumeDuration:()=>1000,
+            privateResumePersistence:{restore:async()=>false,hasCandidate:()=>true,revalidationPlan:()=>({kind:'sampled-recent-v1'}),acquire:()=>lease},
             revalidateRecentResumeSession:async()=>observed(),applyFiniteMkvSeekProviderIdentity:()=>{},
             prepareFiniteMkvSeekBroker:async(current,signal,options)=>{prepared++;assert.equal(options.deferTsIndex,true);
                 if(failure==='throw')throw Error('PREPARE_FAILED');

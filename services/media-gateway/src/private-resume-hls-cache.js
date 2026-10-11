@@ -99,7 +99,17 @@ class PrivateResumeHlsCache {
         entry.inputWindows = [];
     }
     prune() {
-        for (const [key, entry] of this.entries) if (!entry.leases && entry.expiresAt <= this.now()) this.drop(key, entry);
+        for (const [key, entry] of this.entries) if (!entry.leases && (entry.retired || entry.expiresAt <= this.now())) this.drop(key, entry);
+    }
+    retire(binding) {
+        this.epoch++;
+        const key = binding && keyFor(binding), entry = key && this.entries.get(key);
+        if (!entry || entry.capturePurpose === 'startup') return false;
+        // An active viewer may finish consuming its local snapshot. Retirement
+        // denies new leases without revoking the current playback access.
+        entry.retired = true;
+        if (!entry.leases) this.drop(key, entry);
+        return true;
     }
     revokeOwner(ownerKey) {
         this.epoch++;
@@ -111,17 +121,21 @@ class PrivateResumeHlsCache {
         this.prune();
         if (!binding || !Number.isFinite(position) || position < 0) return null;
         const entry = this.entries.get(keyFor(binding));
-        return !entry?.inputOnly && entry?.live && entry.expiresAt > this.now() && position >= entry.start
+        return !entry?.inputOnly && !entry?.retired && entry?.live && entry.expiresAt > this.now() && position >= entry.start
             && position < entry.end && (entry.ended || entry.end - position >= this.minimumAheadSeconds)
             ? entry : null;
     }
     hasCandidate(binding, position) { return Boolean(this.candidate(binding, position)); }
     async restoreStartup(binding, load) {
-        if (this.hasCandidate(binding,0)) return true;
+        return this.restoreWindow(binding,0,load,'startup');
+    }
+    async restoreWindow(binding, position, load, purpose = 'resume') {
+        if (!['resume','startup'].includes(purpose) || !binding || !Number.isFinite(position) || position<0) return false;
+        if (this.hasCandidate(binding,position)) return true;
         const epoch=this.epoch, reservation=2*this.perFileBytes;
         this.prune();
         while (this.entries.size>=this.maxEntries || this.bytes+this.reservedBytes+reservation>this.maxBytes) {
-            const victim=[...this.entries].find(([,e])=>e.capturePurpose==='startup' && !e.leases);
+            const victim=[...this.entries].find(([,e])=>!e.leases && (purpose==='resume' || e.capturePurpose==='startup'));
             if (!victim) return false;
             this.drop(...victim);this.stats.evictions++;
         }
@@ -129,17 +143,18 @@ class PrivateResumeHlsCache {
         try {
             const entry=await load();
             if (!entry || epoch!==this.epoch || keyFor(entry.binding)!==keyFor(binding)
-                || entry.capturePurpose!=='startup' || entry.bytes>this.perFileBytes || entry.expiresAt<=this.now()
+                || entry.capturePurpose!==purpose || entry.retired || entry.bytes>this.perFileBytes || entry.expiresAt<=this.now()
+                || position<entry.start || position>=entry.end || (!entry.ended && entry.end-position<this.minimumAheadSeconds)
                 || this.entries.size>=this.maxEntries
-                || this.entries.has(keyFor(binding))) return this.hasCandidate(binding,0);
+                || this.entries.has(keyFor(binding))) return this.hasCandidate(binding,position);
             this.entries.set(keyFor(binding),entry);this.bytes+=entry.bytes;
-            return this.hasCandidate(binding,0);
+            return this.hasCandidate(binding,position);
         } finally {this.reservedBytes-=reservation;}
     }
     inputCandidate(binding) {
         this.prune();
         const entry = binding && this.entries.get(keyFor(binding));
-        return entry?.inputOnly && entry.live && entry.expiresAt > this.now() ? entry : null;
+        return entry?.inputOnly && !entry.retired && entry.live && entry.expiresAt > this.now() ? entry : null;
     }
     inputRevalidationPlan(binding) {
         const entry = this.inputCandidate(binding), proof = entry?.recentProof;
@@ -177,6 +192,10 @@ class PrivateResumeHlsCache {
         }
         if (!matches) {
             this.drop(keyFor(binding), entry); this.stats.invalidations++; this.stats.misses++; return null;
+        }
+        if (entry.archived && entry.identity) {
+            entry.expiresAt = Math.min(entry.retainedUntil, this.now()+this.ttlMs);
+            entry.archived = false;
         }
         let released = false; entry.leases++; this.stats.hits++;
         if (entry.inputOnly) this.stats.inputHits++;
