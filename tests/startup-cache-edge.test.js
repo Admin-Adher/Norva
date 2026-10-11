@@ -5,7 +5,7 @@ const src = fs.readFileSync(path.join(__dirname, '../supabase/functions/norva-pl
 const section = src.slice(src.indexOf('function startupCacheOwnerAllowed('), src.indexOf('async function runMediaCacheProducerControl('));
 const code = stripTypeScriptTypes(section, { mode: 'transform' });
 const userId = '00000000-0000-4000-8000-000000000001', sourceId = '00000000-0000-4000-8000-000000000002';
-class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
+class HttpError extends Error { constructor(status, message, details) { super(message); this.status = status; this.details = details; } }
 function harness(options = {}) {
   const events = [], owner = 'a'.repeat(64);
   const target = { targetUrl: 'https://provider.invalid/movie/a/b/1.mkv', accountKey: 'account', accountHash: 'account-hash',
@@ -23,11 +23,26 @@ function harness(options = {}) {
     PLAYBACK_SESSION_UUID_PATTERN: /^[a-f0-9-]{36}$/, recordOrEmpty: value => value || {}, stringOr: (value, fallback) => typeof value === 'string' ? value : fallback,
     sha256Hex: async value => value === userId ? owner : 'hash:' + value,
     resolveSourceIdentity: async () => ({ key: 'identity' }), assertProviderCircuitClosed: async () => {},
+    resolvePlaybackTarget: async (source, type, item, user, _db, hints, offline) => {
+      assert.deepEqual([source, type, item, user, offline], [sourceId, 'movie', '1', userId, true]);
+      assert.equal(Object.keys(hints).length, 0); return target;
+    },
+    providerAccountKeyFromUrl: () => 'account',
     userHasLiveSession: async () => false, accountPregenActive: async (_db, user, source) => {
       assert.equal(user, userId); assert.equal(source, sourceId);
       return options.pregenBusy === true;
     },
     getRuntimeConfig: async () => ({}), mediaGatewayRouteForHlsPlaybackUser: async () => ({ url: 'https://gateway.invalid', token: 'gateway-token' }),
+    throwDb: error => { throw Error(error.message); },
+    runCodecProfileBackfill: async (req, _db, source) => {
+      events.push('profile-refresh');
+      assert.equal(source, sourceId);
+      assert.equal(req.headers.get('Authorization'), 'Bearer operator-token');
+      assert.deepEqual(await req.json(), { userId,
+        variantIds: ['00000000-0000-4000-8000-000000000003'], allowSourceLocal: true });
+      if (options.refreshUncertain) throw Error('transport drain unconfirmed');
+      return { persisted: options.refreshDeferred ? 0 : 1 };
+    },
     gatewayPlaybackHints: x => x, boundedInt: (value, fallback, min, max) => Number.isInteger(value) ? Math.min(max, Math.max(min, value)) : fallback,
     releaseProviderFileProbe: async () => events.push('release-file'),
     fetch: async (_url, request) => { events.push('gateway'); target.sentSession = JSON.parse(request.body).session;
@@ -35,12 +50,17 @@ function harness(options = {}) {
       return { json: async () => ({ protocol: 1, prepared: true, providerDrained: !options.uncertainDrain, refreshAfterSeconds: 240 }) }; },
   });
   vm.runInContext(code, context);
-  context.startupCacheTarget = async () => { events.push('target'); if (options.missingEvidence) throw new HttpError(409, 'profile'); return target; };
+  context.startupCacheTarget = async () => { events.push('target');
+    if (options.partialProfile) throw new HttpError(409, 'profile', { code: 'LANGUAGE_VALIDATION_CODEC_PROFILE_REQUIRED' });
+    if (options.missingEvidence) throw new HttpError(409, 'profile'); return target; };
   const db = { rpc: async name => { events.push(name);
     if (name === 'provider_account_busy') return { data: options.busy === true };
     return { data: !(options.accountRefused && name === 'claim_provider_account_language_validation') };
   }, from: name => {
-    const q = { select() { return this; }, eq() { return this; }, maybeSingle: async () => ({ data:
+    const q = { select() { return this; }, eq() { return this; },
+      limit: async () => ({ data: options.variantMissing ? [] : options.variantAmbiguous
+        ? [{ id: userId }, { id: sourceId }] : [{ id: '00000000-0000-4000-8000-000000000003' }] }),
+      maybeSingle: async () => ({ data:
       options.revokedFileLease && name === 'provider_file_probe_leases'
         ? null : { expires_at: new Date(Date.now() + 180000).toISOString() } }) };
     return q;
@@ -66,6 +86,41 @@ test('global startup enrollment still requires the explicit flag, valid authenti
   const busy = harness({ ownerHashes: '', globalScope: 'true', busy: true });
   assert.equal((await busy.context.runStartupCachePreparation(busy.request, busy.db)).prepared, false);
   assert.equal(busy.events.includes('gateway'), false);
+});
+
+test('partial movie metadata schedules one guarded refresh, then leaves prefix preparation to the next cycle', async () => {
+  for (const deferred of [false, true]) {
+    const h = harness({ partialProfile: true, refreshDeferred: deferred });
+    const result = await h.context.runStartupCachePreparation(h.request, h.db);
+    assert.equal(result.prepared, false);
+    assert.equal(result.reason, deferred ? 'profile-refresh-deferred' : 'profile-refreshed');
+    assert.equal(result.refreshAfterSeconds, 60);
+    assert.deepEqual(h.events, ['target', 'provider_account_busy', 'profile-refresh']);
+  }
+});
+
+test('missing or ambiguous exact variant cannot acquire a provider probe for startup recovery', async () => {
+  for (const options of [{ variantMissing: true }, { variantAmbiguous: true }]) {
+    const h = harness({ partialProfile: true, ...options });
+    assert.equal((await h.context.runStartupCachePreparation(h.request, h.db)).reason, 'exact-file-evidence-unavailable');
+    assert.deepEqual(h.events, ['target']);
+  }
+});
+
+test('an uncertain metadata-refresh transport remains an error and cannot start prefix preparation', async () => {
+  const h = harness({ partialProfile: true, refreshUncertain: true });
+  await assert.rejects(h.context.runStartupCachePreparation(h.request, h.db), /drain unconfirmed/);
+  assert.deepEqual(h.events, ['target', 'provider_account_busy', 'profile-refresh']);
+});
+
+test('startup metadata recovery defers before probing on account presence or active background work', async () => {
+  for (const options of [{ busy: true }, { pregenBusy: true }]) {
+    const h = harness({ partialProfile: true, ...options });
+    const result = await h.context.runStartupCachePreparation(h.request, h.db);
+    assert.equal(result.prepared, false);
+    assert.equal(result.reason, options.busy ? 'account-presence' : 'background-job-active');
+    assert.deepEqual(h.events, ['target', 'provider_account_busy']);
+  }
 });
 test('startup Edge entry rejects unauthenticated or caller-selected target/profile before authority reads', async () => {
   const h = harness();

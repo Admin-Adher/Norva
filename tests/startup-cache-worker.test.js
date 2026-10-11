@@ -23,3 +23,16 @@ test('uncertain service response stops the worker cycle before another account a
     fetchImpl: async () => { calls++; throw Error('provider credentials'); } }), false);
   assert.equal(calls, 1);
 });
+
+test('worker preserves only fixed deferral reasons, including profile recovery, without arbitrary server text', async () => {
+  const { runStartupCycle } = await load();
+  for (const reason of ['exact-file-evidence-unavailable', 'profile-refreshed', 'profile-refresh-deferred',
+    'account-presence', 'viewer-active', 'provider credentials or URL']) {
+    let observed;
+    await runStartupCycle({ targets: [target], endpoint: 'https://edge.invalid/startup-cache/prepare', token: 'private',
+      fetchImpl: async () => ({ ok: true, json: async () => ({ protocol: 1, prepared: false, reason }) }),
+      onResult: (_i,r) => { observed = r; } });
+    assert.equal(observed.reason, reason.includes('credentials') ? 'deferred' : reason);
+    assert.equal(observed.prepared, false);
+  }
+});

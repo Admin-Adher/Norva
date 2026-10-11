@@ -163,6 +163,15 @@ Ne pas l'activer avant validation du pilote. Sur SIGTERM il termine l'essai
 déjà envoyé et laisse confirmer le drainage ; aucun nouveau fichier n'est lancé.
 Les journaux donnent seulement l'ordinal et un statut fixe, sans accès fournisseur.
 
+Un profil de film in-band incomplet déclenche une maintenance ciblée du profil,
+via la sonde complète existante et ses barrières de présence, source et admission.
+La tâche ne déclare jamais ces métadonnées complètes sans nouvelle preuve.
+La préparation du préfixe attend le cycle suivant et refait les vérifications.
+`profile-refreshed` signifie profil réparé, **pas minute déjà en cache** ;
+`profile-refresh-deferred` signifie maintenance reportée. Les motifs de report
+sont journalisés uniquement dans un vocabulaire fixe. Les épisodes sans profil
+complet et les fichiers absents ou ambigus restent exclus de cette récupération.
+
 ## Retour arrière
 
 Arrêter le runner et attendre la fin de son essai ; retirer le drapeau Edge puis
