@@ -16246,8 +16246,12 @@ async function runStartupCachePreparation(req: Request, db: SupabaseClient): Pro
       mode: "transcode", seekOffset: 0, expiresAt: new Date(Date.now() + 180_000).toISOString(),
       playbackHint: { ...hints, streamType: itemType === "movie" ? "movie" : "series" }, ...hints,
       codecProfile: target.profile,
-      playbackIdentity: { sourceId, itemType, itemId, variantId: target.variantId || null, sourceRevision: target.revision,
-        vodIdentityKey: await vodPlaybackIdentityKey(sourceId, itemType, itemId, target.variantId, target.targetUrl) } };
+      // Use the same exact owner/source/item/URL identity as ordinary playback.
+      // The catalogue variant still authorizes preparation through the permit
+      // above; adding it only to this transport key makes the prefix invisible
+      // to the public session, whose file identity deliberately omits variants.
+      playbackIdentity: { sourceId, itemType, itemId, variantId: null, sourceRevision: target.revision,
+        vodIdentityKey: await vodPlaybackIdentityKey(sourceId, itemType, itemId, null, target.targetUrl) } };
     // Once dispatched, exclusion is released only on positive Gateway drain.
     releaseSafe = false;
     const response = await fetch(`${route.url}/startup-cache/prepare`, {
