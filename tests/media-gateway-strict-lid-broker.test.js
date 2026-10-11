@@ -886,7 +886,7 @@ test('finite MP4 seek fetches only the gap before a complete cached suffix', asy
   assert.equal(broker.interruptedProviderFetches,0);
 });
 
-test('finite TS lookbehind returns only requested bytes and reuses backwards timestamp searches', { timeout: 8000 }, async (t) => {
+for (const warmup of [0, 16]) test(`finite TS lookbehind returns only requested bytes with warmup ${warmup}`, { timeout: 8000 }, async (t) => {
   const data = Buffer.from(Array.from({ length: 128 }, (_, i) => i));
   const calls = [];
   const provider = http.createServer((req, res) => { calls.push(req.headers.range); sendExactRange(req, res, data); });
@@ -894,7 +894,7 @@ test('finite TS lookbehind returns only requested bytes and reuses backwards tim
   t.after(() => closeServer(provider));
   const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: data.length,
     pathPrefix: 'finite-mkv-seek', dispatcher: null, finiteWindowBytes: 16,
-    finiteSeekLookbehindBytes: 8, finiteCacheBytes: 128, releaseDelayMs: 0 });
+    finiteSeekLookbehindBytes: 8, finiteWarmupWindowBytes: warmup, finiteCacheBytes: 128, releaseDelayMs: 0 });
   t.after(() => broker.close());
   for (const [from, to] of [[125,127],[122,127],[119,127],[90,95],[85,95],[80,95],[0,10]]) {
     const r = await fetch(broker.inputUrl, { headers: { Range: `bytes=${from}-${to}` } });

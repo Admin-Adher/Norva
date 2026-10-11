@@ -6469,7 +6469,10 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 }
                 finiteProviderRange = { ...finiteWindowRange,
                     start: Math.max(0, finiteWindowRange.start - (
-                        forwarded === 0 && !finiteWindowIsWarmup ? context.finiteSeekLookbehindBytes : 0
+                        // A tail cue can be queued while the header warmup is
+                        // still running. It still needs its bounded preceding
+                        // packets; the warmup flag must not remove that slice.
+                        forwarded === 0 ? context.finiteSeekLookbehindBytes : 0
                     )),
                 };
                 finiteBufferedBytes = 0;
