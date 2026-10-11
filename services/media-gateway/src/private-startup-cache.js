@@ -1,6 +1,8 @@
 'use strict';
 const crypto = require('node:crypto');
 const { forkRecentDeliveryTarget } = require('./recent-delivery-target');
+const { strongResumeIdentity } = require('./private-resume-binding');
+const { sampleProof } = require('./recent-resume-samples');
 
 // Uses the existing cache's memory reservations, eviction, ownership, TTL,
 // revalidation and subtitle coverage. A separate binding prevents a prefix
@@ -14,7 +16,7 @@ const preparationKey = body => crypto.createHash('sha256').update(JSON.stringify
     body.audioStreamIndex, body.subtitleStreamIndex, body.audioMode, body.clientAudioPassthrough,
 ])).digest('hex');
 
-function createPrivateStartupCache(cache) {
+function createPrivateStartupCache(cache, disk = null) {
     const stats = { stores: 0, hits: 0, rejects: 0 };
     const prepared = new Map();
     return Object.freeze({
@@ -27,30 +29,62 @@ function createPrivateStartupCache(cache) {
             prepared.set(key, startupBinding(binding));
         },
         remainingSeconds(body) {
-            const key = preparationKey(body), binding = prepared.get(key);
+            const key = preparationKey(body), binding = prepared.get(key) || disk?.bindingForPreparation(key);
             const entry = binding && cache.candidate(binding, 0);
-            if (!entry) { prepared.delete(key); return 0; }
+            if (!entry) {
+                prepared.delete(key);
+                const stored=binding && disk?.metadata(binding);
+                return stored ? Math.max(0,Math.floor((stored.expiresAt-cache.now())/1000)) : 0;
+            }
             return Math.max(0, Math.floor((entry.expiresAt - cache.now()) / 1000));
         },
         hasCandidate: (binding, position) => position === 0 && cache.hasCandidate(startupBinding(binding), 0),
+        async restore(binding) {
+            if (!disk || !binding) return false;
+            const scoped=startupBinding(binding);
+            return await cache.restoreStartup(scoped,()=>disk.get(scoped));
+        },
+        async revokeOwner(ownerKey) {
+            for (const [key,binding] of prepared) if (binding.ownerKey===ownerKey) prepared.delete(key);
+            if (disk) await disk.revokeOwner(ownerKey);
+        },
         revalidationPlan(binding, position) {
             const plan = position === 0 ? cache.revalidationPlan(startupBinding(binding), 0) : null;
             return plan ? { ...plan, deliveryTarget: forkRecentDeliveryTarget(plan.deliveryTarget,
                 { ownerKey: binding.ownerKey, now: cache.now() }) } : null;
         },
         acquire(binding, position, observed) {
-            const lease = position === 0 ? cache.acquire(startupBinding(binding), 0, observed) : null;
+            const scoped = startupBinding(binding);
+            const candidate = position === 0 ? cache.candidate(scoped, 0) : null;
+            const lease = position === 0 ? cache.acquire(scoped, 0, observed) : null;
+            // A definite fresh mismatch must invalidate both tiers. A missing
+            // observation is transient and cannot certify or refresh media.
+            const definiteObservation = observed && (strongResumeIdentity(observed, binding?.fileSizeBytes)
+                || sampleProof(observed.samples, observed.fileSizeBytes, observed.effectiveUrlIdentitySha256)
+                || (Number.isSafeInteger(observed.fileSizeBytes) && observed.fileSizeBytes > 0
+                    && observed.fileSizeBytes !== binding?.fileSizeBytes));
+            if (!lease && candidate && definiteObservation && disk) disk.discard(scoped).catch(()=>{});
             if (lease) stats.hits++;
             return lease;
         },
         async capture(args) {
             const stored = await cache.capture({ ...args, binding: startupBinding(args.binding),
                 position: 0, capturePurpose: 'startup' });
-            stats[stored ? 'stores' : 'rejects']++;
-            return stored;
+            let durable=stored;
+            if (stored && disk) {
+                const entry=cache.candidate(startupBinding(args.binding),0);
+                durable=Boolean(entry && args.preparationBody
+                    && await disk.put(entry,preparationKey(args.preparationBody),args.isCurrent || (()=>true)));
+                if (!durable && entry) {
+                    for (const [key, current] of cache.entries) if (current === entry) cache.drop(key, entry);
+                }
+            }
+            stats[durable ? 'stores' : 'rejects']++;
+            return durable;
         },
         status: () => ({ protocol: 1, seconds: 60, scope: 'private-owner-source-revision',
-            budget: 'shared-with-private-resume', partialPublication: false, ...stats }),
+            budget: 'shared-with-private-resume', partialPublication: false, ...stats,
+            ...(disk ? {disk:disk.status()} : {}) }),
     });
 }
 module.exports = { createPrivateStartupCache, startupBinding };

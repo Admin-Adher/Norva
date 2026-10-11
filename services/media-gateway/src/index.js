@@ -2881,7 +2881,14 @@ const canUseStartupCache = createRecentResumeOwnerGate({
     ownerHashes: process.env.PRIVATE_STARTUP_CACHE_OWNER_HASHES,
     allAuthenticatedOwners: process.env.PRIVATE_STARTUP_CACHE_ALL_AUTHENTICATED_OWNERS === 'true',
 });
-const privateStartupHlsCache = createPrivateStartupCache(privateResumeHlsCache);
+const { StartupCacheDiskStore } = require('./startup-cache-disk-store');
+const startupCacheDisk = process.env.PRIVATE_STARTUP_CACHE_DISK_DIR ? new StartupCacheDiskStore({
+    root:process.env.PRIVATE_STARTUP_CACHE_DISK_DIR,
+    maxBytes:Number(process.env.PRIVATE_STARTUP_CACHE_DISK_MAX_BYTES || 32*1024**3),
+    perOwnerBytes:Number(process.env.PRIVATE_STARTUP_CACHE_DISK_OWNER_BYTES || 2*1024**3),
+    perFileBytes:privateResumeHlsCache.perFileBytes,
+}) : null;
+const privateStartupHlsCache = createPrivateStartupCache(privateResumeHlsCache,startupCacheDisk);
 const startupCachePreparation = new StartupCachePreparation({
     allowsOwner: canUseStartupCache,
     remainingSeconds: body => privateStartupHlsCache.remainingSeconds(body),
@@ -13499,6 +13506,7 @@ app.delete('/raw-pumps', requireGatewayAuth, async (req, res) => {
             privateResumeByteRanges.revokeOwner(ownerKey);
             finitePlaybackRangeReuse.revokeOwner(ownerKey);
             privateResumeHlsCache.revokeOwner(ownerKey);
+            await privateStartupHlsCache.revokeOwner(ownerKey);
             sharedPlaybackRanges.revokeOwner(ownerKey);
         }
         res.json({ ok: true, aborted, nativeRevoked });
@@ -14004,6 +14012,7 @@ app.use((err, req, res, next) => {
 
 async function bootstrap() {
     await fsp.mkdir(OUTPUT_DIR, { recursive: true });
+    if (startupCacheDisk) await startupCacheDisk.initialize();
     if (WHISPER_BIN && WHISPER_MODEL) {
         [WHISPER_BIN_SHA256, WHISPER_MODEL_SHA256, WHISPER_VAD_MODEL_SHA256, WHISPER_VAD_BIN_SHA256] = await Promise.all([
             hashFileSha256(WHISPER_BIN),
@@ -16336,7 +16345,9 @@ async function tryStartPrivateStartupBeforePreopen(session, signal) {
         : normalizeCodecToken(profile.probeSource ?? profile.probe_source) !== 'gatewayprobe'
             || !finiteTsProfileEligible(session)) return false;
     const binding = privateResumeHlsBindingForSession(session);
-    if (!binding || !privateStartupHlsCache.hasCandidate(binding, 0)) return false;
+    if (!binding) return false;
+    await privateStartupHlsCache.restore?.(binding);
+    if (!privateStartupHlsCache.hasCandidate(binding, 0)) return false;
     sessions.set(session.id, session);
     let started = false;
     try {
@@ -16374,7 +16385,7 @@ async function capturePrivateStartupWindow(session) {
     if (!binding || session.actualStartOffset !== 0) return false;
     const playlist = await fsp.readFile(exactSubtitleHlsEnabled(session)
         ? session.videoPlaylistPath : session.playlistPath, 'utf8').catch(() => '');
-    session.startupCacheStored = await privateStartupHlsCache.capture({ binding,
+    session.startupCacheStored = await privateStartupHlsCache.capture({ binding, preparationBody:job.body,
         observed: privateResumeObservedIdentity(session), actualStartOffset: session.actualStartOffset,
         playlist, inputWindows: session.privateResumeInputWindows,
         subtitleRenditions: exactSubtitleRenditionsForSession(session), sourcePesClock: retainedSubtitleClock(session),
@@ -16529,6 +16540,7 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
     const position = Number(session.seekOffset);
     const startup = position === 0 && canUseStartupCache(session.ownerKey);
     const cache = startup ? privateStartupHlsCache : privateResumeHlsCache;
+    if (startup && binding) await privateStartupHlsCache.restore?.(binding);
     // One unavailable check per creation. Keep the untrusted prefix within its
     // original TTL for a future attempt, but never lease it or retry validation
     // again during this cold fallback.

@@ -116,6 +116,26 @@ class PrivateResumeHlsCache {
             ? entry : null;
     }
     hasCandidate(binding, position) { return Boolean(this.candidate(binding, position)); }
+    async restoreStartup(binding, load) {
+        if (this.hasCandidate(binding,0)) return true;
+        const epoch=this.epoch, reservation=2*this.perFileBytes;
+        this.prune();
+        while (this.entries.size>=this.maxEntries || this.bytes+this.reservedBytes+reservation>this.maxBytes) {
+            const victim=[...this.entries].find(([,e])=>e.capturePurpose==='startup' && !e.leases);
+            if (!victim) return false;
+            this.drop(...victim);this.stats.evictions++;
+        }
+        this.reservedBytes+=reservation;
+        try {
+            const entry=await load();
+            if (!entry || epoch!==this.epoch || keyFor(entry.binding)!==keyFor(binding)
+                || entry.capturePurpose!=='startup' || entry.bytes>this.perFileBytes || entry.expiresAt<=this.now()
+                || this.entries.size>=this.maxEntries
+                || this.entries.has(keyFor(binding))) return this.hasCandidate(binding,0);
+            this.entries.set(keyFor(binding),entry);this.bytes+=entry.bytes;
+            return this.hasCandidate(binding,0);
+        } finally {this.reservedBytes-=reservation;}
+    }
     inputCandidate(binding) {
         this.prune();
         const entry = binding && this.entries.get(keyFor(binding));
@@ -258,8 +278,9 @@ class PrivateResumeHlsCache {
         const reservation = 2 * (this.perFileBytes + inputBudget); // read buffer + immutable copy
         while (this.entries.size - (prior ? 1 : 0) >= this.maxEntries || this.bytes + this.reservedBytes + reservation > this.maxBytes) {
             // Background prefixes must not evict a viewer's recent resume.
-            if (startup) return this.rejectCapture('startup-reservation-budget');
-            const victim = [...this.entries].find(([, entry]) => !entry.leases && entry !== prior);
+            const victim = [...this.entries].find(([, entry]) => !entry.leases && entry !== prior
+                && (!startup || entry.capturePurpose==='startup'));
+            if (startup && !victim) return this.rejectCapture('startup-reservation-budget');
             if (!victim) return this.rejectCapture('reservation-budget');
             this.drop(...victim); this.stats.evictions++;
         }
@@ -286,10 +307,12 @@ class PrivateResumeHlsCache {
             bytes += retainedInput.reduce((sum,w) => sum+w.payload.length, 0);
             if (!isCurrent() || this.entries.get(key) !== prior || this.entries.size - (prior ? 1 : 0) >= this.maxEntries) return this.rejectCapture('concurrent-capture');
             if (prior) this.drop(key, prior);
+            const capturedAt=this.now();
             this.entries.set(key, { binding, identity, recentProof, targetParts: observed.targetParts, deliveryTarget: observed.deliveryTarget, start, end, ended, segments, assets, bytes, bandwidth,
+                capturePurpose, createdAt:capturedAt,
                 inputWindows: retainedInput,
                 subtitlePlaylists: subtitles.playlists,
-                expiresAt: this.now() + (recentProof ? Math.min(this.ttlMs, RECENT_TTL_MS) : this.ttlMs), leases: 0, live: true });
+                expiresAt: capturedAt + (recentProof ? Math.min(this.ttlMs, RECENT_TTL_MS) : this.ttlMs), leases: 0, live: true });
             this.bytes += bytes; this.stats.stores++;
             if (recentProof) this.stats.sampledStores++;
             return true;
