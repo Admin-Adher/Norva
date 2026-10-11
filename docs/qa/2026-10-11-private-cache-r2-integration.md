@@ -583,6 +583,32 @@ remise à 1,0 sur cet émulateur de test.
 La matrice Android et la validation de cette dernière modification restent
 suivies séparément des résultats du build.
 
+La matrice Android `38183036595` termine finalement avec **cinq configurations
+réussies et un échec** : téléphone à trois boutons, police 1,0, sur le contrôle
+Back de `advancedSimpleQpelBFramesRenderAndResume`. La mise au premier plan et le
+focus ne suffisent donc pas à qualifier la voie d'injection précédente. La
+vidéo redémarre avant la fin des transitions du lanceur observées dans logcat.
+
+Le test emploie ensuite `UiAutomation.injectInputEvent` pour injecter une seule
+paire réelle Back down/up. Cette API synchronise les animations de fenêtre et
+les opérations de Surface avant l'entrée, contrairement à la voie précédente.
+Les deux injections doivent réussir et la fermeture garde son délai de trois
+secondes ; aucun appel direct à `finish` ou au callback Back ne remplace ce
+contrôle. [Contrat Android de cette API](https://developer.android.com/reference/android/app/UiAutomation#injectInputEvent(android.view.InputEvent,%20boolean)).
+L'échec initial reste conservé dans l'artefact `11718901875` et dans le bilan.
+Premier rejeu local après redémarrage de l'émulateur : refus avant injection,
+car le tutoriel système `ImmersiveModeConfirmation` prend le focus. Le banc
+local est remis dans la même configuration que la CI (`immersive_mode_confirmations`
+déjà confirmé), sans changement du produit. **Trois boutons / police 1,0 :
+1 test réussi en 11,27 s**, avec background/retour, vidéo fraîche et vrai Back.
+Preuves : `android-back-input-three10.logcat` (refus initial) et
+`android-back-input-three10-confirmed.log` (rejeu configuré).
+**Gestes / police 1,3 : 1 test réussi en 9,47 s** avec le même parcours et la
+même injection, puis arrêt de l'émulateur de test. Les contrôles de consentement
+TV du commit `9868c56c` réussissent aussi aux deux polices en CI :
+[38184228832](https://github.com/Admin-Adher/Norva/actions/runs/38184228832).
+La correction Back suivante requiert son propre passage de la matrice complète.
+
 ### Clôture de la campagne réelle
 
 Les **18 sessions** du dernier banc ont toutes un accusé de clôture. À l'arrêt

@@ -6,6 +6,8 @@ import android.app.Instrumentation;
 import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
+import android.view.InputDevice;
+import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.C;
@@ -140,7 +142,19 @@ public final class NativeVfwMpeg4InstrumentedTest {
                 SystemClock.sleep(50);
             }
             assertTrue("Foreground player must own focus before Back",focused[0]);
-            ins.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
+            // Instrumentation's key injection does not synchronize WindowManager
+            // animations. After REORDER_TO_FRONT, focus can precede the input
+            // transition. UiAutomation injects the same real Back events after
+            // window animations/surface transactions, without calling app code.
+            long backDownTime=SystemClock.uptimeMillis();
+            assertTrue("Back down must reach the platform",ins.getUiAutomation().injectInputEvent(
+                    new KeyEvent(backDownTime,backDownTime,KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_BACK,
+                            0,0,KeyCharacterMap.VIRTUAL_KEYBOARD,0,KeyEvent.FLAG_FROM_SYSTEM,
+                            InputDevice.SOURCE_KEYBOARD),true));
+            assertTrue("Back up must reach the platform",ins.getUiAutomation().injectInputEvent(
+                    new KeyEvent(backDownTime,SystemClock.uptimeMillis(),KeyEvent.ACTION_UP,KeyEvent.KEYCODE_BACK,
+                            0,0,KeyCharacterMap.VIRTUAL_KEYBOARD,0,KeyEvent.FLAG_FROM_SYSTEM,
+                            InputDevice.SOURCE_KEYBOARD),true));
             long backDeadline=SystemClock.elapsedRealtime()+3000;
             while(!activity.isFinishing()&&!activity.isDestroyed()&&SystemClock.elapsedRealtime()<backDeadline)SystemClock.sleep(50);
             assertTrue("Back must close the real player",activity.isFinishing()||activity.isDestroyed());
