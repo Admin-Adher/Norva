@@ -147,7 +147,7 @@
 <ol><li>press Left to enter navigation;</li><li>confirm focus is visible and the grid stays fixed;</li><li>move through every item with Up and Down;</li><li>verify the full label from viewing distance;</li><li>select a destination;</li><li>confirm active-page state;</li><li>press Right and return to a meaningful content target;</li><li>repeat from top, middle, and bottom rows.</li></ol>
 <p>Android TV app quality guidance expects remote-friendly navigation. Exact Norva paths and device behavior require verification in the current TV release.</p>
 <h2 id="coordinate-with-filters-and-overlays">Coordinate with filters and overlays</h2>
-<p>The sidebar must not collide with compact TV filters, detail panels, notifications, or overscan-safe content boundaries in the target implementation. Test open and closed layers, not only the base page.</p>
+<p>The sidebar must not collide with <a href="/blog/design-compact-tv-filter-layout/">compact TV filters</a>, detail panels, notifications, or overscan-safe content boundaries in the target implementation. Test open and closed layers, not only the base page.</p>
 <h2 id="original-evidence-width-worksheet">Original evidence: width worksheet</h2>
 <p>Render three candidate widths using the same real labels and states. Record full-label fit, focus clipping, content shift, and D-pad return target. Select the narrowest candidate that passes every critical field.</p>
 <p>The worksheet supports one design system and language set. It does not establish a universal pixel recommendation for every TV.</p>
@@ -174,6 +174,12 @@
           <div class="card-title">How to Control Information Density on a TV Screen</div>
 
           <p>A three-tier content model that keeps TV decisions readable while secondary metadata remains available in stable detail regions.</p>
+        </a>
+        <a class="card" href="/blog/design-compact-tv-filter-layout/">
+          <span class="tag">TV Interface Ergonomics</span>
+          <div class="card-title">How to Make TV Filters Compact Without Hiding Their Meaning</div>
+
+          <p>A two-layer filter architecture that saves TV space while keeping every label, selected value, active state, reset path, and D-pad transition understandable.</p>
         </a>
       </div>
     </section>
