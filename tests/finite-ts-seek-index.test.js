@@ -114,6 +114,7 @@ test('real Gateway preparation admits disabled frozen topologies but rejects act
             isFiniteMkvVodSession: () => false,
             canUsePrivateResumeCache: require("../services/media-gateway/src/private-resume-binding").createPrivateResumeOwnerGate({enabled:false}),
             canUseRecentResumeSamples: () => scenario === 'pilot',
+            finiteTsSeekHints: { begin: () => null },
             sharedPlaybackRanges: new (require("../services/media-gateway/src/shared-playback-ranges").SharedPlaybackRanges)({enabled:false}),
             hybridPlaybackRanges: require("../services/media-gateway/src/shared-playback-ranges").hybridPlaybackRanges,
             finiteTsProfileEligible: () => true,

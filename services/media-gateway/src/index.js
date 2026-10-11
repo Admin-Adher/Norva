@@ -143,6 +143,8 @@ const { PrivateResumeHlsCache, parseResumeMediaPlaylist } = require('./private-r
 const { captureSubtitleWindow, parseSubtitlePlaylist } = require('./private-resume-subtitles');
 const { SharedPlaybackRanges, hybridPlaybackRanges } = require('./shared-playback-ranges');
 const { FiniteTsSeekIndex, indexedTsInputUrl } = require('./finite-ts-seek-index');
+const { TsSeekHints, findFreshTsSeek } = require('./finite-ts-fresh-seek');
+const finiteTsSeekHints = new TsSeekHints();
 const { PrivateMediaCacheStoreClient } = require('./privateMediaCacheStoreClient');
 const { SharedHlsObjectPublisher } = require('./sharedHlsObjectPublisher');
 const { publishSharedMediaCacheSessionWithRetry } = require('./sharedMediaCachePublication');
@@ -16608,6 +16610,9 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     const tsObserver = finiteTs ? await finiteTsSeekIndex.begin({
         ownerKey: session.ownerKey, sourceUrl: session.sourceUrl, fileSizeBytes,
     }).catch(() => null) : null;
+    const tsHints = finiteTs && canUseRecentResumeSamples(session.ownerKey) ? finiteTsSeekHints.begin({
+        ownerKey: session.ownerKey, sourceUrl: session.sourceUrl, fileSizeBytes,
+    }) : null;
     session.finiteTsIndexObserver = tsObserver;
     const coldFiniteTs = finiteTs && Number(session?.seekOffset || 0) === 0;
     const effectiveWindowBytes = finiteMp4 ? FINITE_MKV_SEEK_WINDOW_BYTES : playbackStartupWindowPolicy.bytes(session.ownerKey, coldFiniteTs ? FINITE_MKV_SEEK_WINDOW_BYTES
@@ -16709,7 +16714,9 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         finiteCurrentPrefix: finiteMkv ? session.currentVodPrefix : null,
         finiteCurrentPrefixOwner: session.id,
         finiteResumeRanges: resumeRanges,
-        onFiniteWindow: tsObserver ? window => tsObserver.observe(window) : null,
+        onFiniteWindow: tsObserver || tsHints ? window => {
+            tsObserver?.observe(window); tsHints?.observe(window);
+        } : null,
         onFiniteResumePrefix: !finiteMkv ? null : (prefix) => finiteMkvResumePrefixCache.put({
             sourceUrl: session.sourceUrl,
             ...prefix,
@@ -16761,6 +16768,27 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
             const indexedInputUrl = point ? indexedTsInputUrl(broker.inputUrl, point, fileSizeBytes) : null;
             if (indexedInputUrl) session.finiteTsIndexPlan = { ...point, inputUrl: indexedInputUrl };
         }
+    }
+    if (finiteTs && session.finiteTsResumeAligned === true && exactAudioTrackCount === 1
+        && session.multiAudioHls?.enabled !== true && session.exactSubtitleHls?.enabled !== true
+        && !session.forceFullInputProbe && !session.finiteTsIndexPlan && tsHints) {
+        const began = Date.now();
+        const fresh = await findFreshTsSeek({ fileSizeBytes, seconds: Number(session.seekOffset),
+            durationSeconds: Number(session.codecProfile.durationSeconds ?? session.codecProfile.duration_seconds
+                ?? session.codecProfile.duration), hints: tsHints, signal: parentSignal,
+            read: async (start, end) => {
+                const response = await fetch(broker.inputUrl, { headers: { Range: `bytes=${start}-${end}` },
+                    signal: parentSignal || undefined });
+                const bytes = Buffer.from(await response.arrayBuffer());
+                if (broker.terminalError) throw broker.terminalError;
+                return response.status === 206 ? bytes : null;
+            } });
+        const inputUrl = fresh.point ? indexedTsInputUrl(broker.inputUrl, fresh.point, fileSizeBytes) : null;
+        if (inputUrl) session.finiteTsIndexPlan = { ...fresh.point, inputUrl };
+        session.startupTimings.finiteTsFreshSearchMs = Date.now() - began;
+        session.startupTimings.finiteTsFreshSearchReason = fresh.reason;
+        session.startupTimings.finiteTsFreshSearchReads = fresh.reads;
+        session.startupTimings.finiteTsFreshSearchBytes = fresh.bytes;
     }
     session.startupTimings.finiteTsIndexUsed = Boolean(session.finiteTsIndexPlan);
     session.startupTimings.finiteTsIndexPrerollSeconds = session.finiteTsIndexPlan
