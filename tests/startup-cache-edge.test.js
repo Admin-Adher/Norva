@@ -45,7 +45,8 @@ function harness(options = {}) {
     },
     gatewayPlaybackHints: x => x, boundedInt: (value, fallback, min, max) => Number.isInteger(value) ? Math.min(max, Math.max(min, value)) : fallback,
     releaseProviderFileProbe: async () => events.push('release-file'),
-    fetch: async (_url, request) => { events.push('gateway'); target.sentSession = JSON.parse(request.body).session;
+    fetch: async (_url, request) => { events.push('gateway'); const body = JSON.parse(request.body);
+      target.sentSession = body.session; target.sentPermit = body.permit;
       if (options.transportFailure) throw Error('lost response');
       return { json: async () => ({ protocol: 1, prepared: true, providerDrained: !options.uncertainDrain, refreshAfterSeconds: 240 }) }; },
   });
@@ -141,6 +142,24 @@ test('startup audio binding matches ordinary catalogue defaults and preserves ex
       privateResumeProfile({ ...base, ...hint }));
   }
 });
+test('a prepared movie uses the public file identity while its permit retains the owned variant', async () => {
+  const variantId = '00000000-0000-4000-8000-000000000003';
+  const h = harness({ variantId });
+  await h.context.runStartupCachePreparation(h.request, h.db);
+  const identity = h.target.sentSession.playbackIdentity;
+  const expected = await h.context.vodPlaybackIdentityKey(sourceId, 'movie', '1', null, h.target.targetUrl);
+  assert.equal(identity.vodIdentityKey, expected);
+  assert.equal(identity.variantId, null);
+  assert.equal(h.target.sentPermit.variantId, variantId);
+  assert.equal(h.target.sentPermit.profileFingerprint, h.target.profileFingerprint);
+  assert.equal(h.target.sentPermit.targetHash, 'hash:' + h.target.targetUrl);
+  assert.notEqual(expected, await h.context.vodPlaybackIdentityKey(sourceId, 'movie', '1', variantId, h.target.targetUrl));
+  for (const tuple of [ ['other-source', 'movie', '1', null, h.target.targetUrl],
+    [sourceId, 'series', '1', null, h.target.targetUrl], [sourceId, 'movie', '2', null, h.target.targetUrl],
+    [sourceId, 'movie', '1', null, 'https://provider.invalid/movie/a/b/changed.mkv'] ]) {
+    assert.notEqual(expected, await h.context.vodPlaybackIdentityKey(...tuple));
+  }
+});
 for (const scenario of ['busy', 'accountRefused', 'missingEvidence', 'pregenBusy', 'revokedFileLease']) test(`startup Edge opens no transport on ${scenario}`, async () => {
   const h = harness({ [scenario]: true });
   assert.equal((await h.context.runStartupCachePreparation(h.request, h.db)).prepared, false);
@@ -158,21 +177,15 @@ test('startup Edge requires both leases and current authority, then releases onl
   assert.equal(h.events.at(-1), 'release_provider_account_language_validation');
 });
 
-test('catalogue movie prefix binds the same owned variant as ordinary playback and rejects a changed variant', async () => {
+test('catalogue movie preparation permit rejects a changed owned variant', async () => {
   const variantId = '00000000-0000-4000-8000-000000000003';
   const h = harness({ variantId });
   assert.equal((await h.context.runStartupCachePreparation(h.request, h.db)).prepared, true);
-  const identity = h.target.sentSession.playbackIdentity;
-  assert.equal(identity.variantId, variantId);
-  assert.equal(identity.vodIdentityKey, await h.context.vodPlaybackIdentityKey(sourceId, 'movie', '1', variantId, h.target.targetUrl));
-  assert.notEqual(identity.vodIdentityKey, await h.context.vodPlaybackIdentityKey(sourceId, 'movie', '1', null, h.target.targetUrl));
   const permit = { userId, sourceId, itemType: 'movie', itemId: '1', variantId,
     leaseOwner: 'startup-cache:' + userId, identityKey: 'identity', accountHash: h.target.accountHash,
     sourceRevision: h.target.revision, profileFingerprint: h.target.profileFingerprint, targetHash: 'hash:' + h.target.targetUrl };
   assert.equal(await h.context.startupCachePermitCurrent(h.db, permit), true);
   assert.equal(await h.context.startupCachePermitCurrent(h.db, { ...permit, variantId: 'other-variant' }), false);
-  const ordinary = src.slice(src.indexOf('const identityForTarget ='), src.indexOf('const vodIdentityKey =', src.indexOf('const identityForTarget =')));
-  assert.match(ordinary, /vodPlaybackIdentityKey\([\s\S]*playbackIdentity\.variantId/);
 });
 test('native MP4 cannot occupy an idle provider slot for an HLS prefix its playback route does not read', async () => {
   const profile = { container: 'mov,mp4,m4a,3gp,3g2,mj2', videoCodec: 'h264', videoPixelFormat: 'yuv420p',
