@@ -2832,16 +2832,18 @@ const canUseRecentResumeSamples = createRecentResumeOwnerGate({
     ownerHashes: process.env.PRIVATE_RESUME_RECENT_SAMPLES_OWNER_HASHES,
     allAuthenticatedOwners: process.env.PRIVATE_RESUME_RECENT_SAMPLES_ALL_AUTHENTICATED_OWNERS === 'true',
 });
-// Separate, explicit pilot opt-in. Omission (including an empty owner list)
+// Separate, explicit rollout opt-in. Omission (including an empty owner list)
 // leaves decoder retention disabled; the existing cache policy is unchanged.
 const retainedSessionOwnerGate = createRecentResumeOwnerGate({
     enabled: process.env.PRIVATE_RETAINED_SESSION_ENABLED === 'true',
     ownerHashes: process.env.PRIVATE_RETAINED_SESSION_OWNER_HASHES,
+    allAuthenticatedOwners: process.env.PRIVATE_RETAINED_SESSION_ALL_AUTHENTICATED_OWNERS === 'true',
 });
 // A separate pilot: a brief production burst cannot certify future delivery.
 const startupObservationOwnerGate = createRecentResumeOwnerGate({
     enabled: process.env.VOD_STARTUP_OBSERVATION_ENABLED === 'true',
     ownerHashes: process.env.VOD_STARTUP_OBSERVATION_OWNER_HASHES,
+    allAuthenticatedOwners: process.env.VOD_STARTUP_OBSERVATION_ALL_AUTHENTICATED_OWNERS === 'true',
 });
 const retainedSessionTransfer = new RetainedSessionTransfer({
     stop: session => stopSession(session, { reason: 'retained-session-discarded' }),
@@ -2857,6 +2859,7 @@ const { StartupCachePreparation } = require('./startup-cache-preparation');
 const canUseStartupCache = createRecentResumeOwnerGate({
     enabled: PRIVATE_RESUME_CACHE_ENABLED && process.env.PRIVATE_STARTUP_CACHE_ENABLED === 'true',
     ownerHashes: process.env.PRIVATE_STARTUP_CACHE_OWNER_HASHES,
+    allAuthenticatedOwners: process.env.PRIVATE_STARTUP_CACHE_ALL_AUTHENTICATED_OWNERS === 'true',
 });
 const privateStartupHlsCache = createPrivateStartupCache(privateResumeHlsCache);
 const startupCachePreparation = new StartupCachePreparation({
@@ -3167,7 +3170,13 @@ app.get('/health', (req, res) => {
                 ? 'all-authenticated-owners' : 'owner-allowlist',
             ownerScoped: Boolean(process.env.PRIVATE_RESUME_CACHE_OWNER_HASHES?.trim()), ...privateResumeHlsCache.publicStatus() },
         privateStartupHlsCache: { enabled: process.env.PRIVATE_STARTUP_CACHE_ENABLED === 'true',
-            ownerScope: 'owner-allowlist', ...privateStartupHlsCache.status(), preparation: startupCachePreparation.status() },
+            ownerScope: process.env.PRIVATE_STARTUP_CACHE_ALL_AUTHENTICATED_OWNERS === 'true'
+                ? 'all-authenticated-owners' : 'owner-allowlist',
+            ...privateStartupHlsCache.status(), preparation: startupCachePreparation.status() },
+        retainedSessionOwnerScope: process.env.PRIVATE_RETAINED_SESSION_ALL_AUTHENTICATED_OWNERS === 'true'
+            ? 'all-authenticated-owners' : 'owner-allowlist',
+        startupObservationOwnerScope: process.env.VOD_STARTUP_OBSERVATION_ALL_AUTHENTICATED_OWNERS === 'true'
+            ? 'all-authenticated-owners' : 'owner-allowlist',
         sharedPlaybackRanges: sharedPlaybackRanges.publicStatus(),
         finiteTsSeekIndex: finiteTsSeekIndex.status(),
         finiteMkvLinearSeekBridge: {
