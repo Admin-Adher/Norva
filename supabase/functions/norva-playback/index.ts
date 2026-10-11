@@ -1074,6 +1074,7 @@ async function openProviderPlaybackCircuit(
 async function releaseSupersededPlaybackSessions(
   sessionIds: string[],
   db: SupabaseClient,
+  nativeGatewayDrainedIds?: Set<string>,
 ) {
   if (!sessionIds.length) return 0;
   const { data: sessions, error } = await db
@@ -1088,7 +1089,10 @@ async function releaseSupersededPlaybackSessions(
       db,
     )),
   );
-  results.forEach((result) => {
+  results.forEach((result, index) => {
+    if (result.status === "fulfilled" && result.value.nativeGatewayDrained === true) {
+      nativeGatewayDrainedIds?.add(stringOr(sessions?.[index]?.id, ""));
+    }
     if (result.status === "rejected") {
       console.warn(
         "[norva-playback] superseded transport cleanup failed",
@@ -1097,6 +1101,12 @@ async function releaseSupersededPlaybackSessions(
     }
   });
   return sessionIds.length;
+}
+
+function supersededPlaybackWaitMs(mode: string, released: number, drained: number, pilot: boolean) {
+  if (!(released > 0)) return 0;
+  if (mode === "transcode" || (pilot && drained === released)) return PROVIDER_SLOT_RELEASE_DELAY_MS;
+  return PROVIDER_NATIVE_TAKEOVER_GRACE_MS;
 }
 
 const PROVIDER_NETWORK_CAUSES = new Set([
@@ -2645,25 +2655,23 @@ async function createPlaybackSessionCore(
   // The atomic claim already made the previous generation terminal. Close its
   // real Gateway/raw transport before any provider drain or new coordinator lock;
   // otherwise the bounded catalogue wait would consume the coordinator's TTL.
+  const nativeGatewayDrainedIds = new Set<string>();
   const releasedSuperseded = await releaseSupersededPlaybackSessions(
     supersededSessionIds,
     db,
+    nativeGatewayDrainedIds,
   );
-  if (mode === "transcode" && releasedSuperseded > 0) {
-    await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
-  }
   // Gateway pumps can be aborted server-side immediately. A direct native
   // session is owned by the previous device, so give its short heartbeat poll
   // one bounded window to observe PLAYBACK_SUPERSEDED and release the provider
   // socket before this replacement URL is returned.
-  if (mode !== "transcode" && releasedSuperseded > 0) {
-    await sleep(PROVIDER_NATIVE_TAKEOVER_GRACE_MS);
-  }
+  const takeoverWaitMs = supersededPlaybackWaitMs(mode, releasedSuperseded,
+    nativeGatewayDrainedIds.size, startupCacheOwnerAllowed(await sha256Hex(userId)));
+  if (takeoverWaitMs > 0) await sleep(takeoverWaitMs);
   if (catalogRefreshDrainMs > 0) await sleep(catalogRefreshDrainMs);
   markStartup("catalogueAndTakeoverMs");
   startupTrace.catalogueWaitMs = catalogRefreshDrainMs;
-  startupTrace.takeoverWaitMs = releasedSuperseded > 0
-    ? (mode === "transcode" ? PROVIDER_SLOT_RELEASE_DELAY_MS : PROVIDER_NATIVE_TAKEOVER_GRACE_MS) : 0;
+  startupTrace.takeoverWaitMs = takeoverWaitMs;
 
   // Prepare the cross-device coordinator only after all known provider drains.
   // Its 120-second lock then covers the actual Gateway startup/commit budget,
@@ -6720,6 +6728,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
   const gatewayErrors: unknown[] = [];
   const mediaCacheErrors: unknown[] = [];
   let rawPumpsAborted = 0;
+  let nativeGatewayDrained = false;
   let fastStartProofPersisted = false;
   let mediaCacheGrantRevoked = false;
   let mediaCacheWorkerRevoked = false;
@@ -6763,6 +6772,11 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
       }
       const rawResult = await rawResponse.json().catch(() => ({} as JsonRecord));
       rawPumpsAborted = boundedInt((rawResult as JsonRecord).aborted, 0, 0, 1000);
+      // Only the server-owned capability marker and explicit current drain
+      // acknowledgement can replace a remote device's heartbeat grace.
+      nativeGatewayDrained = recordOrEmpty(session.playback_hint).__norvaNativeMp4SessionV1 === true
+        && rawResponse.ok && rawResult.ok === true
+        && Number.isInteger(rawResult.nativeRevoked) && rawResult.nativeRevoked >= 0;
     } catch (rawError) {
       gatewayErrors.push(rawError);
     }
@@ -6913,6 +6927,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
     session: publicPlaybackSession(expired),
     gatewayClosed: closedGatewayIds.length,
     rawPumpsAborted,
+    nativeGatewayDrained: nativeGatewayDrained && gatewayErrors.length === 0 && mediaCacheErrors.length === 0,
     fastStartProofPersisted,
     gatewayErrors: gatewayErrors.length,
     mediaCacheGrantRevoked,
