@@ -42,9 +42,18 @@ test('native resume uses only fresh decoded progress from the exact finite sessi
 
 test('a Windows renderer reload replays the captured native stop position and still accepts legacy close IDs',async()=>{
  const listeners={},calls=[],window={NorvaDesktop:{nativePlayer:{protocol:1,onEvent(){},
-  pendingPlaybackCloses:async()=>[{sessionId:'owned',resumePosition:82.125},'legacy',{sessionId:'invalid',resumePosition:Infinity}]}},
+  pendingPlaybackCloses:async()=>{assert.fail('The new bridge has an explicit details method');},
+  pendingPlaybackCloseDetails:async()=>[{sessionId:'owned',resumePosition:82.125},'legacy',{sessionId:'invalid',resumePosition:Infinity}]}},
   __norvaNative:{onPlaybackClosed:(...args)=>calls.push(args)},addEventListener:(name,fn)=>listeners[name]=fn};
  vm.runInNewContext(fs.readFileSync('public/js/utils/desktopNative.js','utf8'),{window,Date});
  listeners.load();await new Promise(resolve=>setImmediate(resolve));
  assert.deepEqual(calls,[['owned','player_exited',82.125],['legacy','player_exited',undefined],['invalid','player_exited',undefined]]);
+});
+
+test('the new Windows renderer still acknowledges protocol 1 UUID-only pending closes',async()=>{
+ const listeners={},calls=[],window={NorvaDesktop:{nativePlayer:{protocol:1,onEvent(){},pendingPlaybackCloses:async()=>['legacy']}},
+  __norvaNative:{onPlaybackClosed:(...args)=>calls.push(args)},addEventListener:(name,fn)=>listeners[name]=fn};
+ vm.runInNewContext(fs.readFileSync('public/js/utils/desktopNative.js','utf8'),{window,Date});
+ listeners.load();await new Promise(resolve=>setImmediate(resolve));
+ assert.deepEqual(calls,[['legacy','player_exited',undefined]]);
 });

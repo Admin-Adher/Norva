@@ -19,8 +19,10 @@ test('the native controller retains the exact rendered stop clock until cloud cl
     h.event({type:'progress',sessionId:request.sessionId,positionSeconds:82.125,durationSeconds:1000,decodedVideo:20});
     h.child.emit('exit',0);await new Promise(resolve=>setImmediate(resolve));
     assert.equal(h.events.at(-1).resumePosition,82.125);
-    assert.deepEqual(h.controller.pendingCloses(),[{sessionId:request.sessionId,reason:'player_exited',resumePosition:82.125}]);
+    assert.deepEqual(h.controller.pendingCloses(),[request.sessionId],'protocol 1 callers still receive UUIDs');
+    assert.deepEqual(h.controller.pendingCloseDetails(),[{sessionId:request.sessionId,reason:'player_exited',resumePosition:82.125}]);
     h.controller.acknowledge(request.sessionId);assert.deepEqual(h.controller.pendingCloses(),[]);
+    assert.deepEqual(h.controller.pendingCloseDetails(),[]);
     const event={itemType:'movie',positionSeconds:12,savedAtMs:20000,displayedPictures:1};
     assert.equal(renderedPosition(event,20000),12);
     for(const patch of [{positionSeconds:NaN},{positionSeconds:86400},{savedAtMs:9999},{savedAtMs:20001},{displayedPictures:0},{itemType:'channel'}])

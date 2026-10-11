@@ -130,7 +130,8 @@ class NativePlayerController extends EventEmitter {
     send(state, value) { if (!state.child.stdin.destroyed) state.child.stdin.write(JSON.stringify(value)+'\n'); }
     authorize(id) { if (this.active?.request.sessionId === id) this.send(this.active, { type:'authorize',sessionId:id }); }
     setFullscreen(enabled) { if (this.active?.ready) this.send(this.active, { type:'fullscreen', enabled:enabled === true }); }
-    pendingCloses() {
+    pendingCloses() { return [...this.unacknowledged]; }
+    pendingCloseDetails() {
         return [...this.unacknowledged].map(sessionId => ({sessionId,
             reason:this.completed.get(sessionId)?.reason || 'player_exited',
             resumePosition:this.completed.get(sessionId)?.resumePosition}));

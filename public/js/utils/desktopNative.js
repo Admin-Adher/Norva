@@ -22,7 +22,10 @@
     const replayCloses = async () => {
         if (!window.__norvaNative?.onPlaybackClosed) return;
         try {
-            for (const entry of await bridge.pendingPlaybackCloses()) {
+            // Keep protocol 1's UUID-only close response for older renderers.
+            const closes = typeof bridge.pendingPlaybackCloseDetails === 'function'
+                ? await bridge.pendingPlaybackCloseDetails() : await bridge.pendingPlaybackCloses();
+            for (const entry of closes) {
                 const id=typeof entry==='string' ? entry : entry?.sessionId;
                 const position=Number.isFinite(entry?.resumePosition) && entry.resumePosition>=0 && entry.resumePosition<86400
                     ? entry.resumePosition : undefined;

@@ -228,6 +228,12 @@ sont pas couvertes : le serveur Norva ne reçoit pas leurs octets.
   récente de la session exacte. Le processus principal conserve la position
   de fermeture jusqu'à l'ACK, y compris si le renderer est rechargé. Aucune
   position du DOM vidéo n'est utilisée pour un lecteur LibVLC.
+- Compatibilité Windows : le canal protocole 1 `pending-closes` garde sa liste
+  d'UUID pour les anciens renderers. Le détail de position utilise un canal
+  distinct, protégé par le même contrôle de fenêtre/frame/origine. Le nouveau
+  renderer revient à l'ancienne liste si le preload ne fournit pas le détail.
+  **98 tests ciblés réussis**, sans ignoré, après cette correction, incluant
+  accusés de fermeture, isolation de session et admission du cache natif.
 - Le replay du vrai bloc Gateway teste les scopes MP4 web et récupération
   native, le drainage avant upload, les révocations et le seuil de 90 %.
   Lorsque l'option native est désactivée, aucun snapshot ni revalidation
@@ -236,10 +242,68 @@ sont pas couvertes : le serveur Norva ne reçoit pas leurs octets.
 
 **149 tests ciblés réussis, aucun ignoré**, dont le cycle A/B/redémarrage/retrait
 à 90 % des deux formats avec le vrai Worker/SQLite/R2 local Miniflare.
-Preuve : `native-recovery-focused.local.log`. Les tests JVM et les six
-configurations d'émulateur du commit exact restent à confirmer. Les assertions
-de runtime ajoutées contrôlent une position non décodée refusée, la première
-image Media3 et une horloge utilisable après saut puis pause.
+Preuve : `native-recovery-focused.local.log`. Les assertions de runtime ajoutées
+contrôlent une position non décodée refusée, la première image Media3 et une
+horloge utilisable après saut puis pause.
 
 La PR reste en brouillon. Aucun nouveau gain de lecture public, validation à
 l'écoute ou déploiement de production n'est annoncé. R2 payant reste désactivé.
+
+### Contrôle de WatchPage et du stockage persistant local
+
+Le banc charge les vrais `WatchPage`, `cloudApi`, gestionnaire de sessions MP4,
+bloc de création Gateway, broker d'entrée et classes de cache. Le Worker,
+SQLite et R2 sont exécutés par Miniflare sur le disque local. L'entrée est le
+même extrait H.264/AAC déjà conservé, remuxé sans réencodage (12,075 secondes,
+541 677 octets). Les API d'authentification et d'admission restent des fixtures
+locales : ce contrôle ne vaut pas parcours public Edge/Cloudflare déployé.
+
+| Étape | Observation |
+| --- | --- |
+| Arrêt normal du lecteur | Position finale reçue, transport drainé, une fenêtre publiée |
+| Redémarrage du banc et de Miniflare | RAM recréée, fichiers R2/SQLite conservés |
+| Réouverture après redémarrage | Quatre échantillons frais concordants ; lease accepté |
+| Données d'entrée réutilisées | **541 677 octets** ; aucun nouvel octet de média téléchargé par le broker de lecture |
+| Deux reprises mesurées depuis le clic | **0,37 / 0,38 s** sur ce banc local |
+| Progression | Retrait de l'ancienne archive sans interrompre le lease de lecture |
+| Nouvel arrêt à 6,408 s | Nouvelle fenêtre publiée après drainage de 4 ms |
+| Continuation jusqu'à 12,075 s | Aucune attente signalée ni image perdue sur ce replay court |
+| Fin et clôture | Aucun nouvel archivage, cache vide, aucune connexion source active |
+
+Les quatre requêtes de vérification sont nécessaires avant l'utilisation des
+octets conservés : « zéro nouvel octet de média » ne signifie pas zéro requête
+source. Maximum observé : une connexion à l'origine locale. Les replays courts
+ne valident ni plusieurs minutes de continuité, ni le débit des fournisseurs,
+ni les sauts hors cache, ni la qualité à l'écoute. Le premier replay du banc
+a ouvert la lecture avant la fin du redémarrage asynchrone : erreur de séquencement
+du banc, corrigée dans le protocole par l'attente de son ACK de fin. Les résultats
+positifs ci-dessus proviennent des réouvertures après cet ACK.
+
+Preuves locales sous `.codex-artifacts/startup-cache-20261010/` :
+`native-player-restart-B.safe.json`, `native-player-stop-C.safe.json`,
+`native-player-completed.safe.json` et `native-player-restart.png`. Banc arrêté
+et onglet temporaire fermé après les contrôles.
+
+### CI et émulateurs du raccord natif
+
+Sur le commit de code `e54da030cc028687c3539c03d6b5667b43db3923`,
+[Build Norva 38171302353](https://github.com/Admin-Adher/Norva/actions/runs/38171302353)
+réussit : **6 539 tests réussis, 39 ignorés**, contrôles SQL imposés **50/50**,
+Worker/SQLite/R2 local imposé **15/15**, locales/region/syntaxe et construction
+des trois paquets Android téléphone, TV et Windows.
+
+La [première matrice Android 38171302372](https://github.com/Admin-Adher/Norva/actions/runs/38171302372)
+réussit sur TV aux deux tailles de police et téléphone gestes/police 1,3.
+Les trois autres configurations échouent : deux rejouent une nouvelle assertion
+de cache trop tôt, au callback de première image avant l'état READY ; les autres
+échecs concernent les limites existantes de délai de refus HTML et le retour Back.
+Le test attend désormais READY/ENDED après la première image, dans une fenêtre
+bornée de cinq secondes, puis vérifie la position. Le code conserve son refus
+d'une position encore non décodée ou en attente ; aucune protection de lecture
+n'est assouplie. Correction de test : `1866ede730b448e63bd5c7cdfd80cf6acd2c67d8`.
+La dernière matrice et son statut exact sont publiés dans la [PR786](https://github.com/Admin-Adher/Norva/pull/786).
+
+La préparation reste désactivée en production. Le portable final, les comptes
+réels, l'entrée authentifiée publique et la validation à l'écoute restent des
+contrôles distincts avant activation ; les lectures natives directes restent
+hors du périmètre de stockage serveur.
