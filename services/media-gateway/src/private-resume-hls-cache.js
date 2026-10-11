@@ -4,6 +4,7 @@ const { sampleProof, samplesMatch, RECENT_TTL_MS, captureInputWindows,
     RECENT_INPUT_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES } = require('./recent-resume-samples');
 const { strongResumeIdentity } = require('./private-resume-binding');
 const { captureSubtitleWindow } = require('./private-resume-subtitles');
+const { recentResumeTargetEligible } = require('./recent-resume-validation');
 const keyFor = binding => crypto.createHash('sha256').update(JSON.stringify(binding)).digest('hex');
 const namePattern = /^[a-z0-9][a-z0-9._-]{0,127}\.ts$/i;
 
@@ -75,13 +76,14 @@ function mergedSubtitlePlaylist(prefix, continuation = [], ended = false, sequen
 
 class PrivateResumeHlsCache {
     constructor({ maxBytes = 128 * 1024 * 1024, perFileBytes = 32 * 1024 * 1024,
-        maxEntries = 32, ttlMs = 30 * 60_000, windowSeconds = 48, minimumAheadSeconds = 24, recentRevalidation = false, now = Date.now } = {}) {
+        maxEntries = 32, ttlMs = 30 * 60_000, windowSeconds = 48, minimumAheadSeconds = 24, recentRevalidation = false,
+        allowDeliveryPathRenewal = false, now = Date.now } = {}) {
         if (![maxBytes, perFileBytes, maxEntries, ttlMs, windowSeconds, minimumAheadSeconds].every(Number.isSafeInteger)
             || maxBytes < 1 || maxBytes > 256 * 1024 * 1024 || perFileBytes < 1 || perFileBytes > maxBytes
             || maxEntries < 1 || maxEntries > 128 || ttlMs < 1 || ttlMs > 30 * 60_000
             || windowSeconds < 1 || windowSeconds > 120 || minimumAheadSeconds < 1 || minimumAheadSeconds > windowSeconds)
             throw new Error('RESUME_CACHE_CONFIG_INVALID');
-        Object.assign(this, { maxBytes, perFileBytes, maxEntries, ttlMs, windowSeconds, minimumAheadSeconds, recentRevalidation, now });
+        Object.assign(this, { maxBytes, perFileBytes, maxEntries, ttlMs, windowSeconds, minimumAheadSeconds, recentRevalidation, allowDeliveryPathRenewal, now });
         this.entries = new Map(); this.bytes = 0; this.reservedBytes = 0; this.epoch = 0;
         this.stats = { stores: 0, hits: 0, misses: 0, invalidations: 0, evictions: 0, inputStores: 0, inputHits: 0,
             sampledStores: 0, sampledHits: 0, captureRejects: 0, lastCaptureRejection: null };
@@ -122,11 +124,13 @@ class PrivateResumeHlsCache {
     inputRevalidationPlan(binding) {
         const entry = this.inputCandidate(binding), proof = entry?.recentProof;
         return proof ? { kind: proof.kind, target: proof.target, targetParts: entry.targetParts, deliveryTarget: entry.deliveryTarget,
+            allowDeliveryPathRenewal: this.allowDeliveryPathRenewal === true,
             ranges: proof.ranges.map(({ start, length }) => ({ start, length })) } : null;
     }
     revalidationPlan(binding, position) {
         const entry = this.candidate(binding, position), proof = entry?.recentProof;
         return proof ? { kind: proof.kind, target: proof.target, targetParts: entry.targetParts, deliveryTarget: entry.deliveryTarget,
+            allowDeliveryPathRenewal: this.allowDeliveryPathRenewal === true,
             ranges: proof.ranges.map(({ start, length }) => ({ start, length })) } : null;
     }
     acquireInput(binding, observed) { return this.acquire(binding, 0, observed, true); }
@@ -134,8 +138,12 @@ class PrivateResumeHlsCache {
         const entry = inputOnly ? this.inputCandidate(binding) : this.candidate(binding, position);
         if (!entry) { this.stats.misses++; return null; }
         const identity = strongResumeIdentity(observed, binding.fileSizeBytes);
+        const pathRenewal = entry.recentProof && this.allowDeliveryPathRenewal === true
+            && entry.recentProof.target !== observed?.effectiveUrlIdentitySha256
+            && recentResumeTargetEligible({ target: entry.recentProof.target, targetParts: entry.targetParts,
+                allowDeliveryPathRenewal: true }, observed);
         const matches = entry.recentProof ? this.recentRevalidation && samplesMatch(entry.recentProof,
-            observed?.samples, observed?.fileSizeBytes, observed?.effectiveUrlIdentitySha256)
+            observed?.samples, observed?.fileSizeBytes, observed?.effectiveUrlIdentitySha256, { allowPathRenewal: pathRenewal === true })
             : identity && identity === entry.identity;
         if (entry.recentProof) {
             const current = sampleProof(observed?.samples, observed?.fileSizeBytes, observed?.effectiveUrlIdentitySha256);
@@ -144,7 +152,7 @@ class PrivateResumeHlsCache {
             const matchingSamples = current ? current.ranges.filter((r,i) => r.start === entry.recentProof.ranges[i]?.start
                 && r.digest === entry.recentProof.ranges[i]?.digest).length : 0;
             this.stats.lastSampledValidation = { complete: Boolean(current), sameSize, sameTarget, matchingSamples,
-                outcome: matches ? 'accepted' : !current ? 'fresh-read-unavailable' : !sameSize ? 'size-changed'
+                outcome: matches ? pathRenewal ? 'accepted-path-renewal' : 'accepted' : !current ? 'fresh-read-unavailable' : !sameSize ? 'size-changed'
                     : !sameTarget ? 'target-changed' : 'sample-changed' };
         }
         if (!matches) {
@@ -160,7 +168,7 @@ class PrivateResumeHlsCache {
             start: entry.start, end: entry.end, ended: entry.ended, aheadSeconds: entry.end - position,
             inputSnapshot: () => {
                 ensure();
-                return entry.recentProof ? { fileSizeBytes: binding.fileSizeBytes, target: entry.recentProof.target,
+                return entry.recentProof ? { fileSizeBytes: binding.fileSizeBytes, target: observed.effectiveUrlIdentitySha256,
                     windows: captureInputWindows(entry.inputWindows, binding.fileSizeBytes,
                         entry.inputOnly ? Math.min(this.perFileBytes, RECENT_MULTI_INPUT_MAX_BYTES) : RECENT_INPUT_MAX_BYTES) } : null;
             },
@@ -300,6 +308,7 @@ class PrivateResumeHlsCache {
         bytes: this.bytes, reservedBytes: this.reservedBytes, maxBytes: this.maxBytes,
         perFileBytes: this.perFileBytes, ttlMs: this.ttlMs, windowSeconds: this.windowSeconds,
         recentRevalidation: this.recentRevalidation === true, recentTtlMs: RECENT_TTL_MS,
+        deliveryPathRenewal: this.allowDeliveryPathRenewal === true,
         scope: 'private-owner-source-revision', revalidation: 'current-strong-etag-size-target' }; }
 }
 module.exports = { PrivateResumeHlsCache, parseResumeMediaPlaylist, mergedResumePlaylist, mergedSubtitlePlaylist };

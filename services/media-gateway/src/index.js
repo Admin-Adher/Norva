@@ -138,7 +138,7 @@ const { SOURCE_CLOCK, retainedSubtitleClock, retainedSubtitleClockArgs } = requi
 const { committedSubtitleOutputArgs, readCommittedSubtitle } = require('./committed-subtitle-delivery');
 const { captureSamples, sampleProof, samplesMatch, SAMPLE_BYTES, captureInputWindows, RECENT_INPUT_MAX_BYTES,
     RECENT_HEADER_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES, LinearResumeSamples } = require('./recent-resume-samples');
-const { validateRecentResume, recentResumeTargetParts, compareRecentResumeTargetParts } = require('./recent-resume-validation');
+const { validateRecentResume, recentResumeTargetParts, compareRecentResumeTargetParts, recentResumeTargetEligible } = require('./recent-resume-validation');
 const { PrivateResumeHlsCache, parseResumeMediaPlaylist } = require('./private-resume-hls-cache');
 const { captureSubtitleWindow, parseSubtitlePlaylist } = require('./private-resume-subtitles');
 const { SharedPlaybackRanges, hybridPlaybackRanges } = require('./shared-playback-ranges');
@@ -2869,6 +2869,7 @@ const retainedSessionTransfer = new RetainedSessionTransfer({
     revoke: session => revokeSessionPlaybackAccess(session),
 });
 const privateResumeHlsCache = new PrivateResumeHlsCache({
+    allowDeliveryPathRenewal: true,
     recentRevalidation: process.env.PRIVATE_RESUME_RECENT_SAMPLES_ENABLED === 'true',
     maxBytes: Number(process.env.PRIVATE_RESUME_HLS_CACHE_MAX_BYTES || 128 * 1024 * 1024),
     perFileBytes: Number(process.env.PRIVATE_RESUME_HLS_CACHE_PER_FILE_BYTES || 32 * 1024 * 1024),
@@ -16471,7 +16472,9 @@ async function revalidateRecentResumeSession(session, plan, requestSignal) {
             onUnavailable: observation => {
                 session.startupTimings.recentResumeValidationUnavailable = observation;
             },
-            acceptIdentity: () => !plan.target || identity?.effectiveUrlIdentitySha256 === plan.target,
+            acceptIdentity: () => recentResumeTargetEligible(plan, identity),
+            renewRefusedDelivery: true,
+            onDeliveryRefused: observation => { session.startupTimings.recentDeliveryRefusal = observation; },
             onIdentityRejected: () => {
                 session.startupTimings.recentResumeValidationOutcome = 'target-changed';
                 session.startupTimings.recentResumeTargetComparison = compareRecentResumeTargetParts(
@@ -16487,9 +16490,9 @@ async function revalidateRecentResumeSession(session, plan, requestSignal) {
                     session.freshResumeHandoff = broker.takeFreshValidatedHeader?.(payload) || null;
                 }
             },
-            createBroker: async signal => {
+            createBroker: async (signal, { freshSource = false } = {}) => {
                 const broker = await createStrictLidBroker({ sourceUrl: session.sourceUrl,
-                    recentDeliveryTarget: plan.deliveryTarget, recentDeliveryOwner: session.ownerKey,
+                    recentDeliveryTarget: freshSource ? null : plan.deliveryTarget, recentDeliveryOwner: session.ownerKey,
                     recentDeliveryRoute: recentDeliveryRouteKey(session),
                     fileSizeBytes: fileSizeBytesForSession(session),
                     userAgent: session.userAgent || FFMPEG_USER_AGENT,

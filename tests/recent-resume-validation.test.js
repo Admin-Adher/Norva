@@ -139,6 +139,7 @@ test('Gateway checks the fresh target and rejects without publishing partial pro
             FFMPEG_USER_AGENT:'fixture',pinnedProxyAgentFactoryForRoute:()=>null,providerNodeRouteForSession:()=>null,
             PROVIDER_SLOT_RELEASE_DELAY_MS:0,
             compareRecentResumeTargetParts:()=>null,
+            recentResumeTargetEligible: require('../services/media-gateway/src/recent-resume-validation').recentResumeTargetEligible,
             createStrictLidBroker:async opts=>{opts.onProviderIdentity({effectiveUrlIdentitySha256:same?target:'c'.repeat(64)});return {};},
             validateRecentResume:async opts=>{await opts.createBroker();
                 if(!opts.acceptIdentity()){opts.onIdentityRejected();return null;}

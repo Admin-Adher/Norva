@@ -24,9 +24,9 @@ function sampleProof(samples, fileSizeBytes, target) {
     return Object.freeze({ kind: 'sampled-recent-v1', target, fileSizeBytes, ranges: Object.freeze(ranges) });
 }
 
-function samplesMatch(proof, samples, fileSizeBytes, target) {
+function samplesMatch(proof, samples, fileSizeBytes, target, { allowPathRenewal = false } = {}) {
     const current = sampleProof(samples, fileSizeBytes, target);
-    return Boolean(current && proof?.kind === current.kind && proof.target === target
+    return Boolean(current && proof?.kind === current.kind && (proof.target === target || allowPathRenewal === true)
         && proof.fileSizeBytes === fileSizeBytes && current.ranges.every((range, index) =>
             range.start === proof.ranges[index]?.start && range.digest === proof.ranges[index]?.digest));
 }
