@@ -21896,10 +21896,10 @@ function freezeExactSubtitleHlsTopology(session) {
 
 function audioArgsForSession(session, copyAudio = shouldCopyAudio(session)) {
     if (copyAudio) return ['-c:a', 'copy'];
-    // Retained subtitle graphs use -copyts for every lane. Forcing first_pts=0
+    // Retained subtitle graphs and indexed TS use -copyts for every lane. Forcing first_pts=0
     // here would pad audio from zero to the seek position while video and
     // subtitles already start on the source clock.
-    if (retainedSubtitleClock(session)) {
+    if (retainedSubtitleClock(session) || session?.finiteTsIndexPlan) {
         return TRANSCODE_AUDIO_ARGS.map((value) => value === 'aresample=48000:async=1:first_pts=0'
             ? 'aresample=48000:async=1' : value);
     }
