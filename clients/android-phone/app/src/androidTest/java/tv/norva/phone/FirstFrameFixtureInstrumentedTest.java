@@ -178,6 +178,8 @@ public final class FirstFrameFixtureInstrumentedTest {
                         assertTrue("The provider is withheld: READY must not be needed to apply Resume",
                                 player.getPlaybackState() != androidx.media3.common.Player.STATE_READY);
                         assertEquals(resumeSeconds * 1000L, player.getCurrentPosition());
+                        assertEquals("An undecoded requested position cannot retire cache A", -1L,
+                                ((PlayerActivity) opened).nativeResumePositionMs());
                     });
                 } finally { server.allowResponse.countDown(); }
             }
@@ -198,6 +200,13 @@ public final class FirstFrameFixtureInstrumentedTest {
                     result.getStringExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_AUDIO_MIME));
             assertTrue(result.getBooleanExtra(
                     PlayerActivity.EXTRA_FIRST_FRAME_TEST_CONTRACT_OK, false));
+            final PlayerActivity openedPlayer = (PlayerActivity) activityRef.get();
+            assertNotNull(openedPlayer);
+            instrumentation.runOnMainSync(() -> {
+                long renderedPosition = openedPlayer.nativeResumePositionMs();
+                if ("channel".equals(itemType)) assertEquals("Live has no finite resume archive", -1L, renderedPosition);
+                else assertTrue("A decoded finite clock must be available for cache lifecycle", renderedPosition >= resumeSeconds * 1000L);
+            });
             if (resumeSeconds > 0) {
                 Activity opened = activityRef.get();
                 java.lang.reflect.Field playerField = PlayerActivity.class.getDeclaredField("player");

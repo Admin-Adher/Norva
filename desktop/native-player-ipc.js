@@ -30,7 +30,7 @@ function wireNativePlayer({ ipcMain, window, catalogueView, executable, origin, 
     register('stop', () => controller.stop());
     register('authorize', id => controller.authorize(id));
     register('ack', id => controller.acknowledge(id));
-    register('pending-closes', () => [...controller.unacknowledged]);
+    register('pending-closes', () => controller.pendingCloses());
     controller.on('fullscreen', enabled => {
         window.setFullScreen(enabled);
         controller.setFullscreen(enabled);

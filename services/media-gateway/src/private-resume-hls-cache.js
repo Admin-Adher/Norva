@@ -153,7 +153,7 @@ class PrivateResumeHlsCache {
             const entry=await load();
             if (!entry || epoch!==this.epoch || keyFor(entry.binding)!==keyFor(binding)
                 || entry.capturePurpose!==purpose || entry.retired || entry.bytes>this.perFileBytes || entry.expiresAt<=this.now()
-                || (inputOnly ? !entry.inputOnly || entry.format!=='native-mp4-input-v1'
+                || (inputOnly ? !entry.inputOnly || !['native-mp4-input-v1','native-file-input-v1'].includes(entry.format)
                     : entry.inputOnly || position<entry.start || position>=entry.end || (!entry.ended && entry.end-position<this.minimumAheadSeconds))
                 || this.entries.size>=this.maxEntries
                 || this.entries.has(keyFor(binding))) return Boolean(candidate());
@@ -233,7 +233,7 @@ class PrivateResumeHlsCache {
         });
     }
     captureInput({ binding, observed, inputWindows, nativeResume = null } = {}) {
-        if (nativeResume && (!Number.isFinite(nativeResume.position) || nativeResume.position<=0
+        if (nativeResume && ((nativeResume.format!==undefined && !['native-mp4-input-v1','native-file-input-v1'].includes(nativeResume.format)) || !Number.isFinite(nativeResume.position) || nativeResume.position<=0
             || !Number.isFinite(nativeResume.duration) || nativeResume.duration<=0 || nativeResume.duration>86400
             || nativeResume.position>=nativeResume.duration*0.9)) return this.rejectCapture('native-resume-ending-or-unknown');
         if (!this.recentRevalidation || !binding || observed?.fileSizeBytes !== binding.fileSizeBytes)
@@ -262,7 +262,7 @@ class PrivateResumeHlsCache {
             const identity=nativeResume ? strongResumeIdentity(observed,binding.fileSizeBytes) : null;
             this.entries.set(key, { binding, recentProof, targetParts: observed.targetParts, deliveryTarget: observed.deliveryTarget, inputOnly: true, inputWindows: windows,
                 assets: new Map(), subtitlePlaylists: new Map(), bytes, leases: 0, live: true,
-                ...(nativeResume ? {format:'native-mp4-input-v1',capturePurpose:'resume',createdAt:this.now(),
+                ...(nativeResume ? {format:nativeResume.format || 'native-mp4-input-v1',capturePurpose:'resume',createdAt:this.now(),
                     resumePosition:nativeResume.position,durationSeconds:nativeResume.duration,
                     start:nativeResume.position,end:nativeResume.position,ended:false,segments:[],identity} : {}),
                 expiresAt: this.now() + (identity ? this.ttlMs : Math.min(this.ttlMs, RECENT_TTL_MS)) });

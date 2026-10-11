@@ -39,31 +39,47 @@ final class NativePlaybackClosePolicy {
     }
 
     static String encode(String sessionId, String reason, long createdAtEpochMs) {
+        return encode(sessionId,reason,createdAtEpochMs,null);
+    }
+
+    static Double boundedPosition(Double position) {
+        return position!=null && Double.isFinite(position) && position>=0 && position<86400 ? position : null;
+    }
+
+    static String encode(String sessionId, String reason, long createdAtEpochMs, Double position) {
         String boundedSessionId = boundedSessionId(sessionId);
         if (boundedSessionId == null || createdAtEpochMs <= 0L) return null;
-        return boundedSessionId + "|" + boundedReason(reason) + "|" + createdAtEpochMs;
+        Double bounded=boundedPosition(position);
+        return boundedSessionId + "|" + boundedReason(reason) + "|" + createdAtEpochMs
+                + (bounded==null ? "" : "|" + bounded);
     }
 
     static Entry decode(String encoded, long nowEpochMs) {
-        if (encoded == null || encoded.length() > 96 || nowEpochMs <= 0L) return null;
+        if (encoded == null || encoded.length() > 112 || nowEpochMs <= 0L) return null;
         int reasonSeparator = encoded.indexOf('|');
         int timeSeparator = encoded.indexOf('|', reasonSeparator + 1);
+        int positionSeparator=encoded.indexOf('|',timeSeparator+1);
         if (reasonSeparator != 36 || timeSeparator <= reasonSeparator + 1
-                || encoded.indexOf('|', timeSeparator + 1) >= 0) return null;
+                || (positionSeparator>=0 && encoded.indexOf('|',positionSeparator+1)>=0))return null;
         String sessionId = boundedSessionId(encoded.substring(0, reasonSeparator));
         if (sessionId == null) return null;
         String rawReason = encoded.substring(reasonSeparator + 1, timeSeparator);
         String reason = boundedReason(rawReason);
         if (!reason.equals(rawReason)) return null;
         final long createdAtEpochMs;
+        Double position=null;
         try {
-            createdAtEpochMs = Long.parseLong(encoded.substring(timeSeparator + 1));
+            createdAtEpochMs = Long.parseLong(encoded.substring(timeSeparator + 1,positionSeparator>=0 ? positionSeparator : encoded.length()));
+            if(positionSeparator>=0) {
+                position=boundedPosition(Double.parseDouble(encoded.substring(positionSeparator+1)));
+                if(position==null)return null;
+            }
         } catch (NumberFormatException ignored) {
             return null;
         }
         long ageMs = nowEpochMs - createdAtEpochMs;
         if (createdAtEpochMs <= 0L || ageMs < 0L || ageMs >= MAX_PENDING_AGE_MS) return null;
-        return new Entry(sessionId, reason, createdAtEpochMs);
+        return new Entry(sessionId, reason, createdAtEpochMs, position);
     }
 
     /**
@@ -82,8 +98,14 @@ final class NativePlaybackClosePolicy {
         final String sessionId;
         final String reason;
         final long createdAtEpochMs;
+        final Double resumePosition;
 
         Entry(String sessionId, String reason, long createdAtEpochMs) {
+            this(sessionId,reason,createdAtEpochMs,null);
+        }
+
+        Entry(String sessionId, String reason, long createdAtEpochMs, Double resumePosition) {
+            this.resumePosition=boundedPosition(resumePosition);
             this.sessionId = sessionId;
             this.reason = reason;
             this.createdAtEpochMs = createdAtEpochMs;

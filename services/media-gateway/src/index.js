@@ -4382,11 +4382,12 @@ const nativeMp4Sessions = createNativeMp4Sessions({
         const abortEntry = () => { void nativeMp4Sessions.close(entry).catch(() => {}); };
         entry.ac.signal.addEventListener('abort', abortEntry, { once: true });
         let broker, nativeRecent, nativeIdentity = null;
-        const nativeCacheBinding = claims.scope === 'native-browser-mp4'
+        const nativeRecoveryPersistence = claims.scope === 'native-vod-recovery' && privateResumePersistence.enabled({ownerKey:entry.ownerHash});
+        const nativeCacheBinding = (claims.scope === 'native-browser-mp4' || nativeRecoveryPersistence)
             && canUseStartupCache(entry.ownerHash) && canUseRecentResumeSamples(entry.ownerHash)
             ? privateResumeBinding({ ownerKey: entry.ownerHash, sourceUrl: claims.url,
                 sourceId: claims.resumeSourceId, sourceRevision: claims.resumeSourceRevision,
-                fileSizeBytes: claims.fileSizeBytes, profile: 'native-browser-mp4-input-v1' }) : null;
+                fileSizeBytes: claims.fileSizeBytes, profile: claims.scope==='native-browser-mp4' ? 'native-browser-mp4-input-v1' : 'native-vod-recovery-input-v1' }) : null;
         const nativeCacheEpoch = privateResumeHlsCache.epoch;
         const nativeOwnerRevocationStamp=privateResumeHlsCache.ownerRevocationStamp(entry.ownerHash);
         const nativeFreshScope = { id: entry.sid };
@@ -4513,7 +4514,8 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 reportNativePosition(entry.renderedPosition);
                 if (reason === 'viewer-stop' && nativeCacheBinding && !nativeStopSnapshot) {
                     if(nativeDurable && (terminal || resumeWindowDisposition(entry.renderedPosition,claims.durationSeconds)!=='resume'))return;
-                    nativeStopSnapshot = { samples: broker.snapshotRecentSamples(), windows: broker.snapshotNativeMp4Input() };
+                    nativeStopSnapshot = { samples: broker.snapshotRecentSamples(), windows: claims.scope==='native-browser-mp4'
+                        ? broker.snapshotNativeMp4Input() : broker.snapshotRecentInput(32*1024*1024) };
                 }
             };
             return { inputUrl: broker.inputUrl,
@@ -4533,7 +4535,8 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                             observed: { ...nativeIdentity, samples, fileSizeBytes: claims.fileSizeBytes,
                                 deliveryTarget: broker.retainDeliveryTarget({ ownerKey: entry.ownerHash,
                                     routeKey: nativeRouteKey }) }, inputWindows: windows,
-                            ...(nativeDurable ? {nativeResume:{position:entry.renderedPosition,duration:claims.durationSeconds}} : {}) });
+                            ...(nativeDurable ? {nativeResume:{position:entry.renderedPosition,duration:claims.durationSeconds,
+                                format:claims.scope==='native-browser-mp4' ? 'native-mp4-input-v1' : 'native-file-input-v1'}} : {}) });
                         if(captured && nativeDurable)privateResumePersistence.queueInput(nativeCacheBinding,entry.renderedPosition,claims.durationSeconds);
                     }
                 }

@@ -104,8 +104,12 @@ affichée, sans interpréter le prefetch du navigateur comme une progression.
 L'archive ne revendique pas une durée de buffer calculée à partir des octets.
 Une preuve faible reste limitée à dix minutes ; une archive âgée avec ETag fort
 exige l'ETag, la taille, la cible et quatre échantillons fraîchement concordants.
-La durée provient du profil signé serveur. Les autres caches d'input, les voies
-natives Android/Windows et les profils incomplets restent à traiter séparément.
+La durée provient du profil signé serveur. Le raccord couvre aussi les lectures
+Android/Windows qui utilisent déjà le Gateway `native-vod-recovery`, sous le
+format séparé `native-file-input-v1`. Le compteur du lecteur natif est transmis
+après une vraie première image ; la fermeture garde cette position pour ses
+réessais. Les lectures directes Android/Windows ne passent pas par ce stockage :
+Norva ne reçoit pas leurs octets. Les profils incomplets restent refusés.
 
 ## Configuration inactive
 
@@ -133,6 +137,9 @@ Ne pas les utiliser pour déployer maintenant.
 4. MP4 natif web : reprise A/B, heartbeat/fermeture, 90 %, révocation entre
    comptes, plusieurs instances, redémarrage et réception au-delà des plages
    conservées. Le raccord est testé en isolation ; canary public reste requis.
+   Même validation pour la route native de récupération Android/Windows, avec
+   leurs contrôles JVM/émulateur et portable final. Aucun basculement forcé des
+   lectures directes vers le Gateway pour alimenter le cache.
 5. Invalidations de source et de compte, livraison changeante, durée absente et
    preuves échantillonnées à valider sur copies réelles.
 6. Écoute et sous-titres réels. L'égalité des octets prouve la transparence de gzip,

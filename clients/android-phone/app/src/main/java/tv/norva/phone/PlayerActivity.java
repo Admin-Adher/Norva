@@ -195,6 +195,7 @@ public class PlayerActivity extends Activity {
     private PlaybackUiState playbackUiState = PlaybackUiState.PREPARING;
     private boolean engineReady = false;
     private boolean firstFrameForCurrentRoute = false;
+    private boolean nativeResumeFrameReady = false;
     private boolean recoveryInProgress = false;
     private boolean longStartShown = false;
     private boolean longStartScheduled = false;
@@ -892,6 +893,10 @@ public class PlayerActivity extends Activity {
             }
         });
         player.addAnalyticsListener(new AnalyticsListener() {
+            @Override public void onPositionDiscontinuity(EventTime eventTime, Player.PositionInfo oldPosition,
+                    Player.PositionInfo newPosition, int reason) {
+                nativeResumeFrameReady = false;
+            }
             @Override
             public void onRenderedFirstFrame(
                     EventTime eventTime,
@@ -906,6 +911,7 @@ public class PlayerActivity extends Activity {
                         eventRouteId,
                         activePlaybackRouteId,
                         currentRouteId)) return;
+                nativeResumeFrameReady = true;
                 handleRenderedFirstFrame();
             }
         });
@@ -1695,6 +1701,7 @@ public class PlayerActivity extends Activity {
                 NativePlaybackTelemetry.recordHeartbeat(
                         bearer,
                         heartbeatSessionId,
+                        nativeResumePositionMs(),
                         resultCode -> {
                             if (!ProviderPlaybackPolicy.isPlaybackSuperseded(resultCode)) return;
                             runOnUiThread(() -> {
@@ -1725,6 +1732,12 @@ public class PlayerActivity extends Activity {
                     terminalRecoveryAttempt,
                     isLocal);
         }
+    }
+
+    long nativeResumePositionMs() {
+        if(player==null || isLiveContent() || isLocal || !firstFrameForCurrentRoute || !nativeResumeFrameReady
+                || (player.getPlaybackState()!=Player.STATE_READY && player.getPlaybackState()!=Player.STATE_ENDED))return -1L;
+        return player.getCurrentPosition();
     }
 
     private void clearPendingPlaybackAuthRequest() {
@@ -4383,6 +4396,8 @@ public class PlayerActivity extends Activity {
                 data.putExtra("itemType", itemType);
                 data.putExtra("itemId", itemId);
                 data.putExtra("positionSeconds", pos);
+                Double nativePosition=NativePlaybackTelemetry.boundedRenderedPosition(nativeResumePositionMs());
+                if(nativePosition!=null)data.putExtra("nativeResumePositionSeconds",nativePosition.doubleValue());
                 data.putExtra("durationSeconds", dur);
                 data.putExtra("ended", endedNaturally);
             }

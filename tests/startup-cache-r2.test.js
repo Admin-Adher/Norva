@@ -190,7 +190,8 @@ test('resume A is physically removed after progress, replaced by B, and absent i
  assert.equal(p.queueWindow(alternate,950,1000),false);
 });
 
-test('native MP4 A/B lifecycle survives the actual local R2/SQLite restart with exact compressed bytes',{skip:!Miniflare},async t=>{
+for(const format of ['native-mp4-input-v1','native-file-input-v1'])
+test(`${format} A/B lifecycle survives the actual local R2/SQLite restart with exact compressed bytes`,{skip:!Miniflare},async t=>{
  const h=await fixture(t);assert.equal(await h.capture(),true);
  const disk=new StartupCacheDiskStore({root:path.join(h.root,'native-staging'),purpose:'resume',maxBytes:8*1024**2,
   perOwnerBytes:2*1024**2,perFileBytes:1024**2,reserveFreeBytes:1,retentionMs:7*86400_000,now:()=>h.now});await disk.initialize();
@@ -199,9 +200,9 @@ test('native MP4 A/B lifecycle survives the actual local R2/SQLite restart with 
  const proof={...observed,fileSizeBytes:data.length,samples};
  const makeCache=()=>new PrivateResumeHlsCache({maxBytes:4*1024**2,perFileBytes:1024**2,recentRevalidation:true,now:()=>h.now});
  const c=makeCache(),store=h.makeStore(disk),p=new PrivateResumePersistence({cache:c,store,allowsOwner:o=>o===owner});
- const capture=position=>c.captureInput({binding:b,observed:proof,inputWindows:[{start:0,payload:data}],nativeResume:{position,duration:1000}});
+ const capture=position=>c.captureInput({binding:b,observed:proof,inputWindows:[{start:0,payload:data}],nativeResume:{position,duration:1000,format}});
  assert.equal(capture(110),true);assert.equal(p.queueInput(b,110,1000),true);await p.drained();assert.equal(p.status().stored,1);
- const record=[...store.index.values()][0];assert.equal(record.envelope.manifest.format,'native-mp4-input-v1');
+ const record=[...store.index.values()][0];assert.equal(record.envelope.manifest.format,format);
  assert.ok(record.envelope.payloadBytes<data.length);assert.equal(disk.status().entries,0);
  await h.restart();const c2=makeCache(),s2=h.makeStore(disk),p2=new PrivateResumePersistence({cache:c2,store:s2,allowsOwner:()=>true});
  assert.equal(await p2.restoreInput(b,1000),true);

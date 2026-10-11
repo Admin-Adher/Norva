@@ -41,9 +41,9 @@ function fixture({ resolveFresh, expire, release, abortable = false, userAgent =
   const channelList = { currentChannel: null };
   const window = {
     NorvaTVCloud: { playVideoJson(payload) { launches.push(JSON.parse(payload)); } },
-    NorvaCloud: { token: 'fixture-token', playback: { async expireSession(id) {
+    NorvaCloud: { token: 'fixture-token', playback: { async expireSession(id, options) {
       expirations.push(id);
-      if (expire) await expire(id);
+      if (expire) await expire(id, options);
       return { session: { id, status: 'expired' }, gatewayErrors: 0 };
     } } },
     WatchPage, VideoPlayer, __norvaNative: {}, location,
@@ -101,6 +101,24 @@ function fixture({ resolveFresh, expire, release, abortable = false, userAgent =
   };
   return { window, player, play, retry, close, navigate, timers, launches, resolutions, expirations, notices, renders };
 }
+
+test('a native finite stop sends its captured position on exact close and keeps it for a failed delivery retry',async()=>{
+ const calls=[];let failed=true;
+ const f=fixture({expire:async(id,options)=>{calls.push([id,options.resumePosition]);if(failed)throw Error('temporary');}});
+ assert.equal(f.window.__norvaNative.onPlaybackClosed(session(1),'closed',82.125),'accepted');await tick();await tick();
+ assert.deepEqual(calls,[[session(1),82.125]]);
+ failed=false;
+ assert.equal(f.window.__norvaNative.onPlaybackClosed(session(1),'closed'),'accepted');await tick();await tick();
+ assert.deepEqual(calls,[[session(1),82.125],[session(1),82.125]]);
+ f.window.__norvaNative.onPlaybackClosed(session(1),'closed',99);await tick();
+ assert.equal(calls.length,2,'an acknowledged close cannot be overwritten or repeated');
+});
+
+test('native closes omit invalid stop clocks and keep session ownership separate',async()=>{
+ const calls=[],f=fixture({expire:async(id,options)=>calls.push([id,options.resumePosition])});
+ for(const [i,value] of [NaN,-1,86400,'12',undefined].entries())f.window.__norvaNative.onPlaybackClosed(session(i+1),'closed',value);
+ await tick();await tick();assert.equal(calls.length,5);assert.ok(calls.every(([,value])=>value===undefined));
+});
 
 for (const departure of ['Back', 'navigation', 'new Play', 'new recovery token']) {
   test(`Live ${departure} aborts its exact in-flight preparation signal`, async () => {

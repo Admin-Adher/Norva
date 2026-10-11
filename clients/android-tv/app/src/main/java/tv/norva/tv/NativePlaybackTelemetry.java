@@ -74,8 +74,17 @@ final class NativePlaybackTelemetry {
         });
     }
 
+    static Double boundedRenderedPosition(long positionMs) {
+        return positionMs>=0 && positionMs<86_400_000L ? positionMs/1000d : null;
+    }
+
     static void recordHeartbeat(final String authToken, final String playbackSessionId,
                                 final HeartbeatCallback callback) {
+        recordHeartbeat(authToken, playbackSessionId, -1L, callback);
+    }
+
+    static void recordHeartbeat(final String authToken, final String playbackSessionId,
+                                final long renderedPositionMs, final HeartbeatCallback callback) {
         final String boundedSessionId = boundedSessionId(playbackSessionId);
         if (!validAuthToken(authToken) || boundedSessionId == null) return;
         startWorker("norva-playback-heartbeat", new Runnable() {
@@ -88,8 +97,11 @@ final class NativePlaybackTelemetry {
                             authToken);
                     connection.setRequestMethod("POST");
                     connection.setDoOutput(true);
-                    connection.setFixedLengthStreamingMode(0);
-                    connection.getOutputStream().close();
+                    Double position=boundedRenderedPosition(renderedPositionMs);
+                    byte[] body=position==null ? new byte[0]
+                            : new JSONObject().put("renderedPosition",position).toString().getBytes(StandardCharsets.UTF_8);
+                    connection.setFixedLengthStreamingMode(body.length);
+                    try(OutputStream output=connection.getOutputStream()) { output.write(body); }
                     int status = connection.getResponseCode();
                     String response = readBoundedResponse(connection);
                     String result = status >= 200 && status < 300

@@ -4,6 +4,16 @@
     const bridge = window.NorvaDesktop?.nativePlayer;
     if (bridge?.protocol !== 1) return;
     const progress = new Map();
+    const renderedPosition = (id) => {
+        const event=progress.get(id)?.latest;
+        if (!event || !['movie','episode','series'].includes(event.itemType)
+            || !Number.isFinite(event.positionSeconds) || event.positionSeconds<0 || event.positionSeconds>=86400
+            || !(event.decodedVideo>0 || event.displayedPictures>0)
+            || !Number.isFinite(event.savedAtMs) || Date.now()-event.savedAtMs<0 || Date.now()-event.savedAtMs>10000)return undefined;
+        return event.positionSeconds;
+    };
+    window.__norvaNative = window.__norvaNative || {};
+    window.__norvaNative.renderedPosition = renderedPosition;
     const publish = (entry) => {
         const event=entry?.latest;if(!event || event.durationSeconds<=0)return;
         window.__norvaNative?.onProgress?.(event.sourceId,event.itemType,event.itemId,event.positionSeconds,event.durationSeconds,event.savedAtMs);
@@ -12,8 +22,11 @@
     const replayCloses = async () => {
         if (!window.__norvaNative?.onPlaybackClosed) return;
         try {
-            for (const id of await bridge.pendingPlaybackCloses()) {
-                window.__norvaNative.onPlaybackClosed(id, 'player_exited');
+            for (const entry of await bridge.pendingPlaybackCloses()) {
+                const id=typeof entry==='string' ? entry : entry?.sessionId;
+                const position=Number.isFinite(entry?.resumePosition) && entry.resumePosition>=0 && entry.resumePosition<86400
+                    ? entry.resumePosition : undefined;
+                window.__norvaNative.onPlaybackClosed(id, 'player_exited', position);
             }
         } catch { /* Exact cloud acknowledgement remains required before reopening. */ }
     };
@@ -29,8 +42,10 @@
         }
         if (event.type === 'ended') hooks?.onEnded?.(event.sourceId,event.itemType,event.itemId);
         if (event.type === 'closed') {
+            const position=Number.isFinite(event.resumePosition) && event.resumePosition>=0 && event.resumePosition<86400
+                ? event.resumePosition : renderedPosition(event.sessionId);
             publish(progress.get(event.sessionId));progress.delete(event.sessionId);
-            hooks?.onPlaybackClosed?.(event.sessionId,event.reason);
+            hooks?.onPlaybackClosed?.(event.sessionId,event.reason,position);
         }
     });
     window.addEventListener('load', () => { void replayCloses(); });

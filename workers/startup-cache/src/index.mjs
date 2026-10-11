@@ -40,8 +40,8 @@ async function verifyEnvelope(envelope, env) {
         || !Number.isSafeInteger(b.fileSizeBytes) || b.fileSizeBytes<1 || !hex(m.preparationKey)
         || m.protocol!==1 || !['startup','resume'].includes(m.purpose || 'startup')
         || !Number.isFinite(m.start) || m.start<0 || !Number.isFinite(m.end) || m.ended!==false
-        || (m.format!==undefined && m.format!=='native-mp4-input-v1')
-        || (m.format==='native-mp4-input-v1' ? m.purpose!=='resume' || m.inputOnly!==true
+        || (m.format!==undefined && !['native-mp4-input-v1','native-file-input-v1'].includes(m.format))
+        || (['native-mp4-input-v1','native-file-input-v1'].includes(m.format) ? m.purpose!=='resume' || m.inputOnly!==true
             || !Number.isFinite(m.durationSeconds) || m.durationSeconds<=0 || m.durationSeconds>86400
             || !Number.isFinite(m.resumePosition) || m.resumePosition<=0 || m.resumePosition>=m.durationSeconds*0.9
             || m.start!==m.resumePosition || m.end!==m.resumePosition

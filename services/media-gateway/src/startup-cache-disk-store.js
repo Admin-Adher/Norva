@@ -68,7 +68,7 @@ class StartupCacheDiskStore {
         await this.trim(); this.initialized = true;
     }
     validManifest(m) {
-        const native = m?.format==='native-mp4-input-v1';
+        const native = ['native-mp4-input-v1','native-file-input-v1'].includes(m?.format);
         if (m?.protocol !== 1 || !validBinding(m.binding)
             || (m.format!==undefined && !native)
             || !hex(m.preparationKey) || !Number.isSafeInteger(m.createdAt) || m.createdAt > this.now()
@@ -238,7 +238,7 @@ class StartupCacheDiskStore {
             segments:entry.segments,subtitlePlaylists:[...entry.subtitlePlaylists],
             assets:descriptors.slice(0,entry.assets.size),inputWindows:descriptors.slice(entry.assets.size)};
         if(this.purpose==='resume')manifest.purpose='resume';
-        if(entry.format==='native-mp4-input-v1')Object.assign(manifest,{format:entry.format,inputOnly:true,
+        if(['native-mp4-input-v1','native-file-input-v1'].includes(entry.format))Object.assign(manifest,{format:entry.format,inputOnly:true,
             resumePosition:entry.resumePosition,durationSeconds:entry.durationSeconds});
         if (this.retentionMs) manifest.retainedUntil = Math.max(entry.expiresAt, entry.createdAt+this.retentionMs);
         if (!this.validManifest(manifest)) return false;

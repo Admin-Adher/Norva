@@ -22,3 +22,29 @@ test('cloud history preserves bounded native track identity and explicit subtitl
  const bad=sanitizeHistoryData({playbackPreferences:{audio:{stableId:'https://private.example/file',role:'secret',url:'private'},subtitle:{disabled:'true',token:'secret'}}});
  assert.equal(bad.playbackPreferences,undefined);
 });
+
+test('native resume uses only fresh decoded progress from the exact finite session and flushes it on close',()=>{
+ let receive,now=20000;const calls=[];
+ const window={NorvaDesktop:{nativePlayer:{protocol:1,onEvent:fn=>receive=fn}},addEventListener(){},__norvaNative:{
+  onPlaybackClosed:(...args)=>calls.push(args)
+ }};
+ vm.runInNewContext(fs.readFileSync('public/js/utils/desktopNative.js','utf8'),{window,Date:{now:()=>now}});
+ const event={type:'progress',sessionId:'owned',itemType:'episode',durationSeconds:1000,positionSeconds:123.5,savedAtMs:now,decodedVideo:1};
+ receive(event);assert.equal(window.__norvaNative.renderedPosition('owned'),123.5);
+ assert.equal(window.__norvaNative.renderedPosition('other'),undefined);
+ for(const patch of [{decodedVideo:0},{itemType:'channel'},{positionSeconds:NaN},{savedAtMs:now+1},{savedAtMs:now-10001}]) {
+  receive({...event,...patch});assert.equal(window.__norvaNative.renderedPosition('owned'),undefined);
+ }
+ receive(event);receive({type:'closed',sessionId:'owned',reason:'closed'});
+ assert.deepEqual(calls,[['owned','closed',123.5]]);
+ assert.equal(window.__norvaNative.renderedPosition('owned'),undefined);
+});
+
+test('a Windows renderer reload replays the captured native stop position and still accepts legacy close IDs',async()=>{
+ const listeners={},calls=[],window={NorvaDesktop:{nativePlayer:{protocol:1,onEvent(){},
+  pendingPlaybackCloses:async()=>[{sessionId:'owned',resumePosition:82.125},'legacy',{sessionId:'invalid',resumePosition:Infinity}]}},
+  __norvaNative:{onPlaybackClosed:(...args)=>calls.push(args)},addEventListener:(name,fn)=>listeners[name]=fn};
+ vm.runInNewContext(fs.readFileSync('public/js/utils/desktopNative.js','utf8'),{window,Date});
+ listeners.load();await new Promise(resolve=>setImmediate(resolve));
+ assert.deepEqual(calls,[['owned','player_exited',82.125],['legacy','player_exited',undefined],['invalid','player_exited',undefined]]);
+});

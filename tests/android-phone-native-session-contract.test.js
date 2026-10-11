@@ -129,17 +129,20 @@ test('phone posts a lightweight authenticated heartbeat only during rendered act
   );
   const heartbeat = method(
     telemetry,
-    'static void recordHeartbeat(final String authToken, final String playbackSessionId,',
+    'final long renderedPositionMs, final HeartbeatCallback callback)',
   );
   assert.match(heartbeat, /setRequestMethod\("POST"\)/);
-  assert.match(heartbeat, /setFixedLengthStreamingMode\(0\)/);
+  assert.match(heartbeat, /setFixedLengthStreamingMode\(body.length\)/);
+  assert.match(heartbeat, /boundedRenderedPosition\(renderedPositionMs\)/);
+  assert.match(heartbeat, /new JSONObject\(\).put\("renderedPosition",position\)/);
+  assert.match(heartbeat, /position==null \? new byte\[0\]/);
   assert.match(heartbeat, /openConnection\([\s\S]{0,160}authToken\)/);
   const connection = method(
     telemetry,
     'private static HttpURLConnection openConnection(String url, String authToken)',
   );
   assert.match(connection, /"Authorization", "Bearer " \+ authToken/);
-  assert.doesNotMatch(heartbeat, /JSONObject|sourceId|itemId|originalUrl|fallbackUrl/);
+  assert.doesNotMatch(heartbeat, /sourceId|itemId|originalUrl|fallbackUrl/);
 });
 
 test('every native heartbeat obtains a current bearer through a nonce-scoped private channel', () => {
@@ -297,7 +300,8 @@ test('phone keeps exact native close pending until an explicit trusted ACK', () 
 
   assert.match(finish, /putExtra\(EXTRA_PLAYBACK_SESSION_ID, playbackSessionId\)/);
   assert.match(finish, /putExtra\(EXTRA_PLAYBACK_CLOSE_REASON, playbackCloseReason\(\)\)/);
-  assert.match(result, /queuePlaybackSessionClose\([\s\S]{0,220}continuePlayerResult\(data\)/);
+  assert.match(result, /queuePlaybackSessionClose\([\s\S]{0,500}continuePlayerResult\(data\)/);
+  assert.match(result, /NativePlaybackClosePolicy\.boundedPosition\([\s\S]{0,160}nativeResumePositionSeconds/);
   assert.doesNotMatch(result, /selectedVariantStreamId|window\.__norvaNative\.onEnded/);
   assert.match(queue, /persistPendingPlaybackSessionClosesLocked\(\)/);
   assert.match(queue, /pendingPlaybackCloseContinuations\.put\(sessionId, continuation\)/);

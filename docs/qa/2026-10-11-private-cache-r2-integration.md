@@ -210,3 +210,36 @@ Preuves de cette suite sous `.codex-artifacts/startup-cache-20261010/` :
 `native-durable-regression.local.log`, `native-durable-linux.safe.json`,
 `native-resume-real.remote.py.safe.json`. PR786 reste en brouillon, sans
 migration ni déploiement de production, ni connexion fournisseur supplémentaire.
+
+## Suite : lecteurs natifs Android et Windows, route Gateway
+
+Le raccord préparé s'étend à `native-vod-recovery`, uniquement lorsque cette
+route est déjà utilisée par le lecteur natif et que la persistance est activée
+en environnement isolé. Format `native-file-input-v1` distinct du MP4 web :
+plages originales complètes, en-tête et quatre échantillons frais, durée signée,
+quotas et compression sans perte identiques. Les lectures natives directes ne
+sont pas couvertes : le serveur Norva ne reçoit pas leurs octets.
+
+- Android téléphone/TV : après une première image réellement rendue, le
+  heartbeat transmet la position Media3. La fermeture stocke sa position
+  bornée avec l'UUID, le motif et l'âge absolu du close en attente ; les réessais
+  après rechargement gardent la même position et la même expiration.
+- Windows : le bridge utilise les statistiques de décodage et une position
+  récente de la session exacte. Le processus principal conserve la position
+  de fermeture jusqu'à l'ACK, y compris si le renderer est rechargé. Aucune
+  position du DOM vidéo n'est utilisée pour un lecteur LibVLC.
+- Le replay du vrai bloc Gateway teste les scopes MP4 web et récupération
+  native, le drainage avant upload, les révocations et le seuil de 90 %.
+  Lorsque l'option native est désactivée, aucun snapshot ni revalidation
+  supplémentaire n'est ouvert. Les lectures de préchargement ne sont pas
+  assimilées à la progression d'un spectateur.
+
+**149 tests ciblés réussis, aucun ignoré**, dont le cycle A/B/redémarrage/retrait
+à 90 % des deux formats avec le vrai Worker/SQLite/R2 local Miniflare.
+Preuve : `native-recovery-focused.local.log`. Les tests JVM et les six
+configurations d'émulateur du commit exact restent à confirmer. Les assertions
+de runtime ajoutées contrôlent une position non décodée refusée, la première
+image Media3 et une horloge utilisable après saut puis pause.
+
+La PR reste en brouillon. Aucun nouveau gain de lecture public, validation à
+l'écoute ou déploiement de production n'est annoncé. R2 payant reste désactivé.

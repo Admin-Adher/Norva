@@ -87,7 +87,7 @@ function createNativeMp4Sessions({ allows, open, now = Date.now, leaseMs = 60_00
             const entry=entries.get(sid);
             if (!entry || entry.ownerHash!==ownerHash)throw failure(404,'NATIVE_MP4_SESSION_UNAVAILABLE');
             active(sid);
-            if(entry.claims.scope!=='native-browser-mp4' || !Number.isFinite(position) || position<0 || position>=86400)return false;
+            if(!['native-browser-mp4','native-vod-recovery'].includes(entry.claims.scope) || !Number.isFinite(position) || position<0 || position>=86400)return false;
             entry.initialRenderedPosition ??= position;
             entry.renderedPosition=position;
             // A heartbeat never opens media or acquires a provider connection.

@@ -3828,6 +3828,10 @@ class WatchPage {
     }
 
     nativeResumeRenderedPosition(sessionId) {
+        if(window.NorvaDesktop?.nativePlayer?.protocol===1) {
+            const position=window.__norvaNative?.renderedPosition?.(sessionId);
+            return Number.isFinite(position) && position>=0 && position<86400 ? position : undefined;
+        }
         const video=this.video;
         if (!video || video.readyState<2 || video.seeking || !Number.isFinite(video.currentTime)
             || video.currentTime<0 || video.currentTime>=86400)return undefined;

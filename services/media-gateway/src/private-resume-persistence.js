@@ -42,7 +42,7 @@ class PrivateResumePersistence {
     async restoreInput(binding, duration, signal) {
         if (!this.enabled(binding) || signal?.aborted || !Number.isFinite(duration) || duration<=0)return false;
         const key=scopeFor(binding),fence=this.fences.get(key),cached=this.cache.inputCandidate(binding);
-        if(cached?.format==='native-mp4-input-v1' && (cached.durationSeconds!==duration
+        if(['native-mp4-input-v1','native-file-input-v1'].includes(cached?.format) && (cached.durationSeconds!==duration
             || resumeWindowDisposition(cached.resumePosition,duration)!=='resume')) {
             this.retire(binding,cached.createdAt);return false;
         }
@@ -50,7 +50,7 @@ class PrivateResumePersistence {
         return this.cache.restoreWindow(binding,0,async()=>{
             const entry=await this.store.get(binding,signal);
             if(signal?.aborted || this.fences.get(key)!==fence || !entry || entry.createdAt<=(fence ?? -1)
-                || entry.format!=='native-mp4-input-v1' || entry.durationSeconds!==duration
+                || !['native-mp4-input-v1','native-file-input-v1'].includes(entry.format) || entry.durationSeconds!==duration
                 || resumeWindowDisposition(entry.resumePosition,duration)!=='resume')return null;
             entry.durableOrigin=true;return entry;
         },'resume',true);
@@ -102,7 +102,7 @@ class PrivateResumePersistence {
     queueInput(binding, position, duration) {
         if (!this.enabled(binding) || resumeWindowDisposition(position,duration)!=='resume')return false;
         const entry=this.cache.inputCandidate(binding);
-        if(entry?.format!=='native-mp4-input-v1' || entry.resumePosition!==position || entry.durationSeconds!==duration)return false;
+        if(!['native-mp4-input-v1','native-file-input-v1'].includes(entry?.format) || entry.resumePosition!==position || entry.durationSeconds!==duration)return false;
         return this.queueSnapshot(binding,entry);
     }
     queueSnapshot(binding, entry) {

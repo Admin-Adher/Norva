@@ -120,6 +120,17 @@ test('both Cloud APIs send finite progress optionally while old heartbeat-only c
  }
 });
 
+test('WatchPage uses the current Windows native clock instead of a stale DOM video clock',()=>{
+ const source=fs.readFileSync(require.resolve('../public/js/pages/WatchPage.js'),'utf8');
+ const a=source.indexOf('    nativeResumeRenderedPosition('),b=source.indexOf('    startCloudPlaybackHeartbeat(',a);
+ let position=123.5,seen;
+ const context={window:{NorvaDesktop:{nativePlayer:{protocol:1}},__norvaNative:{renderedPosition:id=>{seen=id;return position;}}},URL};vm.createContext(context);
+ vm.runInContext('class Page {'+source.slice(a,b)+'};globalThis.Page=Page;',context);
+ const p=new context.Page();p.video={readyState:2,currentTime:12,currentSrc:'https://media.invalid/sessions/old/native.mp4'};
+ assert.equal(p.nativeResumeRenderedPosition('owned'),123.5);assert.equal(seen,'owned');
+ for(const value of [undefined,NaN,-1,86400,'123']) { position=value;assert.equal(p.nativeResumeRenderedPosition('owned'),undefined); }
+});
+
 test('Edge forwards native progress only after owned active-session authorization and forwards the stop position',()=>{
  const source=fs.readFileSync(require.resolve('../supabase/functions/norva-playback/index.ts'),'utf8');
  const a=source.indexOf('async function heartbeatPlaybackSession('),b=source.indexOf('async function requestDemandDrivenMediaCacheContinuation(',a),body=source.slice(a,b);
@@ -129,19 +140,22 @@ test('Edge forwards native progress only after owned active-session authorizatio
  assert.match(source,/rawUrl\.searchParams\.set\('resumePosition',String\(resumePosition\)\)/);
 });
 
+for(const [scope,durable] of [['native-browser-mp4',true],['native-vod-recovery',true],['native-vod-recovery',false]])
 for(const [stopPosition,revocation] of [[210,null],[900,null],[210,'other'],[210,'owner']])
-test(`the actual native Gateway close drains without waiting for storage, stop ${stopPosition}, revoke ${revocation}`,async()=>{
+test(`the actual ${scope} Gateway close drains without waiting for storage, enabled ${durable}, stop ${stopPosition}, revoke ${revocation}`,async()=>{
  const gateway=fs.readFileSync(require.resolve('../services/media-gateway/src/index.js'),'utf8');
  const sid='12345678-1234-4234-a234-123456789013',uid='12345678-1234-4234-a234-123456789014';
  const owner=crypto.createHash('sha256').update(uid).digest('hex');let now=Date.now(),released=false,putFinished=false,snapshots=0;
  const b=privateResumeBinding({ownerKey:owner,sourceUrl:'https://source.invalid/film.mp4',sourceId:'source',sourceRevision:'1',
-  fileSizeBytes:bytes.length,profile:'native-browser-mp4-input-v1'}),c=cache(()=>now);
- assert.equal(c.captureInput({binding:b,observed,inputWindows:[{start:0,payload:bytes}],nativeResume:{position:110,duration:1000}}),true);
+  fileSizeBytes:bytes.length,profile:scope==='native-browser-mp4' ? 'native-browser-mp4-input-v1' : 'native-vod-recovery-input-v1'}),c=cache(()=>now);
+ assert.equal(c.captureInput({binding:b,observed,inputWindows:[{start:0,payload:bytes}],nativeResume:{position:110,duration:1000,
+  format:scope==='native-browser-mp4' ? 'native-mp4-input-v1' : 'native-file-input-v1'}}),true);
  let finish;const wait=new Promise(r=>finish=r),stored=[];
- const p=new PrivateResumePersistence({cache:c,allowsOwner:o=>o===owner,store:{disk:{purpose:'resume'},get:async()=>null,current:async()=>true,
+ const p=new PrivateResumePersistence({cache:c,allowsOwner:o=>durable && o===owner,store:{disk:{purpose:'resume'},get:async()=>null,current:async()=>true,
   retire:async()=>{},put:async e=>{stored.push(e.resumePosition);await wait;putFinished=true;return true;},status:()=>({})}});
  const broker={inputUrl:'http://127.0.0.1:9999/private',seedRecentInput:()=>bytes.length,close:async()=>{},terminalError:null,
   snapshotRecentSamples:()=>samples,snapshotNativeMp4Input:()=>{snapshots++;return [{start:0,payload:bytes}];},
+  snapshotRecentInput:maximum=>{assert.equal(maximum,32*1024*1024);snapshots++;return [{start:0,payload:bytes}];},
   retainDeliveryTarget:()=>null,cachedMp4Coverage:()=>null,windowTrace:[]};
  const context={createNativeMp4Sessions,allowsNativeMp4Capability:()=>true,process:{env:{}},PUBLIC_BASE_URL:'https://media.invalid',
   proxyKeyFromUrl:()=>'',providerSlotKeyFromUrl:()=>'',providerSessionBlocksRawOpening:()=>false,
@@ -151,21 +165,21 @@ test(`the actual native Gateway close drains without waiting for storage, stop $
   privateResumePersistence:p,PROVIDER_SLOT_RELEASE_DELAY_MS:0,providerAdaptiveRouteControl:{resolveForPlayback:async()=>null},
   providerNodeRouteForSession:()=>({}),pinnedProxyAgentFactoryForRoute:()=>()=>{},isPublicDirectRoute:()=>true,
   observeProviderProxySelection:()=>{},sharedPlaybackRanges:{begin:()=>null},hybridPlaybackRanges:()=>null,
-  revalidateNativeRecentInput:async()=>{const lease=c.acquireInput(b,observed);return {lease,snapshot:lease.inputSnapshot()};},
-  createStrictLidBroker:async options=>{options.onProviderIdentity(observed);return broker;},resumeWindowDisposition:require('../services/media-gateway/src/private-resume-persistence').resumeWindowDisposition,
+  revalidateNativeRecentInput:async()=>{assert.equal(durable,true);const lease=c.acquireInput(b,observed);return {lease,snapshot:lease.inputSnapshot()};},
+  createStrictLidBroker:async options=>{assert.equal(options.captureRecentSamples,durable);options.onProviderIdentity(observed);return broker;},resumeWindowDisposition:require('../services/media-gateway/src/private-resume-persistence').resumeWindowDisposition,
   console:{info:()=>{}},setImmediate};
  vm.createContext(context);vm.runInContext(gateway.slice(gateway.indexOf('const nativeMp4Sessions = createNativeMp4Sessions('),
   gateway.indexOf('setInterval(() => { void nativeMp4Sessions.sweep()'))+'\nglobalThis.native=nativeMp4Sessions;',context);
- const entry=context.native.grant({v:1,scope:'native-browser-mp4',sid,uid,url:'https://source.invalid/film.mp4',
+ const entry=context.native.grant({v:1,scope,sid,uid,url:'https://source.invalid/film.mp4',
   fileSizeBytes:bytes.length,resumeSourceId:'source',resumeSourceRevision:'1',durationSeconds:1000,exp:Math.floor(Date.now()/1000)+600});
  await context.native.resource(entry);context.native.reportPosition(sid,owner,111);now++;
  if(revocation)c.revokeOwner(revocation==='owner'?owner:'e'.repeat(64));
  await context.native.revoke(owner,sid,false,stopPosition);assert.equal(released,true);assert.equal(putFinished,false);
- assert.equal(snapshots,stopPosition<900?1:0);
- const eligible=stopPosition<900 && revocation!=='owner';
+ assert.equal(snapshots,durable && stopPosition<900?1:0);
+ const eligible=durable && stopPosition<900 && revocation!=='owner';
  await new Promise(r=>setImmediate(r));assert.deepEqual(stored,eligible?[210]:[]);
  finish();await p.drained();assert.equal(p.status().stored,eligible?1:0);
- assert.equal(c.reservedBytes,0);if(stopPosition>=900)assert.equal(c.bytes,0);
+ assert.equal(c.reservedBytes,0);if(durable && stopPosition>=900)assert.equal(c.bytes,0);
 });
 
 test('the bounded owner revocation stamp isolates accounts and safely fences all stamps on capacity overflow',()=>{
