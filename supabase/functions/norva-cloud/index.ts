@@ -238,13 +238,13 @@ const epgCache = new Map<string, { expiresAt: number; data: unknown }>();
 const PRESENCE_TOUCH_INTERVAL_MS = 60_000;
 const presenceTouchedAt = new Map<string, number>();
 function requestReportsViewerPresence(method: string, scope: string, id?: string, action?: string): boolean {
-  // History synchronization and inbox polling keep running on an untouched
+  // History, source-status synchronization and inbox polling run on an untouched
   // catalogue page. These database-only reads are not a new viewer action and
   // must not extend the five-minute provider fence indefinitely. Boot, catalogue
   // navigation and every mutation keep the existing first-play protection.
   if (method === "GET" && !action && (
-    (!id && ["history", "content-events"].includes(scope)) ||
-    (scope === "device" && ["history", "content-events"].includes(id ?? ""))
+    (!id && ["history", "content-events", "sources"].includes(scope)) ||
+    (scope === "device" && ["history", "content-events", "sources"].includes(id ?? ""))
   )) return false;
   if (scope === "device" && id === "heartbeat" && method === "POST" && !action) return false;
   return true;

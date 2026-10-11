@@ -17,7 +17,7 @@ test('periodic history and inbox reads cannot perpetually extend idle account ex
   let lastSeen = 0;
   assert.equal(reports('GET', 'boot'), true);
   for (let now = 30; now <= 600; now += 30) {
-    for (const route of [['history'], ['content-events'], ['device', 'history'], ['device', 'content-events']]) {
+    for (const route of [['history'], ['content-events'], ['sources'], ['device', 'history'], ['device', 'content-events'], ['device', 'sources']]) {
       if (reports('GET', ...route)) lastSeen = now;
     }
     assert.equal(now - lastSeen < 300, now < 300);
@@ -27,8 +27,9 @@ test('periodic history and inbox reads cannot perpetually extend idle account ex
 
 test('first load, catalogue interaction and mutations retain first-play protection', () => {
   for (const route of [
-    ['GET', 'boot'], ['GET', 'media-items'], ['GET', 'sources'],
-    ['GET', 'profile'], ['GET', 'device', 'sources'], ['GET', 'device', 'me'],
+    ['GET', 'boot'], ['GET', 'media-items'], ['GET', 'sources', 'detail'],
+    ['GET', 'profile'], ['GET', 'device', 'sources', 'detail'], ['GET', 'device', 'me'],
+    ['POST', 'sources'], ['PATCH', 'sources', 'detail'], ['DELETE', 'sources', 'detail'],
     ['POST', 'history'], ['DELETE', 'history', 'item'],
     ['POST', 'content-events', 'seen'], ['POST', 'device', 'history'],
     ['DELETE', 'device', 'history', 'item'], ['POST', 'device', 'content-events', 'seen'],
