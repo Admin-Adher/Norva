@@ -599,6 +599,65 @@ test('/probe-audio keeps the shared provider reservation through the release del
   assert.equal(harness.accountExtractions.has(providerKey), false);
 });
 
+test('an exited probe releases its account after grace even when result pipes never close', async () => {
+  const h = makeProbeRouteHarness();
+  const pending = h.handleProbeAudioRequest({ body: { url: providerUrl } }, h.response);
+  h.children[0].emit('exit', 0, null);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.accountExtractions.get(providerKey)?.size, 1);
+  assert.equal(h.response.payload, null);
+  h.releaseDelay();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.accountExtractions.has(providerKey), false);
+  assert.equal(h.response.payload, null, 'incomplete result pipes cannot publish a successful profile');
+  h.children[0].stdout.emit('data', Buffer.from('{"streams":[]}'));
+  h.children[0].emit('close', 0, null);
+  await pending;
+  assert.equal(h.response.payload.providerDrained, true);
+  assert.equal(h.events.filter(e => e === 'delay:2500').length, 1);
+});
+
+test('definitive extraction close cleans up a missed result handler without deleting a newer holder', async () => {
+  const h = makeHarness(), old = new FakeChild();
+  const first = h.registerAccountExtraction(providerKey, old);
+  old.emit('close', 0, null);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.accountExtractions.has(providerKey), false);
+  const next = h.registerAccountExtraction(providerKey, new FakeChild());
+  first.release();
+  assert.equal(h.accountExtractions.get(providerKey)?.size, 1);
+  next.release();
+});
+
+test('extraction errors and unconfirmed metadata closure retain account exclusion', async () => {
+  const h = makeHarness();
+  const child = new FakeChild(), metadata = new FakeChild();
+  metadata.providerMetadataTransport = true;
+  const process = h.registerAccountExtraction(providerKey, child);
+  const transport = h.registerAccountExtraction(providerKey, metadata);
+  child.on('error', () => {});
+  child.emit('error', Error('kill failed'));
+  metadata.emit('close', 1, null);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.accountExtractions.get(providerKey)?.size, 2);
+  process.release(); transport.release();
+});
+
+test('provider holder diagnostics are authenticated, bounded and omit source and process arguments', () => {
+  assert.match(gateway, /app\.get\('\/debug\/provider-activity', requireGatewayAuth/);
+  const fn = sourceBetween('function providerAccountExtractionDiagnostics(', '\nlet _accountActivityLastErrorAt');
+  const accountExtractions = new Map([['private-user/password', new Set(Array.from({length: 70}, () => ({
+    child: { exitCode: 0, signalCode: null, spawnargs: ['https://private.invalid/password'] },
+    activityKind: 'gateway', registeredAtMs: Date.now(), processClosed: true,
+  })))]]);
+  const rows = vm.runInNewContext(`(()=>{${fn};return providerAccountExtractionDiagnostics()})()`, {
+    accountExtractions, providerAffinityHashForGatewayKey: () => 'a'.repeat(64), Date, Math,
+  });
+  assert.equal(rows.length, 64);
+  assert.equal(rows[0].processClosed, true);
+  assert.doesNotMatch(JSON.stringify(rows), /password|private-user|spawnargs|https:/);
+});
+
 test('a viewer starting during probe cooldown observes the holder and waits', async () => {
   const harness = makeProbeRouteHarness();
   const pending = harness.handleProbeAudioRequest({

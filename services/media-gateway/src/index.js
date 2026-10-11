@@ -727,6 +727,8 @@ function registerAccountExtraction(proxyKey, child, reportActivity = true, globa
                 : ACCOUNT_ACTIVITY_KIND_GATEWAY)));
     const entry = {
         child,
+        registeredAtMs: Date.now(),
+        processClosed: false,
         preempted: false,
         reportActivity: activityKind !== null,
         activityKind,
@@ -737,7 +739,24 @@ function registerAccountExtraction(proxyKey, child, reportActivity = true, globa
     let set = accountExtractions.get(proxyKey);
     if (!set) { set = new Set(); accountExtractions.set(proxyKey, set); }
     set.add(entry);
-    entry.release = () => { set.delete(entry); if (!set.size) accountExtractions.delete(proxyKey); };
+    let released = false;
+    entry.release = () => {
+        if (released) return;
+        released = true;
+        set.delete(entry);
+        if (!set.size && accountExtractions.get(proxyKey) === set) accountExtractions.delete(proxyKey);
+    };
+    // Definitive process close is a fallback if the operation's result handler
+    // fails before cleaning up. Metadata dispatchers and probe cooldowns have
+    // their own positive drain protocol and must never be released this way.
+    if (child?.providerMetadataTransport !== true && typeof child?.once === 'function') {
+        child.once('close', () => {
+            entry.processClosed = true;
+            Promise.resolve().then(() => {
+                if (!released && entry.providerCooldown !== true) entry.release();
+            });
+        });
+    }
     // Short catalogue calls routinely finish before the periodic 60-second
     // reporter. Publish the just-registered holder at the next microtask so the
     // Edge can preserve a provider drain after the child exits. Function
@@ -3473,6 +3492,11 @@ app.get('/debug/sessions', requireGatewayAuth, (req, res) => {
         lastProviderProxySelection,
         sessions: Array.from(sessions.values()).map(debugSession)
     });
+});
+
+app.get('/debug/provider-activity', requireGatewayAuth, (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ protocol: 1, extractions: providerAccountExtractionDiagnostics() });
 });
 
 // One-shot canary admission only. The immutable pilot still pins the exact
@@ -11611,7 +11635,7 @@ async function finishDurableStoryboard(job, payload) {
 }
 
 function runStoryboardProcess(job, args, timeoutMs, providerRead) {
-    if (job.cancelled || viewerPlaybackActiveLocally()) return Promise.resolve({ ok: false, preempted: true });
+    if (job.cancelled || backgroundJobBlockedByViewer(job)) return Promise.resolve({ ok: false, preempted: true });
     return new Promise((resolve) => {
         let child;
         try {
@@ -11621,7 +11645,9 @@ function runStoryboardProcess(job, args, timeoutMs, providerRead) {
         trackStoryboardChild(job, child);
         // Both provider reads AND local assembly yield CPU to a viewer. Registration
         // closes the race between the initial guard and spawning ffmpeg.
-        const reg = registerAccountExtraction(proxyKeyFromUrl(job.url), child, true, true);
+        // Local sprite assembly consumes CPU, but owns no provider transport.
+        // Keep its preemption registration without renewing account occupancy.
+        const reg = registerAccountExtraction(proxyKeyFromUrl(job.url), child, providerRead === true, true);
         let finished = false;
         const finish = (ok) => {
             if (finished) return;
@@ -11635,7 +11661,15 @@ function runStoryboardProcess(job, args, timeoutMs, providerRead) {
         child.stderr.resume(); // drain without retaining provider URLs or unbounded stderr
         // A live-child error is not proof that its provider socket is closed.
         child.once('error', () => { if (!child.pid) finish(false); });
-        child.once('close', (code) => finish(code === 0 && !timedOut));
+        child.once('close', (code) => {
+            // A checkpoint is a provider pass too. Previously only the final
+            // sprite marked this cooldown: sixty-second batch retries renewed
+            // the five-minute activity fence continuously, starving idle cache
+            // preparation. Apply the existing provider cooldown after each
+            // confirmed batch close, including interrupted reads.
+            if (providerRead === true) markStoryboardRun(job.url);
+            finish(code === 0 && !timedOut);
+        });
     });
 }
 
@@ -22768,6 +22802,11 @@ function runFfprobe(args, timeoutMs, sourceUrl, options = {}) {
             if (backgroundKey && providerDrainState?.providerProbeStarted) {
                 providerDrainState.ffprobeExited = true;
                 releaseRegistrationAfterProviderDrain();
+                // The process exit proves its provider socket is gone. Start
+                // the same logical release grace now, independently of stdout
+                // closure, JSON parsing, or the HTTP caller still being alive.
+                // The result still waits for close; both paths share one drain.
+                void providerProbeDrainAttestation(providerDrainState).catch(() => {});
             } else {
                 releaseRegistrationAfterProviderDrain();
             }
@@ -25478,6 +25517,26 @@ function activeProviderRouteAccountFingerprints() {
         if (/^[0-9a-f]{64}$/.test(fingerprint)) values.add(fingerprint);
     }
     return [...values].slice(0, 64);
+}
+function providerAccountExtractionDiagnostics() {
+    const rows = [];
+    for (const [key, entries] of accountExtractions) {
+        for (const entry of entries) {
+            if (rows.length >= 64) return rows;
+            rows.push({
+                affinityHash: providerAffinityHashForGatewayKey(key),
+                kind: entry.activityKind,
+                ageMs: Math.max(0, Date.now() - entry.registeredAtMs),
+                preempted: entry.preempted === true,
+                cooldown: entry.providerCooldown === true,
+                processClosed: entry.processClosed === true,
+                processExited: entry.child?.exitCode != null || entry.child?.signalCode != null,
+                metadataTransport: entry.child?.providerMetadataTransport === true,
+                metadataDrained: entry.child?.providerDrained === true,
+            });
+        }
+    }
+    return rows;
 }
 let _accountActivityLastErrorAt = 0;
 async function reportAccountActivityKind(keys, kind) {
