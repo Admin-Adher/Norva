@@ -7605,10 +7605,20 @@ async function createStrictLidBroker(options = {}) {
         context.validator = freshContinuation.validator || null;
         context.effectiveUrlSha256 = freshContinuation.effectiveUrlSha256;
         context.effectiveUrlIdentitySha256 = freshContinuation.effectiveUrlIdentitySha256;
-        seedFiniteMkvCurrentPrefix(context, { finiteCurrentPrefix: freshContinuation.prefix,
+        const seededFreshHeader = seedFiniteMkvCurrentPrefix(context, { finiteCurrentPrefix: freshContinuation.prefix,
             finiteCurrentPrefixOwner: options.freshResumeScope.id });
         onProviderIdentity?.({ validator: context.validator, effectiveUrlSha256: context.effectiveUrlSha256,
             effectiveUrlIdentitySha256: context.effectiveUrlIdentitySha256, targetParts: freshContinuation.targetParts });
+        // This is the same claim's complete, freshly drained header, not old
+        // retained media. Passive navigation also needs its origin: otherwise
+        // recently observed body hints lose their clock after the prior header
+        // expires, and FFmpeg repeats an ordinary remote position search.
+        // Metadata failure cannot alter playback or authorize a cached window.
+        if (seededFreshHeader) try {
+            context.onFiniteWindow?.({ start: 0, bytes: Buffer.from(freshContinuation.prefix.payload),
+                proof: { fileSizeBytes: context.fileSizeBytes, validator: context.validator,
+                    effectiveUrlIdentitySha256: context.effectiveUrlIdentitySha256 } });
+        } catch (_) {}
     } else seedFiniteMkvCurrentPrefix(context, options);
     const server = http.createServer((req, res) => {
         handleStrictLidBrokerRequest(context, expectedPath, req, res);

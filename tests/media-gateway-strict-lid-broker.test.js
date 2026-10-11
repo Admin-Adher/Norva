@@ -159,9 +159,15 @@ test('a drained rejected-cache header continues on the same current target, neve
       acceptIdentity:()=>false,onFreshRejectedHeader:(broker,payload)=>{assert.equal(active,0);token=broker.takeFreshRejectedHeader(payload);},
       createBroker:signal=>h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,freshResumeScope:scope,abortSignal:signal,completedReleaseDelayMs:0})});
     assert.equal(result,null);assert.ok(token);assert.equal(ranges,1);assert.equal(h.strictLidBrokers.size,0);
+    const observed=[];
     next=await h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,freshResumeScope:scope,freshResumeHandoff:token,
+      onFiniteWindow:window=>{observed.push({start:window.start,bytes:window.bytes.length,first:window.bytes[0],proof:window.proof});
+        if(window.start===0)window.bytes.fill(9);},
       pathPrefix:'finite-mkv-seek',finiteWindowBytes:N,finiteWarmupWindowBytes:0,finiteCacheBytes:4*N,completedReleaseDelayMs:0});
     assert.equal(next.currentPrefixBytes,N);
+    assert.equal(observed.length,1);assert.equal(observed[0].start,0);assert.equal(observed[0].bytes,N);assert.equal(observed[0].first,4);
+    assert.equal(observed[0].proof.fileSizeBytes,size);
+    assert.equal(observed[0].proof.effectiveUrlIdentitySha256,h.strictLidEffectiveUrlIdentitySha256(sourceUrl.replace('/entry','/token-1')));
     const header=await fetch(next.inputUrl,{headers:{Range:'bytes=0-4095'}});assert.equal(header.status,206);
     assert.equal(Buffer.from(await header.arrayBuffer()).equals(Buffer.alloc(4096,4)),true);assert.equal(ranges,1);
     const body=await fetch(next.inputUrl,{headers:{Range:`bytes=${N}-${2*N-1}`}});assert.equal(body.status,206);

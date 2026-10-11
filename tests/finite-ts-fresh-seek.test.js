@@ -217,3 +217,18 @@ test('hints contain metadata only and remain bounded, private to the account and
     assert.equal(handle.hasNearby(25), false);
     assert.equal(scanTsWindow(0, Buffer.alloc(100)), null);
 });
+
+test('a current handed-off header restores navigation origin after expiry, while the seek still requires current proof', async()=>{
+    const data=fixture();let clock=0;
+    const store=new TsSeekHints({now:()=>clock}),handle=store.begin(scope(data.length));
+    handle.observe({start:0,bytes:data.subarray(0,65536)});
+    clock=600001;
+    const start=Math.floor(data.length*.6/188)*188;
+    handle.observe({start,bytes:data.subarray(start,start+512*1024)});
+    assert.equal(handle.hasNearby(80),false);assert.equal(handle.describe(80).originKnown,false);
+    handle.observe({start:0,bytes:data.subarray(0,65536)});
+    assert.equal(handle.hasNearby(80),true);assert.equal(handle.describe(80).originKnown,true);
+    const {result}=await seek(data,{hints:handle});assert.ok(result.point);
+    const rejected=await seek(data,{hints:handle,read:async(a,b)=>a===0?Buffer.alloc(b-a+1):data.subarray(a,b+1)});
+    assert.equal(rejected.result.point,null);assert.equal(rejected.result.reason,'origin-unverified');
+});
