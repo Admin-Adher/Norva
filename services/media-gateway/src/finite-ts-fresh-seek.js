@@ -33,6 +33,7 @@ class TsSeekHints {
                 if (!entry || store.now() < entry.at || store.now() - entry.at > 600000) return null;
                 const nearest = entry.clocks.reduce((a, b) => !a || Math.abs(b.pts / 90000 - absoluteSeconds)
                     < Math.abs(a.pts / 90000 - absoluteSeconds) ? b : a, null);
+                if (!nearest || Math.abs(nearest.pts / 90000 - absoluteSeconds) > 30) return null;
                 const nearby = nearest && entry.clocks.filter(c => c.signature === nearest.signature
                     && Math.abs(c.packetOffset - nearest.packetOffset) < WINDOW
                     && Math.abs(c.pts - nearest.pts) >= 180000 && Math.abs(c.pts - nearest.pts) < 1800000)
@@ -90,8 +91,8 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
         || Math.abs(last.pts / 90000 - origin.startSeconds - durationSeconds) > 2)
         return { ...result, reason: 'duration-unverified' };
     const rate = fileSizeBytes / durationSeconds;
-    let predicted = hints?.estimate(absoluteSeconds - 12, rate)
-        ?? align((seconds - 12) * rate);
+    let predicted = hints?.estimate(absoluteSeconds - 20, rate)
+        ?? align((seconds - 20) * rate);
     for (let attempt = 0; attempt < 2; attempt++) {
         if (now() - began >= maxMs) return { ...result, reason: 'budget' };
         const length = attempt === 0 ? 512 * 1024 : 1536 * 1024;
@@ -101,7 +102,11 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
             || scan.audio.some(c => c.pid !== origin.audioPid || c.signature !== signature))
             return { ...result, reason: 'graph-or-clock-unverified' };
         result.scan = { points: scan.points.length, videoStart: scan.video[0].pts / 90000 - absoluteSeconds,
-            videoEnd: scan.video.at(-1).pts / 90000 - absoluteSeconds, audio: scan.audio.length };
+            videoEnd: scan.video.at(-1).pts / 90000 - absoluteSeconds, audio: scan.audio.length,
+            candidates: scan.points.slice(-4).map(p => ({ beforeSeconds: absoluteSeconds - p.pts / 90000,
+                audioBefore: scan.audio.some(c => c.dts <= p.dts && p.dts - c.dts <= 90000),
+                audioAfter: scan.audio.some(c => c.dts >= p.dts + 180000),
+                videoAfter: scan.video.at(-1).dts >= p.dts + 180000 })) };
         const point = scan.points.filter(p => p.signature === signature && p.videoPid === origin.videoPid
             && p.audioPid === origin.audioPid && absoluteSeconds - p.pts / 90000 >= 2
             && absoluteSeconds - p.pts / 90000 <= 18
@@ -116,7 +121,7 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
         const span = (last.pts - first.pts) / 90000;
         const localRate = span > 1 ? (last.packetOffset - first.packetOffset) / span : rate;
         if (!(localRate > rate / 8 && localRate < rate * 8)) return { ...result, reason: 'rate-unverified' };
-        predicted = align(first.packetOffset + (absoluteSeconds - 12 - first.pts / 90000) * localRate);
+        predicted = align(first.packetOffset + (absoluteSeconds - 24 - first.pts / 90000) * localRate);
     }
     return { ...result, reason: 'point-not-found' };
 }
