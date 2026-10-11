@@ -16685,8 +16685,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         freshResumeScope: session,
         captureRecentSamples: canUseRecentResumeSamples(session.ownerKey),
         finiteWindowBytes: effectiveWindowBytes,
-        finiteSeekLookbehindBytes: finiteTs
-            ? (canUseRecentResumeSamples(session.ownerKey) ? 64 : 256) * 1024 : 0,
+        finiteSeekLookbehindBytes: finiteTs ? 256 * 1024 : 0,
         finiteSeekContinuationGraceMs: finiteTs || finiteMp4 ? 50 : 0,
         // MP4 demuxers may parse cached packets for 100–350 ms before
         // closing that local range. Use the existing bounded initial grace
@@ -16699,7 +16698,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         finiteInitialSequentialWindowBytes: growMkvSequential ? effectiveWindowBytes : 0,
         finiteSequentialGrowthBytes: growMkvSequential ? 2 * effectiveWindowBytes : 0,
         finiteFirstWindowBytes: finiteMp4 ? 1024 * 1024
-            : finiteTs && canUseRecentResumeSamples(session.ownerKey) ? 64 * 1024 : 0,
+            : finiteTs && canUseRecentResumeSamples(session.ownerKey) ? 256 * 1024 : 0,
         finiteAtomicWindowBytes: finiteMp4 ? 1024 * 1024 : 0,
         finiteYieldToNewRange: finiteMp4 && canUseRecentResumeSamples(session.ownerKey),
         finiteCacheAbandonedPrefix: finiteMp4,
@@ -16733,7 +16732,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
     session.startupTimings.finiteMkvSeekProviderFetches = 0;
     session.startupTimings.finiteMkvCurrentPrefixBytes = broker.currentPrefixBytes;
     session.startupTimings.finiteMkvSeekWindowBytes = effectiveWindowBytes;
-    session.startupTimings.finiteTsSeekLookbehindBytes = finiteTs ? broker.seekLookbehindBytes : 0;
+    session.startupTimings.finiteTsSeekLookbehindBytes = finiteTs ? 256 * 1024 : 0;
     session.startupTimings.finiteTsSeekContinuationGraceMs = finiteTs ? 50 : 0;
     session.startupTimings.finiteTsAbandonedDrainMs = finiteTs ? 1500 : 0;
     session.startupTimings.finiteMp4AbandonedDrainMs = finiteMp4 ? 1500 : 0;
