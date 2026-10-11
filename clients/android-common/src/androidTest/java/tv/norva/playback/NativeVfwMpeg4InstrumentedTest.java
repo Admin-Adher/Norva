@@ -130,6 +130,16 @@ public final class NativeVfwMpeg4InstrumentedTest {
             }
             // Exercise the platform Back dispatch, including TV's key handler.
             // Calling deprecated Activity.onBackPressed bypasses that handler.
+            // Decoder callbacks can precede focus restoration after returning
+            // from the launcher. Dispatch Back only to the focused player.
+            boolean[] focused={false};
+            long focusDeadline=SystemClock.elapsedRealtime()+5000;
+            while(SystemClock.elapsedRealtime()<focusDeadline){
+                ins.runOnMainSync(()->focused[0]=opened.hasWindowFocus());
+                if(focused[0])break;
+                SystemClock.sleep(50);
+            }
+            assertTrue("Foreground player must own focus before Back",focused[0]);
             ins.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
             long backDeadline=SystemClock.elapsedRealtime()+3000;
             while(!activity.isFinishing()&&!activity.isDestroyed()&&SystemClock.elapsedRealtime()<backDeadline)SystemClock.sleep(50);
