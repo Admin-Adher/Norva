@@ -327,7 +327,7 @@ test('Watch freezes episode identity before every serialized subtitle or audio l
   );
   assert.ok(
     subtitleRestart.indexOf('const playbackIdentity =')
-      < subtitleRestart.indexOf('await this.releasePlaybackPipelineForRetry();'),
+      < subtitleRestart.indexOf('await this.releasePlaybackPipelineForRetry({ strict: true });'),
     'subtitle restart must capture identity before releasing the old lane',
   );
   assert.match(subtitleRestart, /getStreamUrl\(\s*playbackIdentity\.sourceId,\s*playbackIdentity\.itemId,\s*itemType,/);

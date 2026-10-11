@@ -1,5 +1,30 @@
 /* Shared by Node and the Android WebView runtime gate. No network or provider. */
 async function verifyGatewayLateRecovery(WatchPage, Hls, tick) {
+    // WebView must join an ongoing close even once the outgoing session ID is
+    // gone locally. Neither resolver may run before transport expiry settles.
+    for (const fail of [false, true]) {
+        const page = Object.create(WatchPage.prototype);
+        let finish, calls = 0;
+        const closed = new Promise(resolve => { finish = resolve; });
+        Object.assign(page, {
+            cancelPendingHlsAudioSwitch() {}, stopTranscodeSession: async () => {},
+            async stopCloudPlaybackSessions({ strict }) {
+                if (!strict) throw Error('seek close lost strictness');
+                calls++;
+                if (calls === 1) { await closed; if (fail) throw Error('fixture close failure'); }
+                return { confirmedCloudClose: true, closedCloudSessions: 1 };
+            },
+        });
+        const outcomes = [];
+        const first = page.releasePlaybackPipelineForRetry({ strict: true }).then(() => outcomes.push('ready'), () => outcomes.push('failed'));
+        const second = page.releasePlaybackPipelineForRetry({ strict: true }).then(() => outcomes.push('ready'), () => outcomes.push('failed'));
+        await tick();
+        if (calls !== 1 || outcomes.length) throw Error('new cleanup escaped the provider barrier');
+        finish(); await Promise.all([first, second]);
+        if (outcomes.some(value => value !== (fail ? 'failed' : 'ready')) || page._playbackPipelineReleasePromise !== null) {
+            throw Error('expiry failure or settled barrier was lost');
+        }
+    }
     // Recommencer from an evicted position replaces the Gateway graph. The
     // button expresses Play intent; it must not bypass the new graph's gate.
     for (const paused of [false, true]) for (const outcome of ['ready', 'paused', 'stale', 'failed']) {
