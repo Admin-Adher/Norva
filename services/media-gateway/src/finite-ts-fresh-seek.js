@@ -33,6 +33,12 @@ class TsSeekHints {
                 if (!entry || store.now() < entry.at || store.now() - entry.at > 600000) return null;
                 const nearest = entry.clocks.reduce((a, b) => !a || Math.abs(b.pts / 90000 - absoluteSeconds)
                     < Math.abs(a.pts / 90000 - absoluteSeconds) ? b : a, null);
+                const nearby = nearest && entry.clocks.filter(c => c.signature === nearest.signature
+                    && Math.abs(c.packetOffset - nearest.packetOffset) < WINDOW
+                    && Math.abs(c.pts - nearest.pts) >= 180000 && Math.abs(c.pts - nearest.pts) < 1800000)
+                    .sort((a, b) => Math.abs(a.pts - nearest.pts) - Math.abs(b.pts - nearest.pts))[0];
+                const localRate = nearby && (nearby.packetOffset - nearest.packetOffset) / ((nearby.pts - nearest.pts) / 90000);
+                if (localRate > bytesPerSecond / 8 && localRate < bytesPerSecond * 8) bytesPerSecond = localRate;
                 return nearest ? align(nearest.packetOffset + (absoluteSeconds - nearest.pts / 90000) * bytesPerSecond) : null;
             },
         };
@@ -78,7 +84,7 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
     // The tail must confirm that the dated duration and fresh origin describe
     // this response's clock. No timestamp wrap or unrelated delivery timeline
     // may turn a byte estimate into an authorized seek.
-    const tail = await acquire(align(fileSizeBytes - HEADER), HEADER + PACKET);
+    const tail = await acquire(align(fileSizeBytes - 65536), 65536 + PACKET);
     const last = tail?.video.at(-1);
     if (!last || last.pid !== origin.videoPid || last.signature !== signature
         || Math.abs(last.pts / 90000 - origin.startSeconds - durationSeconds) > 2)
@@ -88,11 +94,14 @@ async function findFreshTsSeek({ read, fileSizeBytes, durationSeconds, seconds, 
         ?? align((seconds - 12) * rate);
     for (let attempt = 0; attempt < 2; attempt++) {
         if (now() - began >= maxMs) return { ...result, reason: 'budget' };
-        const start = align(Math.min(fileSizeBytes - WINDOW, Math.max(HEADER, predicted)));
-        const scan = await acquire(start, WINDOW);
+        const length = attempt === 0 ? 512 * 1024 : 1536 * 1024;
+        const start = align(Math.min(fileSizeBytes - length, Math.max(HEADER, predicted)));
+        const scan = await acquire(start, length);
         if (!scan || scan.video.some(c => c.pid !== origin.videoPid || c.signature !== signature)
             || scan.audio.some(c => c.pid !== origin.audioPid || c.signature !== signature))
             return { ...result, reason: 'graph-or-clock-unverified' };
+        result.scan = { points: scan.points.length, videoStart: scan.video[0].pts / 90000 - absoluteSeconds,
+            videoEnd: scan.video.at(-1).pts / 90000 - absoluteSeconds, audio: scan.audio.length };
         const point = scan.points.filter(p => p.signature === signature && p.videoPid === origin.videoPid
             && p.audioPid === origin.audioPid && absoluteSeconds - p.pts / 90000 >= 2
             && absoluteSeconds - p.pts / 90000 <= 18

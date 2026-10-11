@@ -912,6 +912,28 @@ test('finite MP4 seek fetches only the gap before a complete cached suffix', asy
   assert.equal(broker.interruptedProviderFetches,0);
 });
 
+test('internal TS navigation samples complete exactly once and ordinary reads retain lookbehind', { timeout: 8000 }, async t => {
+  const data = Buffer.from(Array.from({ length: 4 * 1024 * 1024 }, (_, i) => i % 251)), calls = [];
+  let navigating = true;
+  const provider = http.createServer((req, res) => { calls.push(req.headers.range); sendExactRange(req, res, data); });
+  const sourceUrl = await listen(provider); t.after(() => closeServer(provider));
+  const broker = await brokerHarness().createStrictLidBroker({ sourceUrl, fileSizeBytes: data.length,
+    pathPrefix: 'finite-mkv-seek', dispatcher: null, finiteWindowBytes: 1048576,
+    finiteFirstWindowBytes: 262144, finiteSeekLookbehindBytes: 262144, finiteNavigationWindow: () => navigating,
+    finiteCacheBytes: data.length, releaseDelayMs: 0 });
+  t.after(() => broker.close());
+  const start = 500000, end = start + 1572864 - 1;
+  const r = await fetch(broker.inputUrl, { headers: { Range: `bytes=${start}-${end}` } });
+  assert.equal(r.headers.get('content-range'), `bytes ${start}-${end}/${data.length}`);
+  assert.deepEqual(Buffer.from(await r.arrayBuffer()), data.subarray(start, end + 1));
+  assert.deepEqual(calls, [`bytes=${start}-${end}`]);
+  navigating = false;
+  const normal = await fetch(broker.inputUrl, { headers: { Range: 'bytes=3000000-3032767' } });
+  assert.deepEqual(Buffer.from(await normal.arrayBuffer()), data.subarray(3000000, 3032768));
+  assert.equal(calls[1], 'bytes=2737856-3032767');
+  assert.equal(broker.interruptedProviderFetches, 0);
+});
+
 for (const warmup of [0, 16]) test(`finite TS lookbehind returns only requested bytes with warmup ${warmup}`, { timeout: 8000 }, async (t) => {
   const data = Buffer.from(Array.from({ length: 128 }, (_, i) => i));
   const calls = [];

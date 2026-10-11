@@ -6404,6 +6404,8 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                 }
             }
             if (finiteSeek && !finiteWindowRange) {
+                const navigationWindow = context.finiteNavigationWindow?.() === true
+                    && range.end - range.start + 1 <= 2 * 1024 * 1024;
                 finiteWindowIsWarmup = (
                     context.finiteWarmupWindowBytes > 0
                     && !context.finiteWarmupWindowConsumed
@@ -6434,6 +6436,10 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                     // only its missing tail instead of redownloading the prefix.
                     alignToWindowEnd: !boundedTail && context.finiteAlignFirstWindow && regularProviderWindowsCompleted === 0,
                 });
+                // The internal TS navigator requested an exact bounded sample.
+                // Complete it in one response; libav's ordinary reads retain
+                // their existing first slice, lookbehind and growth policy.
+                if (navigationWindow) finiteWindowRange = { start: range.start + forwarded, end: range.end, total: range.total };
                 // Finish the complete metadata response before speculatively
                 // entering media bytes. Chromium may abandon that continuation
                 // for its resume cue; a complete moov window remains reusable.
@@ -6481,7 +6487,7 @@ async function serveStrictLidBrokerRange(context, req, res, range, requestId) {
                         // A tail cue can be queued while the header warmup is
                         // still running. It still needs its bounded preceding
                         // packets; the warmup flag must not remove that slice.
-                        forwarded === 0 ? context.finiteSeekLookbehindBytes : 0
+                        forwarded === 0 && !navigationWindow ? context.finiteSeekLookbehindBytes : 0
                     )),
                 };
                 finiteBufferedBytes = 0;
@@ -7524,6 +7530,8 @@ async function createStrictLidBroker(options = {}) {
         onFiniteResumePrefix,
         onFiniteWindow: pathPrefix === 'finite-mkv-seek' && typeof options.onFiniteWindow === 'function'
             ? options.onFiniteWindow : null,
+        finiteNavigationWindow: pathPrefix === 'finite-mkv-seek' && typeof options.finiteNavigationWindow === 'function'
+            ? options.finiteNavigationWindow : null,
         finiteWindowTrace: [],
         finiteQueuedRequests: 0,
         finiteMaxQueuedRequests: 0,
@@ -16717,6 +16725,7 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         onFiniteWindow: tsObserver || tsHints ? window => {
             tsObserver?.observe(window); tsHints?.observe(window);
         } : null,
+        finiteNavigationWindow: tsHints ? () => session.finiteTsNavigationSampling === true : null,
         onFiniteResumePrefix: !finiteMkv ? null : (prefix) => finiteMkvResumePrefixCache.put({
             sourceUrl: session.sourceUrl,
             ...prefix,
@@ -16773,7 +16782,9 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
         && session.multiAudioHls?.enabled !== true && session.exactSubtitleHls?.enabled !== true
         && !session.forceFullInputProbe && !session.finiteTsIndexPlan && tsHints) {
         const began = Date.now();
-        const fresh = await findFreshTsSeek({ fileSizeBytes, seconds: Number(session.seekOffset),
+        session.finiteTsNavigationSampling = true;
+        let fresh;
+        try { fresh = await findFreshTsSeek({ fileSizeBytes, seconds: Number(session.seekOffset),
             durationSeconds: Number(session.codecProfile.durationSeconds ?? session.codecProfile.duration_seconds
                 ?? session.codecProfile.duration), hints: tsHints, signal: parentSignal,
             read: async (start, end) => {
@@ -16782,13 +16793,14 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null) {
                 const bytes = Buffer.from(await response.arrayBuffer());
                 if (broker.terminalError) throw broker.terminalError;
                 return response.status === 206 ? bytes : null;
-            } });
+            } }); } finally { session.finiteTsNavigationSampling = false; }
         const inputUrl = fresh.point ? indexedTsInputUrl(broker.inputUrl, fresh.point, fileSizeBytes) : null;
         if (inputUrl) session.finiteTsIndexPlan = { ...fresh.point, inputUrl };
         session.startupTimings.finiteTsFreshSearchMs = Date.now() - began;
         session.startupTimings.finiteTsFreshSearchReason = fresh.reason;
         session.startupTimings.finiteTsFreshSearchReads = fresh.reads;
         session.startupTimings.finiteTsFreshSearchBytes = fresh.bytes;
+        session.startupTimings.finiteTsFreshSearchScan = fresh.scan || null;
     }
     session.startupTimings.finiteTsIndexUsed = Boolean(session.finiteTsIndexPlan);
     session.startupTimings.finiteTsIndexPrerollSeconds = session.finiteTsIndexPlan
