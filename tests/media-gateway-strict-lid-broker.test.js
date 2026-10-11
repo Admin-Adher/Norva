@@ -178,6 +178,53 @@ test('a drained rejected-cache header continues on the same current target, neve
   }finally{await next?.close();await new Promise(resolve=>server.close(resolve));}
 });
 
+for (const changed of [false, true]) test(`same-claim 509 renews a delivery path only after fresh content proof: changed=${changed}`, async t => {
+  const {validateRecentResume,recentResumeTargetEligible}=require('../services/media-gateway/src/recent-resume-validation');
+  const {retainRecentDeliveryTarget}=require('../services/media-gateway/src/recent-delivery-target');
+  const {PrivateResumeHlsCache}=require('../services/media-gateway/src/private-resume-hls-cache');
+  const {privateResumeBinding}=require('../services/media-gateway/src/private-resume-binding');
+  const {Agent}=require('undici'),crypto=require('node:crypto');
+  const N=65536,size=100*N,owner='e'.repeat(64),scope={id:'same-claim'},routeKey=`path-renewal-${changed}`;
+  let active=0,maxActive=0,refusals=0,redirects=0,opens=0,identity;
+  const server=http.createServer((req,res)=>{
+    if(req.url==='/entry'){redirects++;res.writeHead(302,{Location:'/signed/new'});res.end();return;}
+    active++;maxActive=Math.max(maxActive,active);res.once('finish',()=>active--);
+    if(req.url==='/signed/old'){refusals++;res.writeHead(509,{'Content-Length':0});res.end();return;}
+    const [start,end]=req.headers.range.slice(6).split('-').map(Number);
+    const bytes=Buffer.alloc(end-start+1,start===0?1:Math.floor(start/N));
+    if(changed && start===40*N)bytes[10]++;
+    res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${size}`,'Content-Length':bytes.length});res.end(bytes);
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+  const origin=`http://127.0.0.1:${server.address().port}`,sourceUrl=origin+'/entry',oldUrl=origin+'/signed/old',h=brokerHarness();
+  const target=h.strictLidEffectiveUrlIdentitySha256(oldUrl), samples=[0,20*N,40*N,60*N].map(start=>({start,payload:Buffer.alloc(N,start===0?1:Math.floor(start/N))}));
+  const binding=privateResumeBinding({ownerKey:owner,sourceUrl,sourceId:'source',sourceRevision:'1',vodIdentityKey:'a'.repeat(64),fileSizeBytes:size,profile:'av=1'});
+  const cache=new PrivateResumeHlsCache({recentRevalidation:true,allowDeliveryPathRenewal:true});
+  const observed={fileSizeBytes:size,effectiveUrlIdentitySha256:target,samples,
+    targetParts:require('../services/media-gateway/src/recent-resume-validation').recentResumeTargetParts(oldUrl),
+    deliveryTarget:retainRecentDeliveryTarget({ownerKey:owner,routeKey,sourceUrl,userAgent:'Norva-LID-Test/1',fileSizeBytes:size,targetUrl:oldUrl,targetIdentity:target,targetHash:crypto.createHash('sha256').update(oldUrl).digest('hex')})};
+  assert.equal(await cache.capture({binding,observed,position:10,actualStartOffset:0,
+    playlist:'#EXTM3U\n#EXT-X-INDEPENDENT-SEGMENTS\n'+Array.from({length:20},(_,i)=>`#EXTINF:4,\nseg-${i}.ts\n`).join(''),
+    inputWindows:[{start:0,payload:samples[0].payload}],readAsset:async()=>Buffer.alloc(188,0x47)}),true);
+  const plan=cache.revalidationPlan(binding,10);
+  const fresh=await validateRecentResume({plan,renewRefusedDelivery:true,
+    acceptIdentity:()=>recentResumeTargetEligible(plan,identity),
+    createBroker:async(signal,{freshSource})=>{
+      if(opens)assert.equal(active,0,'the refused provider response must drain first');opens++;
+      return h.createStrictLidBroker({sourceUrl,fileSizeBytes:size,recentDeliveryTarget:freshSource?null:plan.deliveryTarget,
+        recentDeliveryOwner:owner,recentDeliveryRoute:routeKey,freshResumeScope:scope,recentValidationKeepAlive:true,
+        dispatcherFactory:()=>new Agent({connections:1,pipelining:1}),onProviderIdentity:current=>identity=current,
+        abortSignal:signal,completedReleaseDelayMs:0});
+    }});
+  assert.equal(fresh.length,4); assert.equal(refusals,1);assert.equal(redirects,1);assert.equal(opens,2);
+  assert.equal(active,0);assert.equal(maxActive,1);assert.equal(h.strictLidBrokers.size,0);
+  assert.notEqual(identity.effectiveUrlIdentitySha256,target);
+  const lease=cache.acquire(binding,10,{...identity,fileSizeBytes:size,samples:fresh});
+  if(changed)assert.equal(lease,null);
+  else {assert.ok(lease);assert.equal(lease.inputSnapshot().target,identity.effectiveUrlIdentitySha256);lease.release();}
+});
+
 function brokerHarness(diagnosticLogs = null) {
   const startMarker = '// ── Strict LID loopback broker (mono-account provider barrier)';
   const endMarker = '// ── End strict LID loopback broker';

@@ -21,12 +21,24 @@ function compareRecentResumeTargetParts(previous, current) {
     return Object.fromEntries(keys.map(key => [key, previous[key] === current[key]]));
 }
 
+// This is permission to finish the fresh checks, not to use cached bytes.
+// The cache still requires its exact private binding, original short TTL,
+// exact range totals and all four matching digests. Never renew another host,
+// scheme or query shape; pin the newly resolved URL for this entire broker.
+function recentResumeTargetEligible(plan, identity) {
+    if (!plan?.target) return true;
+    if (identity?.effectiveUrlIdentitySha256 === plan.target) return true;
+    const comparison = compareRecentResumeTargetParts(plan.targetParts, identity?.targetParts);
+    return plan.allowDeliveryPathRenewal === true && comparison?.protocol === true
+        && comparison.host === true && comparison.queryKeys === true && comparison.path === false;
+}
+
 // The caller owns the ordinary playback claim. A separate uncached broker
 // prevents an old byte-range cache from validating itself. No retry or route
 // rotation; close/drain must finish before normal playback can take over.
 async function validateRecentResume({ plan, createBroker, signal, budgetMs = 8000, fetchImpl = fetch,
     acceptIdentity = () => true, onIdentityRejected = () => {}, onFreshRejectedHeader = () => {}, onFreshValidatedHeader = () => {},
-    onSample = () => {}, onUnavailable = () => {} }) {
+    onSample = () => {}, onUnavailable = () => {}, renewRefusedDelivery = false, onDeliveryRefused = () => {} }) {
     if (!plan || plan.kind !== 'sampled-recent-v1' || plan.ranges?.length !== 4
         || plan.ranges.some(r => !Number.isSafeInteger(r.start) || r.start < 0 || r.length !== SAMPLE_BYTES)) return null;
     const controller = new AbortController();
@@ -45,13 +57,29 @@ async function validateRecentResume({ plan, createBroker, signal, budgetMs = 800
     };
     try {
         if (controller.signal.aborted) return null;
-        broker = await createBroker(controller.signal);
+        broker = await createBroker(controller.signal, { freshSource: false });
         const samples = [];
         for (const range of plan.ranges) {
             if (controller.signal.aborted) return null;
             const startedAt = Date.now();
-            const response = await fetchImpl(broker.inputUrl, { signal: controller.signal,
+            let response = await fetchImpl(broker.inputUrl, { signal: controller.signal,
                 headers: { Range: `bytes=${range.start}-${range.start + range.length - 1}` } });
+            // A retained delivery capability can expire independently of the
+            // owned file. One confirmed 509 permits a fresh opening on the SAME
+            // route and claim, only after drain. No concurrent reader, retry of
+            // the refused URL, extra budget, or authorization of old media.
+            if (renewRefusedDelivery === true && samples.length === 0 && range.start === 0
+                && response.status !== 206 && broker.recentDeliveryTargetUsed === true
+                && broker.terminalError?.upstreamStatus === 509) {
+                await response.body?.cancel();
+                await broker.close();
+                broker = null;
+                onDeliveryRefused({ upstreamStatus: 509, drained: true });
+                if (controller.signal.aborted) return null;
+                broker = await createBroker(controller.signal, { freshSource: true });
+                response = await fetchImpl(broker.inputUrl, { signal: controller.signal,
+                    headers: { Range: `bytes=${range.start}-${range.start + range.length - 1}` } });
+            }
             if (response.status !== 206) { await response.body?.cancel();
                 unavailable({ kind: 'response', status: response.status, completedSamples: samples.length }); return null; }
             const payload = Buffer.from(await response.arrayBuffer());
@@ -85,4 +113,4 @@ async function validateRecentResume({ plan, createBroker, signal, budgetMs = 800
         }
     }
 }
-module.exports = { validateRecentResume, recentResumeTargetParts, compareRecentResumeTargetParts };
+module.exports = { validateRecentResume, recentResumeTargetParts, compareRecentResumeTargetParts, recentResumeTargetEligible };
