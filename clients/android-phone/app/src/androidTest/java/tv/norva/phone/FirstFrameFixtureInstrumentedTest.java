@@ -202,6 +202,26 @@ public final class FirstFrameFixtureInstrumentedTest {
                     PlayerActivity.EXTRA_FIRST_FRAME_TEST_CONTRACT_OK, false));
             final PlayerActivity openedPlayer = (PlayerActivity) activityRef.get();
             assertNotNull(openedPlayer);
+            if (!"channel".equals(itemType)) {
+                // A real first-frame callback can precede READY. The cache
+                // deliberately requires both; do not assert that clock while
+                // Media3 is still completing its initial buffer admission.
+                java.lang.reflect.Field field = PlayerActivity.class.getDeclaredField("player");
+                field.setAccessible(true);
+                androidx.media3.exoplayer.ExoPlayer decodedPlayer =
+                        (androidx.media3.exoplayer.ExoPlayer) field.get(openedPlayer);
+                int[] playbackState = {androidx.media3.common.Player.STATE_IDLE};
+                long readyDeadline = SystemClock.elapsedRealtime() + 5_000;
+                do {
+                    instrumentation.runOnMainSync(() -> playbackState[0] = decodedPlayer.getPlaybackState());
+                    if (playbackState[0] == androidx.media3.common.Player.STATE_READY
+                            || playbackState[0] == androidx.media3.common.Player.STATE_ENDED) break;
+                    SystemClock.sleep(20);
+                } while (SystemClock.elapsedRealtime() < readyDeadline);
+                assertTrue("The rendered fixture must also finish buffer admission",
+                        playbackState[0] == androidx.media3.common.Player.STATE_READY
+                                || playbackState[0] == androidx.media3.common.Player.STATE_ENDED);
+            }
             instrumentation.runOnMainSync(() -> {
                 long renderedPosition = openedPlayer.nativeResumePositionMs();
                 if ("channel".equals(itemType)) assertEquals("Live has no finite resume archive", -1L, renderedPosition);
