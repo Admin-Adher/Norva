@@ -16913,7 +16913,11 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null, { deferT
         finiteFirstWindowBytes: finiteMp4 ? 1024 * 1024
             : finiteTs && canUseRecentResumeSamples(session.ownerKey) ? 256 * 1024 : 0,
         finiteAtomicWindowBytes: finiteMp4 ? 1024 * 1024 : 0,
-        finiteYieldToNewRange: finiteMp4 && canUseRecentResumeSamples(session.ownerKey),
+        // Matroska's cue lookup can leave its header reader open while a
+        // distant playback range is queued. Yield that obsolete provider
+        // window without closing the declared local range, just as for MP4.
+        // Overlapping/atomic work and file-identity checks stay unchanged.
+        finiteYieldToNewRange: (finiteMp4 || finiteMkv) && canUseRecentResumeSamples(session.ownerKey),
         finiteCacheAbandonedPrefix: finiteMp4,
         finiteCacheBytes: FINITE_MKV_SEEK_CACHE_BYTES,
         finiteResumePrefixTargetBytes: finiteTs ? 0 : Math.min(effectiveWindowBytes, INBAND_HEADER_BYTES),

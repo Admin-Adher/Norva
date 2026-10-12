@@ -4010,6 +4010,8 @@ for (const [finiteTs, grow, multi = false] of [[false, false], [true, false], [f
     assert.equal(brokerOptions.finiteSeekLookbehindBytes, finiteTs ? 256 * 1024 : 0);
     assert.equal(brokerOptions.finiteSeekContinuationGraceMs, finiteTs ? 50 : 0);
     assert.equal(brokerOptions.finiteAbandonedDrainMs, finiteTs ? 1500 : 0);
+    assert.equal(brokerOptions.finiteYieldToNewRange, !finiteTs && multi,
+        'the eligible MKV continuation yields a distant cue through the same pinned broker; disabled owners and TS retain their policy');
     assert.equal(brokerOptions.finiteWarmupCueGraceMs, finiteTs ? 0 : 50);
     assert.equal(brokerOptions.finiteWarmupWindowBytes, 256 * 1024);
     assert.equal(brokerOptions.finiteSequentialWindowBytes, (grow ? 8 : 2) * 1024 * 1024);
