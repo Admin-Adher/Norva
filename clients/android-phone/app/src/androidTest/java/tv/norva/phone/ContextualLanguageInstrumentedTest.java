@@ -25,6 +25,7 @@ public class ContextualLanguageInstrumentedTest {
     }
 
     private static void tapSearch(android.app.Instrumentation instrumentation, WebView view, String kind) throws Exception {
+        android.app.UiAutomation automation = TouchTestSupport.prepare(instrumentation, view);
         // Use the rendered DOM bounds and a real touch event, as on a phone.
         org.json.JSONArray rect = new org.json.JSONArray(evaluate(instrumentation, view,
             "(()=>{const r=document.getElementById('"+kind+"-category-search').getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2,r.width,r.height,devicePixelRatio,innerWidth,innerHeight];})()"));
@@ -35,19 +36,7 @@ public class ContextualLanguageInstrumentedTest {
         instrumentation.runOnMainSync(() -> view.getLocationOnScreen(offset));
         float x=(float)(rect.getDouble(0)*rect.getDouble(4)+offset[0]);
         float y=(float)(rect.getDouble(1)*rect.getDouble(4)+offset[1]);
-        long down=android.os.SystemClock.uptimeMillis();
-        for(int action:new int[]{android.view.MotionEvent.ACTION_DOWN,android.view.MotionEvent.ACTION_UP}) {
-            android.view.MotionEvent event=android.view.MotionEvent.obtain(down,android.os.SystemClock.uptimeMillis(),action,x,y,0);
-            event.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
-            try {
-                // The IME is a different UID and can take the window between
-                // DOWN and UP. Inject through the system automation connection,
-                // then keep the focus/IME assertions below as the outcome gate.
-                assertTrue("Search touch delivered", instrumentation.getUiAutomation()
-                        .injectInputEvent(event, true));
-            } finally { event.recycle(); }
-            if(action==android.view.MotionEvent.ACTION_DOWN)Thread.sleep(40);
-        }
+        TouchTestSupport.tap(automation, x, y);
     }
 
     private static void captureMissingKeyboard(android.app.Instrumentation instrumentation,
