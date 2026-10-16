@@ -411,6 +411,7 @@
         const nativeLiveIntentByOwner = new WeakMap();
         const nativeLiveCleanupByOwner = new WeakMap();
         const nativePlaybackCloseTasks = new Map();
+        const nativePlaybackClosePositions = new Map();
         const completedNativePlaybackCloses = new Set();
         const NATIVE_PLAYBACK_CLOSE_COMPLETED_MAX = 64;
         const NATIVE_PLAYBACK_CLOSE_TIMEOUT_MS = 12_000;
@@ -477,6 +478,7 @@
             try {
                 const result = await expireSession(sessionId, {
                     keepalive: true,
+                    ...(nativePlaybackClosePositions.has(sessionId) ? {resumePosition:nativePlaybackClosePositions.get(sessionId)} : {}),
                     ...(controller ? { signal: controller.signal } : {})
                 });
                 const returnedSessionId = boundedNativePlaybackSessionId(result?.session?.id);
@@ -513,6 +515,7 @@
                 () => {
                     if (nativePlaybackCloseTasks.get(sessionId) === cleanup) {
                         nativePlaybackCloseTasks.delete(sessionId);
+                        nativePlaybackClosePositions.delete(sessionId);
                         rememberCompletedNativePlaybackClose(sessionId);
                         acknowledgeNativePlaybackClose(sessionId);
                     }
@@ -667,9 +670,14 @@
             }
             return sessionId;
         };
-        window.__norvaNative.onPlaybackClosed = (rawSessionId, _reason = '') => {
+        window.__norvaNative.onPlaybackClosed = (rawSessionId, _reason = '', resumePosition) => {
             const sessionId = boundedNativePlaybackSessionId(rawSessionId);
             if (!sessionId) return 'not_ready';
+            if(Number.isFinite(resumePosition) && resumePosition>0 && resumePosition<86400
+                && !completedNativePlaybackCloses.has(sessionId) && !nativePlaybackCloseTasks.has(sessionId)) {
+                nativePlaybackClosePositions.set(sessionId,resumePosition);
+                while(nativePlaybackClosePositions.size>64)nativePlaybackClosePositions.delete(nativePlaybackClosePositions.keys().next().value);
+            }
             const liveClaim = nativeLiveSessionClaims.get(sessionId);
             if (liveClaim) abortNativeLivePreparation(liveClaim.claim);
             // A close can arrive while its replacement URL is resolving, after

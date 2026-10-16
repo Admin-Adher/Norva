@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
-const { NativePlayerController,playbackRequest } = require('../desktop/native-player-controller');
+const { NativePlayerController,playbackRequest,renderedPosition } = require('../desktop/native-player-controller');
 const request={sessionId:'12345678-1234-4234-8234-123456789abc',url:'https://example.test/movie/file.mkv',title:'Film',resumeSeconds:42,sourceId:'owned',itemId:'file',itemType:'movie'};
 function fixture(){
     const child=new EventEmitter(); for(const key of ['stdin','stdout','stderr'])child[key]=new PassThrough();
@@ -14,6 +14,20 @@ function fixture(){
     const events=[];controller.on('event',e=>events.push(e));
     return{controller,child,writes,calls,events,event:e=>child.stdout.write(JSON.stringify(e)+'\n')};
 }
+test('the native controller retains the exact rendered stop clock until cloud close is acknowledged',async()=>{
+    const h=fixture();await h.controller.open({...request,itemType:'episode'});
+    h.event({type:'progress',sessionId:request.sessionId,positionSeconds:82.125,durationSeconds:1000,decodedVideo:20});
+    h.child.emit('exit',0);await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(h.events.at(-1).resumePosition,82.125);
+    assert.deepEqual(h.controller.pendingCloses(),[request.sessionId],'protocol 1 callers still receive UUIDs');
+    assert.deepEqual(h.controller.pendingCloseDetails(),[{sessionId:request.sessionId,reason:'player_exited',resumePosition:82.125}]);
+    h.controller.acknowledge(request.sessionId);assert.deepEqual(h.controller.pendingCloses(),[]);
+    assert.deepEqual(h.controller.pendingCloseDetails(),[]);
+    const event={itemType:'movie',positionSeconds:12,savedAtMs:20000,displayedPictures:1};
+    assert.equal(renderedPosition(event,20000),12);
+    for(const patch of [{positionSeconds:NaN},{positionSeconds:86400},{savedAtMs:9999},{savedAtMs:20001},{displayedPictures:0},{itemType:'channel'}])
+        assert.equal(renderedPosition({...event,...patch},20000),undefined);
+});
 for(const url of ['file:///c:/private','javascript:run()','\\\\server\\file','http://example.test/video\n:option','https://example.test/file#option'])test(`reject native input ${url.split(':')[0]}`,()=>{
     assert.throws(()=>playbackRequest({...request,url}),/INVALID_NATIVE_URL/);
 });

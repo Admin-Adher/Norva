@@ -166,7 +166,8 @@ test('MKV and TS resumes keep an unavailable candidate unleased and retain norma
         const run = vm.runInNewContext('(' + source.slice(start, end) + ')', {
             Date, Number, canUseStartupCache: () => true, canUseRecentResumeSamples: () => true,
             privateResumeHlsBindingForSession: () => binding, privateResumeFormat: () => format,
-            privateResumeHlsCache: { hasCandidate: () => true, revalidationPlan: () => ({ kind: 'sampled-recent-v1' }),
+            privateResumeDuration:()=>1000,
+            privateResumePersistence: { restore:async()=>false,hasCandidate: () => true, revalidationPlan: () => ({ kind: 'sampled-recent-v1' }),
                 acquire: () => { calls.push('invalidate'); return null; } },
             revalidateRecentResumeSession: async () => {
                 calls.push('fresh-drained');

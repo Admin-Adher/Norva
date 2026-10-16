@@ -227,6 +227,7 @@ public class PlayerActivity extends Activity {
     private boolean everReady = false;        // direct or fallback reached STATE_READY at least once
     private boolean clarityPlaybackStarted = false;
     private boolean firstFrameRendered = false;
+    private boolean nativeResumeFrameReady = false;
     private long playbackLaunchElapsedMs;
     public static final String EXTRA_MEDIA_CACHE = "mediaCache";
     private tv.norva.playback.NativeMediaCache nativeMediaCache;
@@ -753,6 +754,10 @@ public class PlayerActivity extends Activity {
         try { mediaSession = new MediaSession.Builder(this, player).build(); } catch (Exception ignored) { }
 
         player.addListener(new Player.Listener() {
+            @Override public void onPositionDiscontinuity(Player.PositionInfo oldPosition,
+                    Player.PositionInfo newPosition, int reason) {
+                nativeResumeFrameReady = false;
+            }
             @Override
             public void onPlaybackStateChanged(int state) {
                 spinner.setVisibility(state == Player.STATE_BUFFERING ? View.VISIBLE : View.GONE);
@@ -821,6 +826,7 @@ public class PlayerActivity extends Activity {
 
             @Override
             public void onRenderedFirstFrame() {
+                nativeResumeFrameReady = true;
                 if (!firstFrameRendered) {
                     firstFrameRendered = true;
                     NativeClarity.event("playback_first_frame");
@@ -1074,6 +1080,7 @@ public class PlayerActivity extends Activity {
             NativePlaybackTelemetry.recordHeartbeat(
                     bearer,
                     heartbeatSessionId,
+                    nativeResumePositionMs(),
                     resultCode -> runOnUiThread(new Runnable() {
                         @Override public void run() {
                             if (heartbeatGeneration != playbackHeartbeatGeneration) return;
@@ -1086,6 +1093,12 @@ public class PlayerActivity extends Activity {
         if ("provider_failure".equals(purpose) && reportProviderBusy) {
             NativePlaybackTelemetry.reportProviderBusy(bearer, playbackSessionId);
         }
+    }
+
+    long nativeResumePositionMs() {
+        if(player==null || isLiveContent() || !firstFrameRendered || !nativeResumeFrameReady
+                || (player.getPlaybackState()!=Player.STATE_READY && player.getPlaybackState()!=Player.STATE_ENDED))return -1L;
+        return player.getCurrentPosition();
     }
 
     private void clearPendingPlaybackAuthRequest() {
@@ -4006,6 +4019,8 @@ public class PlayerActivity extends Activity {
                 data.putExtra("itemType", itemType);
                 data.putExtra("itemId", itemId);
                 data.putExtra("positionSeconds", pos);
+                Double nativePosition=NativePlaybackTelemetry.boundedRenderedPosition(nativeResumePositionMs());
+                if(nativePosition!=null)data.putExtra("nativeResumePositionSeconds",nativePosition.doubleValue());
                 data.putExtra("durationSeconds", dur);
                 data.putExtra("ended", endedNaturally);
                 data.putExtra("playNext", playNextChosen);

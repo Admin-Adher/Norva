@@ -8,20 +8,26 @@ const crypto = require('node:crypto');
 // release the source before another lane runs; no full-response deadlock and
 // never two provider requests. Bytes live only within this exact session.
 async function createNativeInput(sourceUrl, { windowBytes = 256 * 1024, timeoutMs = 15000,
+    maxSequentialWindowBytes = windowBytes,
+    streamSequentialWindows = false,
     cacheWindows = Math.min(64, Math.floor(16 * 1024 * 1024 / windowBytes)) } = {}) {
     if (!Number.isSafeInteger(cacheWindows) || cacheWindows < 1 || cacheWindows > 64
         || cacheWindows * windowBytes > 16 * 1024 * 1024) throw Error('NATIVE_INPUT_CACHE_BOUND');
     if (!Number.isSafeInteger(windowBytes) || windowBytes < 1 || windowBytes > 2 * 1024 * 1024) throw Error('NATIVE_INPUT_WINDOW_BOUND');
+    if (!Number.isSafeInteger(maxSequentialWindowBytes) || maxSequentialWindowBytes < windowBytes
+        || maxSequentialWindowBytes > Math.min(2 * 1024 * 1024, cacheWindows * windowBytes)
+        || maxSequentialWindowBytes % windowBytes !== 0) throw Error('NATIVE_INPUT_SEQUENTIAL_BOUND');
     const token = crypto.randomBytes(24).toString('hex');
     let stopped = false, total = null, pending = Promise.resolve(), activeRequest = null;
     let validator = null, changed = false;
+    let lastSourceEnd = null, sequentialReads = 0;
     // Small complete ranges let LibVLC parse headers/index without waiting for
     // an unrelated 2 MiB body. The byte budget stays 16 MiB, within this session.
     const cache = new Map(); // at most 16 MiB; only complete windows in this exact session
     const agents = { 'http:':new http.Agent({keepAlive:true,maxSockets:1}), 'https:':new https.Agent({keepAlive:true,maxSockets:1}) };
     const counters = { sourceRequests:0, maximumConcurrentSourceRequests:0, activeSourceRequests:0, completedBytes:0, cacheHits:0, cachedBytes:0, maximumCachedBytes:0, ranges:[] };
     const drains = new Set();
-    async function requestRange(address, start, end, redirects = 0) {
+    async function requestRange(address, start, end, redirects = 0, onChunk = null) {
         if (stopped) throw Error('NATIVE_INPUT_CLOSED');
         const url = new URL(address);
         if (!agents[url.protocol] || redirects > 4) throw Error('NATIVE_INPUT_REDIRECT');
@@ -61,9 +67,15 @@ async function createNativeInput(sourceUrl, { windowBytes = 256 * 1024, timeoutM
                 response.on('data',chunk=>{
                     firstByteMs ??= Date.now()-began;
                     length+=chunk.length;
-                    if(length>expected || length>windowBytes){fail('NATIVE_INPUT_OVERSIZE');return;}
+                    if(length>expected || length>maxSequentialWindowBytes){fail('NATIVE_INPUT_OVERSIZE');return;}
                     chunks.push(chunk);
                     if(length===expected)payloadCompleteMs=Date.now()-began;
+                    if (onChunk) {
+                        response.pause();
+                        Promise.resolve().then(()=>onChunk(start+length-chunk.length,chunk))
+                            .then(()=>{if(!failure && !stopped)response.resume();})
+                            .catch(()=>fail('NATIVE_INPUT_NETWORK'));
+                    }
                 });
                 response.once('end',()=>{
                     bodyEndMs=Date.now()-began;
@@ -87,10 +99,10 @@ async function createNativeInput(sourceUrl, { windowBytes = 256 * 1024, timeoutM
             drains.add(drain);void drain.then(()=>drains.delete(drain));
             request.once('error',()=>{failure ||= Error('NATIVE_INPUT_NETWORK');});
         });
-        if(result.redirect)return requestRange(result.redirect,start,end,redirects+1);
+        if(result.redirect)return requestRange(result.redirect,start,end,redirects+1,onChunk);
         total=result.total;validator=result.identity;return result;
     }
-    function read(start, isClosed) {
+    function read(start, isClosed, onChunk = null) {
         const operation = pending.catch(()=>{}).then(async()=>{
             if(stopped || isClosed()) throw Error('NATIVE_INPUT_CLOSED');
             if(changed) throw Error('NATIVE_INPUT_CHANGED');
@@ -99,13 +111,26 @@ async function createNativeInput(sourceUrl, { windowBytes = 256 * 1024, timeoutM
             if(existing && start<existing.start+existing.payload.length) {
                 cache.delete(base);cache.set(base,existing);counters.cacheHits++;return existing;
             }
-            const chunk=await requestRange(sourceUrl,base,total===null?base+windowBytes-1:Math.min(total-1,base+windowBytes-1));
+            const contiguous = lastSourceEnd !== null && base === lastSourceEnd + 1;
+            if (!contiguous) sequentialReads = 0;
+            const bytes = contiguous && sequentialReads >= 3 ? maxSequentialWindowBytes : windowBytes;
+            const chunk=await requestRange(sourceUrl,base,total===null?base+bytes-1:Math.min(total-1,base+bytes-1),0,
+                streamSequentialWindows && bytes > windowBytes ? onChunk : null);
             if(stopped)throw Error('NATIVE_INPUT_CLOSED');
-            cache.set(base,chunk);
+            lastSourceEnd = base + chunk.payload.length - 1;
+            sequentialReads++;
+            // Keep complete fixed-size cache entries and the same memory cap.
+            // A distant reader resets the acquisition size; no parallel GET.
+            for (let offset = 0; offset < chunk.payload.length; offset += windowBytes) {
+                const start = base + offset;
+                cache.delete(start);
+                cache.set(start, chunk.payload.length <= windowBytes ? chunk :
+                    {...chunk, start, payload:Buffer.from(chunk.payload.subarray(offset, offset + windowBytes))});
+            }
             while(cache.size>cacheWindows)cache.delete(cache.keys().next().value);
             counters.cachedBytes=[...cache.values()].reduce((sum,value)=>sum+value.payload.length,0);
             counters.maximumCachedBytes=Math.max(counters.maximumCachedBytes,counters.cachedBytes);
-            return chunk;
+            return cache.get(base);
         });
         pending=operation.then(()=>{},()=>{});return operation;
     }
@@ -123,14 +148,25 @@ async function createNativeInput(sourceUrl, { windowBytes = 256 * 1024, timeoutM
             const end=last===null?total-1:Math.min(last,total-1);
             res.writeHead(match?206:200,{'Content-Length':end-at+1,'Accept-Ranges':'bytes','Content-Type':'application/octet-stream','Cache-Control':'no-store',...(match?{'Content-Range':`bytes ${at}-${end}/${total}`}:{})});
             if(req.method==='HEAD'){res.end();return;}
-            while(at<=end&&!closed&&!stopped){
-                chunk=await read(at,()=>closed);
-                const count=Math.min(chunk.start+chunk.payload.length- at,end-at+1);
-                const payload=chunk.payload.subarray(at-chunk.start,at-chunk.start+count);at+=count;
-                if(!res.write(payload))await new Promise(resolve=>{
+            async function write(payload) {
+                if(closed || stopped || res.destroyed)return;
+                if (!res.write(payload)) await new Promise(resolve=>{
                     const done=()=>{res.off('drain',done);res.off('close',done);res.off('error',done);resolve();};
                     res.once('drain',done);res.once('close',done);res.once('error',done);
                 });
+            }
+            while(at<=end&&!closed&&!stopped){
+                chunk=await read(at,()=>closed,async(start,payload)=>{
+                    if(closed || stopped || at>end)return;
+                    const from=Math.max(0,at-start),to=Math.min(payload.length,end-start+1);
+                    if(to<=from)return;
+                    if(start+from!==at)throw Error('NATIVE_INPUT_DISCONTINUITY');
+                    at+=to-from;await write(payload.subarray(from,to));
+                });
+                const count=Math.min(chunk.start+chunk.payload.length- at,end-at+1);
+                if(count<=0)continue;
+                const payload=chunk.payload.subarray(at-chunk.start,at-chunk.start+count);at+=count;
+                await write(payload);
             }
             res.end();
         }catch{if(!res.headersSent)res.writeHead(502).end();else res.destroy();}

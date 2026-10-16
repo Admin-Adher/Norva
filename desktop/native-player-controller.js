@@ -6,6 +6,13 @@ const { createNativeInput } = require('./native-input');
 const { access } = require('node:fs/promises');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function renderedPosition(event, now = Date.now()) {
+    if (!event || !['movie', 'episode', 'series'].includes(event.itemType)
+        || !Number.isFinite(event.positionSeconds) || event.positionSeconds < 0 || event.positionSeconds >= 86400
+        || !(event.decodedVideo > 0 || event.displayedPictures > 0)
+        || !Number.isFinite(event.savedAtMs) || now - event.savedAtMs < 0 || now - event.savedAtMs > 10000) return undefined;
+    return event.positionSeconds;
+}
 function trackPreferences(value) {
     const result = {};
     for (const key of ['audio','subtitle']) {
@@ -108,9 +115,10 @@ class NativePlayerController extends EventEmitter {
                     transport:input.counters || null});
                 if (this.active === state) this.active = null;
                 this.unacknowledged.add(request.sessionId);
-                this.completed.set(request.sessionId,{sourceId:request.sourceId,itemId:request.itemId,itemType:request.itemType,reason:state.reason});
+                const resumePosition = renderedPosition(state.progress);
+                this.completed.set(request.sessionId,{sourceId:request.sourceId,itemId:request.itemId,itemType:request.itemType,reason:state.reason,resumePosition});
                 state.resolveExit();
-                this.emit('event', { type:'closed',sessionId:request.sessionId,reason:state.reason });
+                this.emit('event', { type:'closed',sessionId:request.sessionId,reason:state.reason,resumePosition });
             };
             child.once('exit', exited); child.once('error', exited);
             state.readyTimeout = setTimeout(() => { if (!state.ready) void this.stop(); }, 15000);
@@ -122,6 +130,12 @@ class NativePlayerController extends EventEmitter {
     send(state, value) { if (!state.child.stdin.destroyed) state.child.stdin.write(JSON.stringify(value)+'\n'); }
     authorize(id) { if (this.active?.request.sessionId === id) this.send(this.active, { type:'authorize',sessionId:id }); }
     setFullscreen(enabled) { if (this.active?.ready) this.send(this.active, { type:'fullscreen', enabled:enabled === true }); }
+    pendingCloses() { return [...this.unacknowledged]; }
+    pendingCloseDetails() {
+        return [...this.unacknowledged].map(sessionId => ({sessionId,
+            reason:this.completed.get(sessionId)?.reason || 'player_exited',
+            resumePosition:this.completed.get(sessionId)?.resumePosition}));
+    }
     acknowledge(id) {
         if (!UUID.test(id || '') || !this.unacknowledged.delete(id)) return;
         const ended=this.completed.get(id); this.completed.delete(id);
@@ -135,4 +149,4 @@ class NativePlayerController extends EventEmitter {
         try { await state.exited; } finally { clearTimeout(kill); }
     }
 }
-module.exports = { NativePlayerController, playbackRequest, trackPreferences };
+module.exports = { NativePlayerController, playbackRequest, trackPreferences, renderedPosition };

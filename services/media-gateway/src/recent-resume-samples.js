@@ -138,7 +138,7 @@ const RECENT_HEADER_MAX_BYTES = 8 * 1024 * 1024;
 // ranges; remove overlaps and detach buffers under a strict aggregate ceiling.
 // These bytes have no independent identity authority: the HLS cache exposes
 // them only after its exact private binding and fresh sample proof succeed.
-function captureInputWindows(entries, fileSizeBytes, maximum = RECENT_INPUT_MAX_BYTES) {
+function planInputWindows(entries, fileSizeBytes, maximum = RECENT_INPUT_MAX_BYTES) {
     if (!Number.isSafeInteger(fileSizeBytes) || fileSizeBytes < 1
         || !Number.isSafeInteger(maximum) || maximum < 1 || maximum > RECENT_MULTI_INPUT_MAX_BYTES
         || !Array.isArray(entries)) return [];
@@ -148,14 +148,14 @@ function captureInputWindows(entries, fileSizeBytes, maximum = RECENT_INPUT_MAX_
             || !entry.payload.length || entry.start + entry.payload.length > fileSizeBytes) continue;
         let gaps = [[entry.start, entry.start + entry.payload.length]];
         for (const prior of selected) {
-            const a = prior.start, b = a + prior.payload.length;
+            const a = prior.start, b = a + prior.length;
             gaps = gaps.flatMap(([lo, hi]) => hi <= a || lo >= b ? [[lo, hi]]
                 : [[lo, Math.min(hi, a)], [Math.max(lo, b), hi]].filter(([x,y]) => x < y));
         }
         for (const [lo, hi] of gaps) {
             const length = Math.min(hi - lo, maximum - bytes);
             if (length <= 0) break;
-            selected.push({ start: lo, payload: Buffer.from(entry.payload.subarray(lo-entry.start, lo-entry.start+length)) });
+            selected.push({ start: lo, source: entry.payload, offset: lo-entry.start, length });
             bytes += length;
         }
         if (bytes >= maximum) break;
@@ -163,6 +163,11 @@ function captureInputWindows(entries, fileSizeBytes, maximum = RECENT_INPUT_MAX_
     return selected.sort((a,b) => a.start-b.start);
 }
 
+function captureInputWindows(entries, fileSizeBytes, maximum = RECENT_INPUT_MAX_BYTES) {
+    return planInputWindows(entries,fileSizeBytes,maximum).map(w=>({start:w.start,
+        payload:Buffer.from(w.source.subarray(w.offset,w.offset+w.length))}));
+}
+
 module.exports = { SAMPLE_BYTES, RECENT_TTL_MS, sampleProof, samplesMatch, captureSamples,
     LinearResumeSamples, LINEAR_SAMPLE_WINDOW_BYTES,
-    RECENT_INPUT_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES, RECENT_HEADER_MAX_BYTES, captureInputWindows };
+    RECENT_INPUT_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES, RECENT_HEADER_MAX_BYTES, captureInputWindows, planInputWindows };

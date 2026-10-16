@@ -13,7 +13,7 @@ function wireNativePlayer({ ipcMain, window, catalogueView, executable, origin, 
     const host = { handle:handle.readBigUInt64LE().toString(16), processId:process.pid };
     const controller = new NativePlayerController(executable, {host});
     controller.on('diagnostic', data => { try { diagnostic(data); } catch { /* Diagnostics cannot prevent session drain. */ } });
-    const channels = ['open','stop','authorize','ack','pending-closes'];
+    const channels = ['open','stop','authorize','ack','pending-closes','pending-close-details'];
     const register = (name, action) => ipcMain.handle(`norva:native:${name}`, async (event, value) => {
         if (!trustedSender(event,window,origin)) throw Error('NATIVE_ORIGIN_REJECTED');
         return action(value);
@@ -30,7 +30,8 @@ function wireNativePlayer({ ipcMain, window, catalogueView, executable, origin, 
     register('stop', () => controller.stop());
     register('authorize', id => controller.authorize(id));
     register('ack', id => controller.acknowledge(id));
-    register('pending-closes', () => [...controller.unacknowledged]);
+    register('pending-closes', () => controller.pendingCloses());
+    register('pending-close-details', () => controller.pendingCloseDetails());
     controller.on('fullscreen', enabled => {
         window.setFullScreen(enabled);
         controller.setFullscreen(enabled);

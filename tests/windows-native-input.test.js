@@ -14,6 +14,9 @@ async function fixture(t,kind='normal',options={}){
   const payload=bytes.subarray(start,last+1);
   r.writeHead(206,{'Content-Range':`bytes ${start}-${last}/${bytes.length}`,'Content-Length':payload.length,ETag:changed?'"two"':'"one"'});
   if(kind==='abort'){r.write(payload.subarray(0,16));setTimeout(()=>r.destroy(),10);return;}
+  if((kind==='slow-grown'||kind==='abort-grown') && payload.length>1024){
+   r.write(payload.subarray(0,2048));setTimeout(()=>kind==='abort-grown'?r.destroy():r.end(payload.subarray(2048)),150);return;
+  }
   setTimeout(()=>r.end(payload),5);
  });server.listen(0,'127.0.0.1');await once(server,'listening');
  const input=await createNativeInput(`http://127.0.0.1:${server.address().port}/${kind==='redirect'?'redirect':'file'}`,{windowBytes:1024,timeoutMs:200,...options});
@@ -21,6 +24,50 @@ async function fixture(t,kind='normal',options={}){
  return{input,stats:()=>({active,maximum,requests}),change:()=>{changed=true;}};
 }
 async function get(url,start,end){const r=await fetch(url,{headers:{Range:`bytes=${start}-${end}`}});return{status:r.status,body:Buffer.from(await r.arrayBuffer())};}
+
+test('sequential acquisition grows only after complete adjacent reads and resets at a distant seek',async t=>{
+ const f=await fixture(t,'normal',{maxSequentialWindowBytes:4096,cacheWindows:8});
+ assert.deepEqual((await get(f.input.url,0,11263)).body,bytes.subarray(0,11264));
+ const ranges=f.input.counters.ranges;
+ assert.deepEqual(ranges.slice(0,4).map(r=>r.end-r.start+1),[1024,1024,1024,4096]);
+ assert.ok(f.input.counters.maximumCachedBytes<=8192);
+ assert.equal(f.stats().maximum,1);
+ assert.deepEqual((await get(f.input.url,24576,25087)).body,bytes.subarray(24576,25088));
+ assert.equal(f.input.counters.ranges.at(-1).end-f.input.counters.ranges.at(-1).start+1,1024);
+ const count=f.stats().requests;
+ assert.deepEqual((await get(f.input.url,24576,25087)).body,bytes.subarray(24576,25088));
+ assert.equal(f.stats().requests,count);
+ f.change();assert.equal((await get(f.input.url,28672,29183)).status,502);
+ assert.equal((await get(f.input.url,24576,25087)).status,502);
+});
+
+test('growing reads preserve exact concurrent header/index responses within one provider connection',async t=>{
+ const f=await fixture(t,'normal',{maxSequentialWindowBytes:4096,cacheWindows:8,streamSequentialWindows:true});
+ const spans=[[0,12287],[24576,32767],[4096,20479]];
+ const results=await Promise.all(spans.map(([start,end])=>get(f.input.url,start,end)));
+ results.forEach((r,i)=>{assert.equal(r.status,206);assert.deepEqual(r.body,bytes.subarray(spans[i][0],spans[i][1]+1));});
+ assert.equal(f.stats().maximum,1);assert.ok(f.input.counters.maximumCachedBytes<=8192);
+});
+
+test('a growing body reaches the player before completion but enters cache only after complete validation',async t=>{
+ const f=await fixture(t,'slow-grown',{maxSequentialWindowBytes:4096,cacheWindows:8,streamSequentialWindows:true,timeoutMs:1000});
+ const response=await fetch(f.input.url,{headers:{Range:'bytes=0-7167'}}),reader=response.body.getReader(),chunks=[];
+ let received=0;
+ while(received<5120){const {value,done}=await reader.read();assert.equal(done,false);chunks.push(Buffer.from(value));received+=value.length;}
+ assert.ok(f.input.counters.completedBytes<7168,'the growing provider body is still arriving');
+ assert.equal(f.input.counters.cachedBytes,3072,'partial data is not cacheable');
+ for(;;){const {value,done}=await reader.read();if(done)break;chunks.push(Buffer.from(value));}
+ assert.deepEqual(Buffer.concat(chunks),bytes.subarray(0,7168));
+ const before=f.stats().requests;assert.deepEqual((await get(f.input.url,3072,7167)).body,bytes.subarray(3072,7168));
+ assert.equal(f.stats().requests,before);assert.equal(f.stats().maximum,1);
+});
+
+test('interrupted progressive data closes the local response and is never cached',async t=>{
+ const f=await fixture(t,'abort-grown',{maxSequentialWindowBytes:4096,cacheWindows:8,streamSequentialWindows:true,timeoutMs:1000});
+ await assert.rejects(get(f.input.url,0,7167));
+ assert.equal(f.input.counters.cachedBytes,3072);assert.equal(f.input.counters.completedBytes,3072);
+ await f.input.stop();assert.equal(f.input.counters.activeSourceRequests,0);
+});
 test('parallel native header/index reads are byte exact with a single provider GET at a time',async t=>{
  const f=await fixture(t);const spans=[[0,5000],[16000,24000],[31000,32767]];
  const results=await Promise.all(spans.map(([s,e])=>get(f.input.url,s,e)));

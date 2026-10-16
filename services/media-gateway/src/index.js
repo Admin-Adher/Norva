@@ -2881,12 +2881,44 @@ const canUseStartupCache = createRecentResumeOwnerGate({
     ownerHashes: process.env.PRIVATE_STARTUP_CACHE_OWNER_HASHES,
     allAuthenticatedOwners: process.env.PRIVATE_STARTUP_CACHE_ALL_AUTHENTICATED_OWNERS === 'true',
 });
-const privateStartupHlsCache = createPrivateStartupCache(privateResumeHlsCache);
+const { StartupCacheDiskStore } = require('./startup-cache-disk-store');
+const startupCacheDisk = process.env.PRIVATE_STARTUP_CACHE_DISK_DIR ? new StartupCacheDiskStore({
+    root:process.env.PRIVATE_STARTUP_CACHE_DISK_DIR,
+    maxBytes:Number(process.env.PRIVATE_STARTUP_CACHE_DISK_MAX_BYTES || 32*1024**3),
+    perOwnerBytes:Number(process.env.PRIVATE_STARTUP_CACHE_DISK_OWNER_BYTES || 2*1024**3),
+    perFileBytes:privateResumeHlsCache.perFileBytes,
+    retentionMs:Number(process.env.PRIVATE_STARTUP_CACHE_RETENTION_SECONDS || 0)*1000,
+}) : null;
+const startupCacheR2Requested = process.env.PRIVATE_STARTUP_CACHE_R2_ENABLED === 'true'
+    && process.env.PRIVATE_STARTUP_CACHE_R2_ACTIVATION_APPROVED === 'true';
+const { StartupCacheR2Store } = require('./startup-cache-r2-store');
+const startupCacheStore = startupCacheR2Requested ? new StartupCacheR2Store({disk:startupCacheDisk,
+    baseUrl:process.env.PRIVATE_STARTUP_CACHE_R2_URL,serviceToken:process.env.PRIVATE_STARTUP_CACHE_R2_TOKEN,
+    manifestHmacKey:process.env.PRIVATE_STARTUP_CACHE_R2_MANIFEST_HMAC_KEY}) : startupCacheDisk;
+const privateStartupHlsCache = createPrivateStartupCache(privateResumeHlsCache,startupCacheStore);
+const { PrivateResumePersistence, resumeWindowDisposition } = require('./private-resume-persistence');
+const resumePersistenceRequested = startupCacheR2Requested
+    && process.env.PRIVATE_RESUME_CACHE_PERSISTENCE_ENABLED === 'true';
+const resumeCacheDisk = resumePersistenceRequested ? new StartupCacheDiskStore({
+    root:process.env.PRIVATE_RESUME_CACHE_DISK_DIR, purpose:'resume',
+    maxBytes:Number(process.env.PRIVATE_RESUME_CACHE_DISK_MAX_BYTES || 1024**3),
+    perOwnerBytes:Number(process.env.PRIVATE_RESUME_CACHE_DISK_OWNER_BYTES || 128*1024**2),
+    perFileBytes:privateResumeHlsCache.perFileBytes,
+    retentionMs:Number(process.env.PRIVATE_RESUME_CACHE_RETENTION_SECONDS || 0)*1000,
+}) : null;
+if(resumeCacheDisk && path.resolve(resumeCacheDisk.root)===path.resolve(startupCacheDisk.root))
+    throw Error('PRIVATE_CACHE_STAGING_DIRECTORIES_MUST_DIFFER');
+const resumeCacheStore = resumeCacheDisk ? new StartupCacheR2Store({disk:resumeCacheDisk,
+    baseUrl:process.env.PRIVATE_STARTUP_CACHE_R2_URL, serviceToken:process.env.PRIVATE_STARTUP_CACHE_R2_TOKEN,
+    manifestHmacKey:process.env.PRIVATE_STARTUP_CACHE_R2_MANIFEST_HMAC_KEY}) : null;
+const privateResumePersistence = new PrivateResumePersistence({cache:privateResumeHlsCache,
+    store:resumeCacheStore, allowsOwner:canUsePrivateResumeCache});
 const startupCachePreparation = new StartupCachePreparation({
     allowsOwner: canUseStartupCache,
-    remainingSeconds: body => privateStartupHlsCache.remainingSeconds(body),
+    remainingSeconds: (body,signal) => privateStartupHlsCache.remainingSecondsAsync(body,signal),
     canStart: body => !viewerPlaybackActiveLocally() && !accountSlotBusyLocally(body.sourceUrl)
-        && !(accountExtractions.get(proxyKeyFromUrl(body.sourceUrl))?.size),
+        && !(accountExtractions.get(proxyKeyFromUrl(body.sourceUrl))?.size)
+        && !(startupCacheR2Requested && startupCacheStore.status().preparationBlocked),
     authorize: async job => {
         if (!edgeCallbackBase || !GATEWAY_TOKEN || !job.permit) return false;
         try {
@@ -3189,6 +3221,7 @@ app.get('/health', (req, res) => {
             recentOwnerScope: process.env.PRIVATE_RESUME_RECENT_SAMPLES_ALL_AUTHENTICATED_OWNERS === 'true'
                 ? 'all-authenticated-owners' : 'owner-allowlist',
             ownerScoped: Boolean(process.env.PRIVATE_RESUME_CACHE_OWNER_HASHES?.trim()), ...privateResumeHlsCache.publicStatus() },
+        privateResumePersistence: privateResumePersistence.status(),
         privateStartupHlsCache: { enabled: process.env.PRIVATE_STARTUP_CACHE_ENABLED === 'true',
             ownerScope: process.env.PRIVATE_STARTUP_CACHE_ALL_AUTHENTICATED_OWNERS === 'true'
                 ? 'all-authenticated-owners' : 'owner-allowlist',
@@ -4349,12 +4382,14 @@ const nativeMp4Sessions = createNativeMp4Sessions({
         const abortEntry = () => { void nativeMp4Sessions.close(entry).catch(() => {}); };
         entry.ac.signal.addEventListener('abort', abortEntry, { once: true });
         let broker, nativeRecent, nativeIdentity = null;
-        const nativeCacheBinding = claims.scope === 'native-browser-mp4'
+        const nativeRecoveryPersistence = claims.scope === 'native-vod-recovery' && privateResumePersistence.enabled({ownerKey:entry.ownerHash});
+        const nativeCacheBinding = (claims.scope === 'native-browser-mp4' || nativeRecoveryPersistence)
             && canUseStartupCache(entry.ownerHash) && canUseRecentResumeSamples(entry.ownerHash)
             ? privateResumeBinding({ ownerKey: entry.ownerHash, sourceUrl: claims.url,
                 sourceId: claims.resumeSourceId, sourceRevision: claims.resumeSourceRevision,
-                fileSizeBytes: claims.fileSizeBytes, profile: 'native-browser-mp4-input-v1' }) : null;
+                fileSizeBytes: claims.fileSizeBytes, profile: claims.scope==='native-browser-mp4' ? 'native-browser-mp4-input-v1' : 'native-vod-recovery-input-v1' }) : null;
         const nativeCacheEpoch = privateResumeHlsCache.epoch;
+        const nativeOwnerRevocationStamp=privateResumeHlsCache.ownerRevocationStamp(entry.ownerHash);
         const nativeFreshScope = { id: entry.sid };
         try {
             const reason = `native MP4 ${entry.sid.slice(0, 8)}`;
@@ -4385,7 +4420,9 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 fileSizeBytes: claims.fileSizeBytes, signal: entry.ac.signal,
             }));
             if (nativeCacheBinding) {
+                await privateResumePersistence.restoreInput(nativeCacheBinding,claims.durationSeconds,entry.ac.signal);
                 nativeRecent = await revalidateNativeRecentInput({ cache: privateResumeHlsCache,
+                    persistence:privateResumePersistence,
                     binding: nativeCacheBinding, scope: nativeFreshScope, signal: entry.ac.signal,
                     createBroker: (signal, onProviderIdentity, scope, plan) => createStrictLidBroker({
                         sourceUrl: claims.url, fileSizeBytes: claims.fileSizeBytes, userAgent: claims.ua,
@@ -4461,13 +4498,29 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                 broker.seedRecentInput(nativeRecent.snapshot, 32 * 1024 * 1024);
             }
             let nativeStopSnapshot = null;
+            const nativeDurable=privateResumePersistence.enabled(nativeCacheBinding);
+            const initialPosition=privateResumeHlsCache.inputCandidate(nativeCacheBinding)?.resumePosition
+                ?? entry.initialRenderedPosition;
+            let initialRenderedPosition=initialPosition,retired=false,terminal=false;
+            const reportNativePosition=position=>{
+                if(!nativeDurable || !Number.isFinite(position) || position<0 || position>=86400)return;
+                initialRenderedPosition ??= position;
+                terminal=resumeWindowDisposition(position,claims.durationSeconds)==='finished';
+                if(!retired && privateResumePersistence.progress(nativeCacheBinding,position,initialRenderedPosition,claims.durationSeconds)) {
+                    retired=true;
+                }
+            };
             const prepareNativeClose = reason => {
+                reportNativePosition(entry.renderedPosition);
                 if (reason === 'viewer-stop' && nativeCacheBinding && !nativeStopSnapshot) {
-                    nativeStopSnapshot = { samples: broker.snapshotRecentSamples(), windows: broker.snapshotNativeMp4Input() };
+                    if(nativeDurable && (terminal || resumeWindowDisposition(entry.renderedPosition,claims.durationSeconds)!=='resume'))return;
+                    nativeStopSnapshot = { samples: broker.snapshotRecentSamples(), windows: claims.scope==='native-browser-mp4'
+                        ? broker.snapshotNativeMp4Input() : broker.snapshotRecentInput(32*1024*1024) };
                 }
             };
             return { inputUrl: broker.inputUrl,
                 prepareClose: prepareNativeClose,
+                reportPosition:reportNativePosition,
                 cachedCoverage: target => broker.cachedMp4Coverage(target), close: async reason => {
                 prepareNativeClose(reason);
                 const samples = nativeStopSnapshot?.samples;
@@ -4476,11 +4529,15 @@ const nativeMp4Sessions = createNativeMp4Sessions({
                     await broker.close(reason);
                     nativeRecent?.lease.release();
                     if (reason === 'viewer-stop' && nativeIdentity && samples && !broker.terminalError
-                        && nativeCacheEpoch === privateResumeHlsCache.epoch) {
-                        privateResumeHlsCache.captureInput({ binding: nativeCacheBinding,
+                        && (nativeDurable ? nativeOwnerRevocationStamp===privateResumeHlsCache.ownerRevocationStamp(entry.ownerHash)
+                            : nativeCacheEpoch===privateResumeHlsCache.epoch)) {
+                        const captured=privateResumeHlsCache.captureInput({ binding: nativeCacheBinding,
                             observed: { ...nativeIdentity, samples, fileSizeBytes: claims.fileSizeBytes,
                                 deliveryTarget: broker.retainDeliveryTarget({ ownerKey: entry.ownerHash,
-                                    routeKey: nativeRouteKey }) }, inputWindows: windows });
+                                    routeKey: nativeRouteKey }) }, inputWindows: windows,
+                            ...(nativeDurable ? {nativeResume:{position:entry.renderedPosition,duration:claims.durationSeconds,
+                                format:claims.scope==='native-browser-mp4' ? 'native-mp4-input-v1' : 'native-file-input-v1'}} : {}) });
+                        if(captured && nativeDurable)privateResumePersistence.queueInput(nativeCacheBinding,entry.renderedPosition,claims.durationSeconds);
                     }
                 }
                 finally {
@@ -4522,6 +4579,7 @@ app.post('/native-sessions', requireGatewayAuth, (req, res) => {
 app.post('/native-sessions/:id/heartbeat', requireGatewayAuth, (req, res) => {
     try {
         nativeMp4Sessions.heartbeat(req.params.id, req.body?.ownerKey);
+        if(typeof req.body?.renderedPosition==='number')nativeMp4Sessions.reportPosition(req.params.id,req.body.ownerKey,req.body.renderedPosition);
         res.json({ ok: true });
     } catch (error) { res.status(error.status || 503).json({ error: 'Native media session unavailable' }); }
 });
@@ -13482,7 +13540,9 @@ app.delete('/raw-pumps', requireGatewayAuth, async (req, res) => {
     }
     // Marks ordinary stop vs owner revocation and snapshots only complete
     // native input synchronously before the pump's abort drains its cache.
-    const nativeRevocation = nativeMp4Sessions.revoke(ownerKey, sid, globalCleanup);
+    const positionValue=req.query?.resumePosition;
+    const resumePosition=typeof positionValue==='string' && positionValue.trim()!=='' ? Number(positionValue) : null;
+    const nativeRevocation = nativeMp4Sessions.revoke(ownerKey, sid, globalCleanup,resumePosition);
     const aborted = abortRawPumps(
         (p) => p.ownerHash === ownerKey && (globalCleanup || p.sid === sid),
         null,
@@ -13499,6 +13559,7 @@ app.delete('/raw-pumps', requireGatewayAuth, async (req, res) => {
             privateResumeByteRanges.revokeOwner(ownerKey);
             finitePlaybackRangeReuse.revokeOwner(ownerKey);
             privateResumeHlsCache.revokeOwner(ownerKey);
+            await Promise.all([privateStartupHlsCache.revokeOwner(ownerKey),privateResumePersistence.revokeOwner(ownerKey)]);
             sharedPlaybackRanges.revokeOwner(ownerKey);
         }
         res.json({ ok: true, aborted, nativeRevoked });
@@ -13752,6 +13813,7 @@ app.delete('/sessions/:id', requireGatewayAuth, async (req, res) => {
     const resumePosition = Number(req.query?.resumePosition);
     if (req.query?.resumePosition !== undefined && Number.isFinite(resumePosition)
         && resumePosition > 0 && resumePosition < 86_400) session.privateResumeStopPosition = resumePosition;
+    reportPrivateResumeProgress(session,resumePosition);
     const finalCodecProfile = await privateFinalCodecProfileAfterPendingCacheWork(session);
     if (sessions.get(req.params.id) !== session) return res.status(404).json({ error: 'Session not found' });
     if (await tryParkRetainedSession(session, resumePosition)) {
@@ -13773,7 +13835,7 @@ app.delete('/sessions/:id', requireGatewayAuth, async (req, res) => {
 // the ordinary prefetch credit; this adds a tighter cap for the retained pilot.
 function reportRetainedPlaybackPosition(req, session) {
     const value = req.query?.renderedPosition;
-    if (!retainedSubtitleClock(session) || session.retainedSessionState
+    if (session.retainedSessionState
         || req.playbackAttachmentId || session.primaryViewerAttached === false
         || session.expiresAt.getTime() <= Date.now()
         || !timingSafeEqual(req.playbackToken, session.accessToken)
@@ -13781,6 +13843,8 @@ function reportRetainedPlaybackPosition(req, session) {
     const local = Number(value), anchor = session.retainedViewerStartOffset ?? session.actualStartOffset;
     if (!Number.isFinite(anchor) || !Number.isFinite(session.actualStartOffset)
         || local >= 86400 || session.sourceTimestamps === true) return false;
+    reportPrivateResumeProgress(session,anchor+local);
+    if (!retainedSubtitleClock(session)) return false;
     return session.hlsOutputAdmission?.reportPlaybackPosition('video.m3u8',
         anchor - session.actualStartOffset + local) === true;
 }
@@ -14004,6 +14068,8 @@ app.use((err, req, res, next) => {
 
 async function bootstrap() {
     await fsp.mkdir(OUTPUT_DIR, { recursive: true });
+    if (startupCacheStore) await startupCacheStore.initialize();
+    if (resumeCacheStore) await resumeCacheStore.initialize();
     if (WHISPER_BIN && WHISPER_MODEL) {
         [WHISPER_BIN_SHA256, WHISPER_MODEL_SHA256, WHISPER_VAD_MODEL_SHA256, WHISPER_VAD_BIN_SHA256] = await Promise.all([
             hashFileSha256(WHISPER_BIN),
@@ -16066,7 +16132,7 @@ function acknowledgeRetainedViewerSegment(session, name, requestSessionId) {
 }
 
 async function tryParkRetainedSession(session, position) {
-    if (!session.retainedRequestBinding || !retainedSessionOwnerGate(session.ownerKey)
+    if (session.privateResumeTerminal || !session.retainedRequestBinding || !retainedSessionOwnerGate(session.ownerKey)
         || !session.retainedInputScope || !session.boundedHlsOutput || !session.hlsOutputReservation
         || session.mediaCacheProducer || session.completeHlsCacheLease || session.privateResumeLease
         || multiAudioHlsEnabled(session) || session.inputPump || session.linearSeekBridge
@@ -16149,6 +16215,8 @@ async function tryResumeRetainedSession({ lookup, binding, playbackSessionId, ex
                 session.retainedViewerFirstPlaylist = view;
                 session.retainedViewCandidate = null;
                 session.privateResumeStopPosition = null;
+                session.privateResumeCacheRetired = false;
+                session.privateResumeTerminal = false;
                 session.retainedDetachPromise = null;
                 session.primaryViewerAttached = true; session.status = 'ready';
                 session.lastClientAccessAtMs = Date.now();
@@ -16294,6 +16362,14 @@ async function trySeedRecentRetainedInput(session, signal) {
 async function capturePrivateResumeWindow(session, playlistClock = null) {
     if (session.startupCacheJob) return false;
     const position = session.privateResumeStopPosition;
+    const binding = privateResumeHlsBindingForSession(session);
+    if (privateResumePersistence.enabled(binding) && (session.privateResumeTerminal
+        || resumeWindowDisposition(position,privateResumeDuration(session))==='finished')) {
+        if (!session.privateResumeCacheRetired)privateResumePersistence.retire(binding);
+        privateResumeHlsCache.retire(privateResumeRetainedInputBinding(session));
+        session.privateResumeRangeHandle?.invalidate();
+        return false;
+    }
     if (!Number.isFinite(position) || position <= 0) return false;
     if (session.retainedInputInterrupted) return privateResumeHlsCache.rejectCapture('retained-input-interrupted');
     if (session.lastError || session.inputFailure) return privateResumeHlsCache.rejectCapture('session-error');
@@ -16301,7 +16377,6 @@ async function capturePrivateResumeWindow(session, playlistClock = null) {
     // discontinuity graph. The new encoder's output is independently reusable.
     const actualStartOffset = session.privateResumeContinuationOffset ?? session.actualStartOffset;
     const inputBinding = privateResumeRetainedInputBinding(session);
-    const binding = privateResumeHlsBindingForSession(session);
     if (inputBinding && (!binding || multiAudioHlsEnabled(session)
         || session.exactSubtitleHls?.cacheEligible === false)) return privateResumeHlsCache.captureInput({ binding: inputBinding,
         observed: privateResumeObservedIdentity(session), inputWindows: session.privateResumeInputWindows });
@@ -16309,7 +16384,7 @@ async function capturePrivateResumeWindow(session, playlistClock = null) {
     if (!Number.isFinite(actualStartOffset)) return privateResumeHlsCache.rejectCapture('invalid-start-clock');
     const playlist = await fsp.readFile(exactSubtitleHlsEnabled(session)
         ? session.videoPlaylistPath : session.playlistPath, 'utf8').catch(() => '');
-    return privateResumeHlsCache.captureWithInputFallback({ binding, inputBinding, observed: privateResumeObservedIdentity(session),
+    const captured = await privateResumeHlsCache.captureWithInputFallback({ binding, inputBinding, observed: privateResumeObservedIdentity(session),
         inputWindows: session.privateResumeInputWindows,
         position, actualStartOffset, playlistClock,
         playlistName: exactSubtitleHlsEnabled(session) ? 'video.m3u8' : 'playlist.m3u8',
@@ -16319,6 +16394,24 @@ async function capturePrivateResumeWindow(session, playlistClock = null) {
         playlist: playlist.replace(/^#EXT-X-ENDLIST\s*$/gm, ''),
         sourcePesClock: retainedSubtitleClock(session),
         readAsset: (name, remainingBytes) => readPrivateResumeAsset(session, name, remainingBytes) });
+    if (captured)privateResumePersistence.queueWindow(binding,position,privateResumeDuration(session));
+    return captured;
+}
+
+function privateResumeDuration(session) {
+    const profile=asRecord(session?.codecProfile);
+    const duration=Number(profile.durationSeconds ?? profile.duration_seconds ?? profile.duration);
+    return Number.isFinite(duration) && duration>0 ? duration : null;
+}
+
+function reportPrivateResumeProgress(session,position) {
+    const binding=privateResumeHlsBindingForSession(session);
+    if (!privateResumePersistence.enabled(binding) || !Number.isFinite(position) || position<0 || position>=86400)return false;
+    const duration=privateResumeDuration(session);
+    if(duration)session.privateResumeTerminal=resumeWindowDisposition(position,duration)==='finished';
+    if(!session.privateResumeCacheRetired && privateResumePersistence.progress(binding,position,Number(session.seekOffset || 0),duration))
+        session.privateResumeCacheRetired=true;
+    return session.privateResumeCacheRetired===true;
 }
 
 async function tryStartPrivateStartupBeforePreopen(session, signal) {
@@ -16336,7 +16429,9 @@ async function tryStartPrivateStartupBeforePreopen(session, signal) {
         : normalizeCodecToken(profile.probeSource ?? profile.probe_source) !== 'gatewayprobe'
             || !finiteTsProfileEligible(session)) return false;
     const binding = privateResumeHlsBindingForSession(session);
-    if (!binding || !privateStartupHlsCache.hasCandidate(binding, 0)) return false;
+    if (!binding) return false;
+    await privateStartupHlsCache.restore?.(binding);
+    if (!privateStartupHlsCache.hasCandidate(binding, 0)) return false;
     sessions.set(session.id, session);
     let started = false;
     try {
@@ -16374,7 +16469,7 @@ async function capturePrivateStartupWindow(session) {
     if (!binding || session.actualStartOffset !== 0) return false;
     const playlist = await fsp.readFile(exactSubtitleHlsEnabled(session)
         ? session.videoPlaylistPath : session.playlistPath, 'utf8').catch(() => '');
-    session.startupCacheStored = await privateStartupHlsCache.capture({ binding,
+    session.startupCacheStored = await privateStartupHlsCache.capture({ binding, preparationBody:job.body, signal:job.signal,
         observed: privateResumeObservedIdentity(session), actualStartOffset: session.actualStartOffset,
         playlist, inputWindows: session.privateResumeInputWindows,
         subtitleRenditions: exactSubtitleRenditionsForSession(session), sourcePesClock: retainedSubtitleClock(session),
@@ -16528,7 +16623,9 @@ async function tryStartPrivateResumeWindow(session, requestSignal) {
     const binding = privateResumeHlsBindingForSession(session);
     const position = Number(session.seekOffset);
     const startup = position === 0 && canUseStartupCache(session.ownerKey);
-    const cache = startup ? privateStartupHlsCache : privateResumeHlsCache;
+    const cache = startup ? privateStartupHlsCache : privateResumePersistence;
+    if (startup && binding) await privateStartupHlsCache.restore?.(binding);
+    if (!startup && binding)await privateResumePersistence.restore(binding,position,privateResumeDuration(session),requestSignal);
     // One unavailable check per creation. Keep the untrusted prefix within its
     // original TTL for a future attempt, but never lease it or retry validation
     // again during this cold fallback.
@@ -16816,7 +16913,11 @@ async function prepareFiniteMkvSeekBroker(session, parentSignal = null, { deferT
         finiteFirstWindowBytes: finiteMp4 ? 1024 * 1024
             : finiteTs && canUseRecentResumeSamples(session.ownerKey) ? 256 * 1024 : 0,
         finiteAtomicWindowBytes: finiteMp4 ? 1024 * 1024 : 0,
-        finiteYieldToNewRange: finiteMp4 && canUseRecentResumeSamples(session.ownerKey),
+        // Matroska's cue lookup can leave its header reader open while a
+        // distant playback range is queued. Yield that obsolete provider
+        // window without closing the declared local range, just as for MP4.
+        // Overlapping/atomic work and file-identity checks stay unchanged.
+        finiteYieldToNewRange: (finiteMp4 || finiteMkv) && canUseRecentResumeSamples(session.ownerKey),
         finiteCacheAbandonedPrefix: finiteMp4,
         finiteCacheBytes: FINITE_MKV_SEEK_CACHE_BYTES,
         finiteResumePrefixTargetBytes: finiteTs ? 0 : Math.min(effectiveWindowBytes, INBAND_HEADER_BYTES),

@@ -37,6 +37,7 @@ test('embedded playback hides the catalogue without disabling its parent and res
     class Controller extends EventEmitter {
         constructor(_exe,options){super();this.options=options;this.unacknowledged=new Set();}
         async open(){return{accepted:true};} stop(){} authorize(){} acknowledge(){} setFullscreen(value){this.fullscreen=value;}
+        pendingCloses(){return ['owned'];} pendingCloseDetails(){return [{sessionId:'owned',resumePosition:82.125}];}
     }
     let controller;const handlers=new Map(),views=[],children=[],full=[];
     const webContents=new EventEmitter();webContents.mainFrame={url:'https://norva.tv/app'};
@@ -49,6 +50,9 @@ test('embedded playback hides the catalogue without disabling its parent and res
     vm.runInNewContext(fs.readFileSync('desktop/native-player-ipc.js','utf8'),context);
     context.module.exports.wireNativePlayer({ipcMain:{handle:(name,fn)=>handlers.set(name,fn),removeHandler(){}},window,catalogueView:{setVisible:value=>views.push(value)},executable:'player.exe',origin:'https://norva.tv',diagnostic:()=>{throw Error('disk full');}});
     const event={sender:webContents,senderFrame:webContents.mainFrame};
+    assert.deepEqual(await handlers.get('norva:native:pending-closes')(event),['owned']);
+    assert.deepEqual(await handlers.get('norva:native:pending-close-details')(event),[{sessionId:'owned',resumePosition:82.125}]);
+    await assert.rejects(handlers.get('norva:native:pending-close-details')({...event,senderFrame:{url:'https://other.test'}}),/NATIVE_ORIGIN_REJECTED/);
     await handlers.get('norva:native:open')(event,{host:'untrusted'});
     assert.equal(controller.options.host.handle,'1234');assert.equal(controller.options.host.processId,42);
     assert.deepEqual(views,[false]);

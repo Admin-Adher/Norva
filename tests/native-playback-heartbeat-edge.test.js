@@ -150,7 +150,7 @@ test('native heartbeat is a versioned authenticated REST route with a bounded re
   assert.match(router, /providerCircuitProtocol:\s*1/);
   assert.match(
     router,
-    /req\.method === "POST"[\s\S]*?segments\[0\] === "playback"[\s\S]*?segments\[1\] === "sessions"[\s\S]*?segments\[2\][\s\S]*?segments\[3\] === "heartbeat"[\s\S]*?requireIdentity\(req, supabase\)[\s\S]*?heartbeatPlaybackSession\(segments\[2\], identity\.userId, supabase\)/,
+    /req\.method === "POST"[\s\S]*?segments\[0\] === "playback"[\s\S]*?segments\[1\] === "sessions"[\s\S]*?segments\[2\][\s\S]*?segments\[3\] === "heartbeat"[\s\S]*?requireIdentity\(req, supabase\)[\s\S]*?heartbeatPlaybackSession\(segments\[2\], identity\.userId, supabase, renderedPosition\)/,
   );
 });
 

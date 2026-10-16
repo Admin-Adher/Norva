@@ -33,6 +33,7 @@ try {
             authorize: id => invoke('authorize',id),
             ackPlaybackSessionClosed: id => invoke('ack',id),
             pendingPlaybackCloses: () => invoke('pending-closes'),
+            pendingPlaybackCloseDetails: () => invoke('pending-close-details'),
             onEvent: callback => {
                 const listener = (_event,value) => callback(value);
                 ipcRenderer.on('norva:native:event',listener);

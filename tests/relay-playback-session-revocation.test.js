@@ -241,7 +241,7 @@ test('relay requests prove liveness and HLS descendants preserve the revocable i
     assert.match(prepare, /lockTtlMs:\s*EDGE_SESSION_COORDINATOR_LOCK_TTL_MS/);
   }
 
-  assert.match(cloudApi, /heartbeatSession:\s*\(id\)\s*=>\s*playbackHeartbeatRequest\(id\)/);
+  assert.match(cloudApi, /heartbeatSession:\s*\(id, position\)\s*=>\s*playbackHeartbeatRequest\(id, \{\}, position\)/);
   const heartbeat = cloudApi.slice(
     cloudApi.indexOf('function playbackHeartbeatRequest'),
     cloudApi.indexOf('// Pull the deepest upstream detail'),

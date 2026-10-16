@@ -1577,6 +1577,8 @@ public class MainActivity extends Activity {
         queuePlaybackSessionClose(
                 data.getStringExtra(PlayerActivity.EXTRA_PLAYBACK_SESSION_ID),
                 data.getStringExtra(PlayerActivity.EXTRA_PLAYBACK_CLOSE_REASON),
+                NativePlaybackClosePolicy.boundedPosition(data.hasExtra("nativeResumePositionSeconds")
+                        ? data.getDoubleExtra("nativeResumePositionSeconds",-1d) : null),
                 new Runnable() {
                     @Override public void run() { continuePlayerResult(data); }
                 });
@@ -1713,7 +1715,7 @@ public class MainActivity extends Activity {
     }
 
     private void queuePlaybackSessionClose(String rawSessionId, String reason,
-                                           Runnable continuation) {
+                                           Double resumePosition, Runnable continuation) {
         final String sessionId = NativePlaybackClosePolicy.boundedSessionId(rawSessionId);
         if (sessionId == null) {
             if (continuation != null) continuation.run();
@@ -1736,7 +1738,7 @@ public class MainActivity extends Activity {
                             new NativePlaybackClosePolicy.Entry(
                                     sessionId,
                                     NativePlaybackClosePolicy.boundedReason(reason),
-                                    nowEpochMs));
+                                    nowEpochMs, resumePosition));
                     persistenceChanged = true;
                 }
                 if (continuation != null) {
@@ -1754,6 +1756,7 @@ public class MainActivity extends Activity {
 
     private void dispatchPlaybackSessionClose(String sessionId) {
         final String reason;
+        final Double resumePosition;
         synchronized (playbackCloseLock) {
             if (!playbackCloseDeliveryActive) return;
             if (pruneExpiredPlaybackSessionClosesLocked(System.currentTimeMillis())) {
@@ -1763,6 +1766,7 @@ public class MainActivity extends Activity {
                     pendingPlaybackSessionCloses.get(sessionId);
             if (pending == null || playbackCloseRetryTasks.containsKey(sessionId)) return;
             reason = pending.reason;
+            resumePosition = pending.resumePosition;
             Integer previousAttempts = playbackCloseDeliveryAttempts.get(sessionId);
             playbackCloseDeliveryAttempts.put(
                     sessionId,
@@ -1775,7 +1779,8 @@ public class MainActivity extends Activity {
         final String js = "(function(){try{var n=window.__norvaNative;"
                 + "if(!n||typeof n.onPlaybackClosed!=='function')return 'not_ready';"
                 + "var s=n.onPlaybackClosed(" + jsStr(sessionId) + ","
-                + jsStr(reason) + ");return s==='accepted'?'accepted':'not_ready';"
+                + jsStr(reason) + "," + (resumePosition==null ? "null" : resumePosition.toString())
+                + ");return s==='accepted'?'accepted':'not_ready';"
                 + "}catch(_){return 'not_ready';}})()";
         runOnUiThread(new Runnable() {
             @Override public void run() {
@@ -1931,7 +1936,7 @@ public class MainActivity extends Activity {
         Set<String> encoded = new LinkedHashSet<>();
         for (NativePlaybackClosePolicy.Entry entry : pendingPlaybackSessionCloses.values()) {
             String value = NativePlaybackClosePolicy.encode(
-                    entry.sessionId, entry.reason, entry.createdAtEpochMs);
+                    entry.sessionId, entry.reason, entry.createdAtEpochMs, entry.resumePosition);
             if (value != null) encoded.add(value);
         }
         prefs().edit().putStringSet(PREF_PENDING_PLAYBACK_CLOSES, encoded).apply();

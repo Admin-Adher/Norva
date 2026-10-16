@@ -178,6 +178,8 @@ public final class FirstFrameFixtureInstrumentedTest {
                         assertTrue("The provider is withheld: READY must not be needed to apply Resume",
                                 player.getPlaybackState() != androidx.media3.common.Player.STATE_READY);
                         assertEquals(resumeSeconds * 1000L, player.getCurrentPosition());
+                        assertEquals("An undecoded requested position cannot retire cache A", -1L,
+                                ((PlayerActivity) opened).nativeResumePositionMs());
                     });
                 } finally { server.allowResponse.countDown(); }
             }
@@ -198,6 +200,33 @@ public final class FirstFrameFixtureInstrumentedTest {
                     result.getStringExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_AUDIO_MIME));
             assertTrue(result.getBooleanExtra(
                     PlayerActivity.EXTRA_FIRST_FRAME_TEST_CONTRACT_OK, false));
+            final PlayerActivity openedPlayer = (PlayerActivity) activityRef.get();
+            assertNotNull(openedPlayer);
+            if (!"channel".equals(itemType)) {
+                // A real first-frame callback can precede READY. The cache
+                // deliberately requires both; do not assert that clock while
+                // Media3 is still completing its initial buffer admission.
+                java.lang.reflect.Field field = PlayerActivity.class.getDeclaredField("player");
+                field.setAccessible(true);
+                androidx.media3.exoplayer.ExoPlayer decodedPlayer =
+                        (androidx.media3.exoplayer.ExoPlayer) field.get(openedPlayer);
+                int[] playbackState = {androidx.media3.common.Player.STATE_IDLE};
+                long readyDeadline = SystemClock.elapsedRealtime() + 5_000;
+                do {
+                    instrumentation.runOnMainSync(() -> playbackState[0] = decodedPlayer.getPlaybackState());
+                    if (playbackState[0] == androidx.media3.common.Player.STATE_READY
+                            || playbackState[0] == androidx.media3.common.Player.STATE_ENDED) break;
+                    SystemClock.sleep(20);
+                } while (SystemClock.elapsedRealtime() < readyDeadline);
+                assertTrue("The rendered fixture must also finish buffer admission",
+                        playbackState[0] == androidx.media3.common.Player.STATE_READY
+                                || playbackState[0] == androidx.media3.common.Player.STATE_ENDED);
+            }
+            instrumentation.runOnMainSync(() -> {
+                long renderedPosition = openedPlayer.nativeResumePositionMs();
+                if ("channel".equals(itemType)) assertEquals("Live has no finite resume archive", -1L, renderedPosition);
+                else assertTrue("A decoded finite clock must be available for cache lifecycle", renderedPosition >= resumeSeconds * 1000L);
+            });
             if (resumeSeconds > 0) {
                 Activity opened = activityRef.get();
                 java.lang.reflect.Field playerField = PlayerActivity.class.getDeclaredField("player");
@@ -249,6 +278,7 @@ public final class FirstFrameFixtureInstrumentedTest {
         byte[] body = "<!DOCTYPE html><html><body>Service unavailable</body></html>"
                 .getBytes(StandardCharsets.UTF_8);
         try (FixtureHttpServer origin = new FixtureHttpServer(body, "text/html")) {
+            origin.allowResponse = new CountDownLatch(1);
             target.startActivity(new Intent(target, PlayerActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     .putExtra(PlayerActivity.EXTRA_URL, origin.url())
@@ -258,11 +288,16 @@ public final class FirstFrameFixtureInstrumentedTest {
                     .putExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_TOKEN, token));
             activity = instrumentation.waitForMonitorWithTimeout(monitor, 5000);
             assertNotNull(activity);
+            long requestDeadline = SystemClock.elapsedRealtime() + 5000;
+            while (origin.requests.get() == 0 && SystemClock.elapsedRealtime() < requestDeadline) SystemClock.sleep(25);
+            assertEquals("One initial provider request is required", 1, origin.requests.get());
+            instrumentation.waitForIdleSync();
+            origin.allowResponse.countDown();
             assertTrue("HTML refusal did not become terminal within 5 seconds", terminal.await(5, TimeUnit.SECONDS));
             assertEquals("terminal", result.get().getStringExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_OUTCOME));
-            long refusalDelay = terminalAt.get() - origin.firstRequestAt.get();
+            long refusalDelay = terminalAt.get() - origin.firstResponseAt.get();
             assertTrue("HTML response to terminal took " + refusalDelay + "ms",
-                    origin.firstRequestAt.get() > 0 && refusalDelay >= 0 && refusalDelay < 2000);
+                    origin.firstResponseAt.get() > 0 && refusalDelay >= 0 && refusalDelay < 2000);
             SystemClock.sleep(2000);
             assertEquals("Provider refusal was retried automatically", 1, origin.requests.get());
             final Activity opened = activity;
@@ -320,6 +355,10 @@ public final class FirstFrameFixtureInstrumentedTest {
         try (FixtureHttpServer blocked = new FixtureHttpServer(
                 "<!DOCTYPE html><html>Unavailable</html>".getBytes(StandardCharsets.UTF_8), "text/html", false, refusalStatus);
              FixtureHttpServer raw = new FixtureHttpServer(Files.readAllBytes(fixture.toPath()))) {
+            // The recovery deadline starts when a refusal is available, after
+            // Activity startup. A blocked fixture must not charge server wait
+            // or first-layout work to the resolver's no-retry latency budget.
+            blocked.allowResponse = new CountDownLatch(1);
             BroadcastReceiver receiver = new BroadcastReceiver() {
                 @Override public void onReceive(Context context, Intent intent) {
                     if (PlayerActivity.ACTION_FIRST_FRAME_TEST_RESULT.equals(intent.getAction())) {
@@ -331,7 +370,9 @@ public final class FirstFrameFixtureInstrumentedTest {
                     if (!"network-fixture".equals(intent.getStringExtra(PlayerActivity.EXTRA_ITEM_ID))) return;
                     try {
                         assertEquals(expectedReason, intent.getStringExtra("retryReason"));
-                        long refusalElapsedMs = SystemClock.elapsedRealtime() - blocked.firstRequestAt.get();
+                        long responseAt = blocked.firstResponseAt.get();
+                        assertTrue("The refusal must have been released", responseAt > 0);
+                        long refusalElapsedMs = SystemClock.elapsedRealtime() - responseAt;
                         assertTrue("Refusal must reach the resolver promptly, without timed retries; elapsedMs=" + refusalElapsedMs,
                                 refusalElapsedMs < 1500);
                         assertEquals(3L, intent.getLongExtra("positionSeconds", -1));
@@ -360,6 +401,14 @@ public final class FirstFrameFixtureInstrumentedTest {
                         .putExtra(PlayerActivity.EXTRA_RESUME_SECONDS, 3)
                         .putExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_TOKEN, testToken));
                 activity.set(ins.waitForMonitorWithTimeout(monitor, 10000));
+                assertNotNull("Recovery Activity must be open", activity.get());
+                long requestDeadline = SystemClock.elapsedRealtime() + 5000;
+                while (blocked.requests.get() == 0 && SystemClock.elapsedRealtime() < requestDeadline) {
+                    SystemClock.sleep(25);
+                }
+                assertEquals("The initial request must reach the origin", 1, blocked.requests.get());
+                ins.waitForIdleSync();
+                blocked.allowResponse.countDown();
                 assertTrue("Native raw recovery must render a frame", frame.await(30, TimeUnit.SECONDS));
                 if (callbackFailure.get() != null) throw new AssertionError(callbackFailure.get());
                 assertEquals("first_frame", frameResult.get().getStringExtra(PlayerActivity.EXTRA_FIRST_FRAME_TEST_OUTCOME));
@@ -644,6 +693,7 @@ public final class FirstFrameFixtureInstrumentedTest {
         private final int status;
         final java.util.concurrent.atomic.AtomicInteger requests = new java.util.concurrent.atomic.AtomicInteger();
         final java.util.concurrent.atomic.AtomicLong firstRequestAt = new java.util.concurrent.atomic.AtomicLong();
+        final java.util.concurrent.atomic.AtomicLong firstResponseAt = new java.util.concurrent.atomic.AtomicLong();
         private final ServerSocket server;
         private final Thread thread;
         private volatile boolean closed;
@@ -707,6 +757,7 @@ public final class FirstFrameFixtureInstrumentedTest {
                 requests.incrementAndGet();
                 firstRequestAt.compareAndSet(0, SystemClock.elapsedRealtime());
                 if (allowResponse != null) allowResponse.await(10, TimeUnit.SECONDS);
+                firstResponseAt.compareAndSet(0, SystemClock.elapsedRealtime());
                 if (status != 200) {
                     write(output, "HTTP/1.1 " + status + " Refused\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                     output.flush();

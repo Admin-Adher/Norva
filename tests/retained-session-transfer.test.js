@@ -36,6 +36,7 @@ function harness({ drain, validation, gate = true } = {}) {
         app: { delete: (_path, _auth, handler) => { ctx.deleteHandler = handler; } },
         requireGatewayAuth: () => {}, compactRecord: x => x,
         privateFinalCodecProfileForSession: () => null,
+        reportPrivateResumeProgress:()=>false,
         privateFinalCodecProfileAfterPendingCacheWork: async () => { await ctx.profilePending; return null; },
         revalidateRecentResumeSession: async (lookup, plan, signal) => {
             counts.validation++; assert.equal(counts.socket, 0, 'old transport drained before validation');

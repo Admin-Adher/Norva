@@ -36,6 +36,7 @@ export async function runStartupCycle({ targets, endpoint, token, fetchImpl = fe
                 body: JSON.stringify(target), signal: AbortSignal.timeout(145_000) });
             const body = await response.json();
             result = { ok: response.ok && body.protocol === 1, prepared: response.ok && body.prepared === true,
+                providerDrained: response.ok && body.protocol === 1 && body.providerDrained === true,
                 refreshAfterSeconds: Number.isInteger(body.refreshAfterSeconds) ? Math.max(30, Math.min(300, body.refreshAfterSeconds)) : 60,
                 // Avoid repeating private identifiers or upstream error text.
                 reason: response.ok && body.prepared === true ? 'prefix-ready' : response.ok
@@ -49,17 +50,49 @@ export async function runStartupCycle({ targets, endpoint, token, fetchImpl = fe
     return true;
 }
 
+export async function runGlobalStartupCycle({ endpoint, token, fetchImpl=fetch, stopping=()=>false, onResult=()=>{} }) {
+    const url=new URL(endpoint);
+    if(!['http:','https:'].includes(url.protocol) || !url.pathname.endsWith('/startup-cache/prepare')
+        || url.username || url.password || url.search || url.hash || !token)throw Error('Invalid startup worker configuration');
+    const queue=new URL(url);queue.pathname=queue.pathname.replace(/prepare$/,'queue');
+    const call=async body=>{
+        const r=await fetchImpl(queue,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},
+            body:JSON.stringify(body),signal:AbortSignal.timeout(15_000)});
+        const out=await r.json();if(!r.ok || out.protocol!==1)throw Error('Queue unconfirmed');return out;
+    };
+    if(stopping())return true;
+    try {
+        const claimed=await call({action:'claim'});
+        if(claimed.enabled!==true || !claimed.job)return true;
+        const job=claimed.job;
+        if(!uuid.test(job.leaseId))throw Error('Invalid queue lease');
+        const targets=startupTargets([job.target]);let result;
+        // A claim performs no supplier I/O. If shutting down, let it expire.
+        if(stopping())return true;
+        const ok=await runStartupCycle({targets,endpoint,token,fetchImpl,onResult:(_i,r)=>{result=r;onResult(0,r);}});
+        if(!ok || result.providerDrained!==true)return false;
+        const ack=await call({action:'ack',leaseId:job.leaseId,prepared:result.prepared,
+            providerDrained:true,retrySeconds:result.refreshAfterSeconds || 60});
+        return ack.acknowledged===true;
+    }catch(_){onResult(0,{ok:false,prepared:false,providerDrained:false,reason:'transport-unconfirmed'});return false;}
+}
+
 async function main() {
     const manifest = process.env.NORVA_STARTUP_CACHE_TARGETS_FILE;
-    if (!manifest) throw Error('Startup target manifest is required');
+    const globalQueue=process.env.NORVA_STARTUP_CACHE_GLOBAL_QUEUE_ENABLED==='true';
+    if (!manifest && !globalQueue) throw Error('Startup target manifest is required');
     const next = new Map();
     let stopping = false;
     const pause = new AbortController();
     const stop = () => { stopping = true; pause.abort(); };
     process.once('SIGTERM', stop); process.once('SIGINT', stop);
     do {
-        const targets = startupTargets(JSON.parse(await fs.readFile(manifest, 'utf8')));
-        const ok = await runStartupCycle({ targets, endpoint: process.env.NORVA_STARTUP_CACHE_ENDPOINT,
+        const targets = globalQueue?null:startupTargets(JSON.parse(await fs.readFile(manifest, 'utf8')));
+        const common={endpoint:process.env.NORVA_STARTUP_CACHE_ENDPOINT,token:process.env.NORVA_BACKFILL_TOKEN};
+        let attempted=false;
+        const ok = globalQueue?await runGlobalStartupCycle({...common,stopping:()=>stopping,
+            onResult(index,result){attempted=true;process.stdout.write(JSON.stringify({protocol:1,targetOrdinal:index,...result})+'\n');}})
+            :await runStartupCycle({ targets, endpoint: process.env.NORVA_STARTUP_CACHE_ENDPOINT,
             token: process.env.NORVA_BACKFILL_TOKEN, eligible: index => !stopping && (next.get(JSON.stringify(targets[index])) || 0) <= Date.now(),
             onResult(index, result) {
                 const key = JSON.stringify(targets[index]);
@@ -69,7 +102,7 @@ async function main() {
         if (process.argv.includes('--once') || stopping) break;
         // Graceful stop waits for the dispatched server attempt's drain result;
         // it cancels only the idle pause, never abandons an in-flight acquisition.
-        await sleep(ok ? 60_000 : 180_000, null, { signal: pause.signal }).catch(error => {
+        await sleep(ok ? globalQueue && attempted ? 1000 : 60_000 : 180_000, null, { signal: pause.signal }).catch(error => {
             if (!stopping) throw error;
         });
     } while (!stopping);

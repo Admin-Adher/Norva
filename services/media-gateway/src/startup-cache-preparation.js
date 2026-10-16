@@ -60,7 +60,8 @@ class StartupCachePreparation {
                 if (job.signal.aborted) throw Error('STARTUP_PREPARATION_CANCELLED');
             };
             await job.assertAuthorized();
-            const remaining = this.remainingSeconds(job.body);
+            const remaining = await this.remainingSeconds(job.body,job.signal);
+            if (job.signal.aborted) throw Error('STARTUP_PREPARATION_CANCELLED');
             if (remaining > 120) {
                 job.preexisting = true;
             } else {
@@ -98,8 +99,11 @@ class StartupCachePreparation {
             if (drained) this.jobs.delete(job);
         }
         if (prepared) this.stats.prepared++;
+        let refreshAfterSeconds=60;
+        if(prepared)try { refreshAfterSeconds=Math.max(30,Math.min(300,
+            (await this.remainingSeconds(job.body,job.signal))-120)); }catch(_){}
         return { protocol: 1, prepared, seconds: prepared ? 60 : 0, providerDrained: drained,
-            refreshAfterSeconds: prepared ? Math.max(30, Math.min(300, this.remainingSeconds(job.body) - 120)) : 60,
+            refreshAfterSeconds,
             reason: prepared ? 'prefix-ready' : job.signal.aborted ? 'cancelled' : 'not-prepared' };
     }
     async preempt(predicate) {

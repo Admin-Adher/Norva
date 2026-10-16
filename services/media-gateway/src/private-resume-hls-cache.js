@@ -1,6 +1,6 @@
 'use strict';
 const crypto = require('node:crypto');
-const { sampleProof, samplesMatch, RECENT_TTL_MS, captureInputWindows,
+const { sampleProof, samplesMatch, RECENT_TTL_MS, captureInputWindows, planInputWindows,
     RECENT_INPUT_MAX_BYTES, RECENT_MULTI_INPUT_MAX_BYTES } = require('./recent-resume-samples');
 const { strongResumeIdentity } = require('./private-resume-binding');
 const { captureSubtitleWindow } = require('./private-resume-subtitles');
@@ -99,27 +99,72 @@ class PrivateResumeHlsCache {
         entry.inputWindows = [];
     }
     prune() {
-        for (const [key, entry] of this.entries) if (!entry.leases && entry.expiresAt <= this.now()) this.drop(key, entry);
+        for (const [key, entry] of this.entries) if (!entry.leases && (entry.retired || entry.expiresAt <= this.now())) this.drop(key, entry);
+    }
+    retire(binding) {
+        this.epoch++;
+        const key = binding && keyFor(binding), entry = key && this.entries.get(key);
+        if (!entry || entry.capturePurpose === 'startup') return false;
+        // An active viewer may finish consuming its local snapshot. Retirement
+        // denies new leases without revoking the current playback access.
+        entry.retired = true;
+        if (!entry.leases) this.drop(key, entry);
+        return true;
     }
     revokeOwner(ownerKey) {
         this.epoch++;
+        this.ownerRevocationEpochs ||= new Map();this.ownerRevocationFloor ||= 0;
+        if(!this.ownerRevocationEpochs.has(ownerKey) && this.ownerRevocationEpochs.size>=8192) {
+            this.ownerRevocationEpochs.clear();this.ownerRevocationFloor++;
+        }
+        this.ownerRevocationEpochs.set(ownerKey,(this.ownerRevocationEpochs.get(ownerKey) || 0)+1);
         for (const [key, entry] of this.entries) if (entry.binding.ownerKey === ownerKey) {
             this.drop(key, entry); this.stats.invalidations++;
         }
+    }
+    ownerRevocationStamp(ownerKey) {
+        return `${this.ownerRevocationFloor || 0}:${this.ownerRevocationEpochs?.get(ownerKey) || 0}`;
     }
     candidate(binding, position) {
         this.prune();
         if (!binding || !Number.isFinite(position) || position < 0) return null;
         const entry = this.entries.get(keyFor(binding));
-        return !entry?.inputOnly && entry?.live && entry.expiresAt > this.now() && position >= entry.start
+        return !entry?.inputOnly && !entry?.retired && entry?.live && entry.expiresAt > this.now() && position >= entry.start
             && position < entry.end && (entry.ended || entry.end - position >= this.minimumAheadSeconds)
             ? entry : null;
     }
     hasCandidate(binding, position) { return Boolean(this.candidate(binding, position)); }
+    async restoreStartup(binding, load) {
+        return this.restoreWindow(binding,0,load,'startup');
+    }
+    async restoreWindow(binding, position, load, purpose = 'resume', inputOnly = false) {
+        if (!['resume','startup'].includes(purpose) || !binding || !Number.isFinite(position) || position<0) return false;
+        const candidate=()=>inputOnly ? this.inputCandidate(binding) : this.candidate(binding,position);
+        if (candidate()) return true;
+        const epoch=this.epoch, reservation=2*this.perFileBytes;
+        this.prune();
+        while (this.entries.size>=this.maxEntries || this.bytes+this.reservedBytes+reservation>this.maxBytes) {
+            const victim=[...this.entries].find(([,e])=>!e.leases && (purpose==='resume' || e.capturePurpose==='startup'));
+            if (!victim) return false;
+            this.drop(...victim);this.stats.evictions++;
+        }
+        this.reservedBytes+=reservation;
+        try {
+            const entry=await load();
+            if (!entry || epoch!==this.epoch || keyFor(entry.binding)!==keyFor(binding)
+                || entry.capturePurpose!==purpose || entry.retired || entry.bytes>this.perFileBytes || entry.expiresAt<=this.now()
+                || (inputOnly ? !entry.inputOnly || !['native-mp4-input-v1','native-file-input-v1'].includes(entry.format)
+                    : entry.inputOnly || position<entry.start || position>=entry.end || (!entry.ended && entry.end-position<this.minimumAheadSeconds))
+                || this.entries.size>=this.maxEntries
+                || this.entries.has(keyFor(binding))) return Boolean(candidate());
+            this.entries.set(keyFor(binding),entry);this.bytes+=entry.bytes;
+            return Boolean(candidate());
+        } finally {this.reservedBytes-=reservation;}
+    }
     inputCandidate(binding) {
         this.prune();
         const entry = binding && this.entries.get(keyFor(binding));
-        return entry?.inputOnly && entry.live && entry.expiresAt > this.now() ? entry : null;
+        return entry?.inputOnly && !entry.retired && entry.live && entry.expiresAt > this.now() ? entry : null;
     }
     inputRevalidationPlan(binding) {
         const entry = this.inputCandidate(binding), proof = entry?.recentProof;
@@ -142,7 +187,7 @@ class PrivateResumeHlsCache {
             && entry.recentProof.target !== observed?.effectiveUrlIdentitySha256
             && recentResumeTargetEligible({ target: entry.recentProof.target, targetParts: entry.targetParts,
                 allowDeliveryPathRenewal: true }, observed);
-        const matches = entry.recentProof ? this.recentRevalidation && samplesMatch(entry.recentProof,
+        const matches = entry.recentProof ? (!entry.identity || identity===entry.identity) && this.recentRevalidation && samplesMatch(entry.recentProof,
             observed?.samples, observed?.fileSizeBytes, observed?.effectiveUrlIdentitySha256, { allowPathRenewal: pathRenewal === true })
             : identity && identity === entry.identity;
         if (entry.recentProof) {
@@ -157,6 +202,10 @@ class PrivateResumeHlsCache {
         }
         if (!matches) {
             this.drop(keyFor(binding), entry); this.stats.invalidations++; this.stats.misses++; return null;
+        }
+        if (entry.archived && entry.identity) {
+            entry.expiresAt = Math.min(entry.retainedUntil, this.now()+this.ttlMs);
+            entry.archived = false;
         }
         let released = false; entry.leases++; this.stats.hits++;
         if (entry.inputOnly) this.stats.inputHits++;
@@ -183,7 +232,10 @@ class PrivateResumeHlsCache {
             release: () => { if (!released) { released = true; entry.leases--; this.prune(); } },
         });
     }
-    captureInput({ binding, observed, inputWindows } = {}) {
+    captureInput({ binding, observed, inputWindows, nativeResume = null } = {}) {
+        if (nativeResume && ((nativeResume.format!==undefined && !['native-mp4-input-v1','native-file-input-v1'].includes(nativeResume.format)) || !Number.isFinite(nativeResume.position) || nativeResume.position<=0
+            || !Number.isFinite(nativeResume.duration) || nativeResume.duration<=0 || nativeResume.duration>86400
+            || nativeResume.position>=nativeResume.duration*0.9)) return this.rejectCapture('native-resume-ending-or-unknown');
         if (!this.recentRevalidation || !binding || observed?.fileSizeBytes !== binding.fileSizeBytes)
             return this.rejectCapture('input-ineligible');
         const recentProof = sampleProof(observed.samples, observed.fileSizeBytes, observed.effectiveUrlIdentitySha256);
@@ -193,7 +245,12 @@ class PrivateResumeHlsCache {
         if (prior?.leases || (prior && !prior.inputOnly)) return this.rejectCapture('input-entry-in-use');
         // Shares the HLS cache's hard bound. No second cache or extra global
         // memory allowance. Reserve before detaching the bounded input bytes.
-        const reservation = 2 * limit;
+        // Reserve for the exact bounded, overlap-free selection before copying
+        // it. Reserving twice the configured maximum needlessly rejects B when
+        // A still exists, even if the received window is much smaller.
+        const selection = planInputWindows(inputWindows,binding.fileSizeBytes,limit);
+        const reservation = 2 * selection.reduce((n,w)=>n+w.length,0);
+        if (!reservation) return this.rejectCapture('input-header-unavailable');
         while (this.entries.size - (prior ? 1 : 0) >= this.maxEntries
             || this.bytes + this.reservedBytes + reservation > this.maxBytes) {
             const victim = [...this.entries].find(([, e]) => !e.leases && e !== prior);
@@ -207,9 +264,13 @@ class PrivateResumeHlsCache {
                 return this.rejectCapture('input-header-unavailable');
             const bytes = windows.reduce((n,w) => n + w.payload.length, 0);
             if (prior) this.drop(key, prior);
+            const identity=nativeResume ? strongResumeIdentity(observed,binding.fileSizeBytes) : null;
             this.entries.set(key, { binding, recentProof, targetParts: observed.targetParts, deliveryTarget: observed.deliveryTarget, inputOnly: true, inputWindows: windows,
                 assets: new Map(), subtitlePlaylists: new Map(), bytes, leases: 0, live: true,
-                expiresAt: this.now() + Math.min(this.ttlMs, RECENT_TTL_MS) });
+                ...(nativeResume ? {format:nativeResume.format || 'native-mp4-input-v1',capturePurpose:'resume',createdAt:this.now(),
+                    resumePosition:nativeResume.position,durationSeconds:nativeResume.duration,
+                    start:nativeResume.position,end:nativeResume.position,ended:false,segments:[],identity} : {}),
+                expiresAt: this.now() + (identity ? this.ttlMs : Math.min(this.ttlMs, RECENT_TTL_MS)) });
             this.bytes += bytes; this.stats.inputStores++;
             return true;
         } finally { this.reservedBytes -= reservation; }
@@ -251,15 +312,19 @@ class PrivateResumeHlsCache {
         if (!ended && end - position < (startup ? 60 : this.minimumAheadSeconds)) return this.rejectCapture('insufficient-ahead');
         this.prune(); const key = keyFor(binding), prior = this.entries.get(key);
         if (prior?.leases) return this.rejectCapture('active-lease');
-        // Reserve the entire per-file budget before asynchronous reads. Pending
-        // captures and leased windows count towards the same hard memory bound.
-        const inputBudget = recentProof && Array.isArray(inputWindows) ? Math.min(RECENT_INPUT_MAX_BYTES,
-            inputWindows.slice(0,512).reduce((sum,w) => sum + (Buffer.isBuffer(w?.payload) ? w.payload.length : 0), 0)) : 0;
-        const reservation = 2 * (this.perFileBytes + inputBudget); // read buffer + immutable copy
+        // Segments, subtitles and retained source intervals form one snapshot:
+        // its hydrated form must fit the same per-file limit. Plan input before
+        // copying, and reserve that limit only once (read + immutable copy).
+        const inputSelection = recentProof ? planInputWindows(inputWindows, binding.fileSizeBytes, RECENT_INPUT_MAX_BYTES) : [];
+        const inputBudget = inputSelection.reduce((sum,w) => sum+w.length, 0);
+        if (inputBudget >= this.perFileBytes) return this.rejectCapture('reservation-budget');
+        const mediaBudget = this.perFileBytes - inputBudget;
+        const reservation = 2 * this.perFileBytes;
         while (this.entries.size - (prior ? 1 : 0) >= this.maxEntries || this.bytes + this.reservedBytes + reservation > this.maxBytes) {
             // Background prefixes must not evict a viewer's recent resume.
-            if (startup) return this.rejectCapture('startup-reservation-budget');
-            const victim = [...this.entries].find(([, entry]) => !entry.leases && entry !== prior);
+            const victim = [...this.entries].find(([, entry]) => !entry.leases && entry !== prior
+                && (!startup || entry.capturePurpose==='startup'));
+            if (startup && !victim) return this.rejectCapture('startup-reservation-budget');
             if (!victim) return this.rejectCapture('reservation-budget');
             this.drop(...victim); this.stats.evictions++;
         }
@@ -268,9 +333,9 @@ class PrivateResumeHlsCache {
         try {
             const retainedInput = inputBudget ? captureInputWindows(inputWindows, binding.fileSizeBytes, inputBudget) : [];
             for (const [i, segment] of selected.entries()) {
-                const payload = await readAsset(segment.name, this.perFileBytes - bytes);
+                const payload = await readAsset(segment.name, mediaBudget - bytes);
                 if (epoch !== this.epoch || !Buffer.isBuffer(payload) || !payload.length
-                    || payload.length > this.perFileBytes - bytes) return this.rejectCapture('asset-unavailable-or-budget');
+                    || payload.length > mediaBudget - bytes) return this.rejectCapture('asset-unavailable-or-budget');
                 const name = `resume-${i}.ts`;
                 // Detached immutable snapshot. A new FFmpeg process may delete
                 // or replace its temporary files without changing this cache.
@@ -279,17 +344,19 @@ class PrivateResumeHlsCache {
                 segments.push({ name, duration: segment.duration });
             }
             const subtitles = await captureSubtitleWindow({ renditions: subtitleRenditions,
-                videoSegments: selected, readAsset, sourcePesClock, maxBytes: Math.min(4 * 1024 * 1024, this.perFileBytes - bytes) });
+                videoSegments: selected, readAsset, sourcePesClock, maxBytes: Math.min(4 * 1024 * 1024, mediaBudget - bytes) });
             if (!subtitles || epoch !== this.epoch) return this.rejectCapture('subtitle-coverage-or-revoked');
             for (const [name, payload] of subtitles.assets) assets.set(name, payload);
             bytes += subtitles.bytes;
             bytes += retainedInput.reduce((sum,w) => sum+w.payload.length, 0);
             if (!isCurrent() || this.entries.get(key) !== prior || this.entries.size - (prior ? 1 : 0) >= this.maxEntries) return this.rejectCapture('concurrent-capture');
             if (prior) this.drop(key, prior);
+            const capturedAt=this.now();
             this.entries.set(key, { binding, identity, recentProof, targetParts: observed.targetParts, deliveryTarget: observed.deliveryTarget, start, end, ended, segments, assets, bytes, bandwidth,
+                capturePurpose, createdAt:capturedAt,
                 inputWindows: retainedInput,
                 subtitlePlaylists: subtitles.playlists,
-                expiresAt: this.now() + (recentProof ? Math.min(this.ttlMs, RECENT_TTL_MS) : this.ttlMs), leases: 0, live: true });
+                expiresAt: capturedAt + (recentProof ? Math.min(this.ttlMs, RECENT_TTL_MS) : this.ttlMs), leases: 0, live: true });
             this.bytes += bytes; this.stats.stores++;
             if (recentProof) this.stats.sampledStores++;
             return true;

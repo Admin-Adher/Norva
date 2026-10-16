@@ -32,16 +32,11 @@ public class LiveGuideAuditInstrumentedTest {
         try(FileOutputStream out=new FileOutputStream(new File(i.getTargetContext().getExternalFilesDir(null),name+".png"))){b.compress(Bitmap.CompressFormat.PNG,100,out);} finally {b.recycle();}
     }
     private void tapSearch(Instrumentation i, WebView v) throws Exception {
+        android.app.UiAutomation automation = TouchTestSupport.prepare(i, v);
         org.json.JSONArray r=new org.json.JSONArray(js(i,v,"(()=>{const r=document.querySelector('.live-guide-search').getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2,devicePixelRatio]})()"));
         int[] offset=new int[2];i.runOnMainSync(()->v.getLocationOnScreen(offset));
         float x=(float)(r.getDouble(0)*r.getDouble(2)+offset[0]),y=(float)(r.getDouble(1)*r.getDouble(2)+offset[1]);
-        long down=android.os.SystemClock.uptimeMillis();
-        for(int action:new int[]{0,1}) {
-            android.view.MotionEvent e=android.view.MotionEvent.obtain(down,android.os.SystemClock.uptimeMillis(),action,x,y,0);
-            e.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
-            try {assertTrue(i.getUiAutomation().injectInputEvent(e,true));}finally{e.recycle();}
-            Thread.sleep(50);
-        }
+        TouchTestSupport.tap(automation, x, y);
     }
     @Test public void attachedGuideNavigationAndPlayRequests() throws Exception {
         Instrumentation i=InstrumentationRegistry.getInstrumentation();

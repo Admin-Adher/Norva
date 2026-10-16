@@ -83,6 +83,17 @@ function createNativeMp4Sessions({ allows, open, now = Date.now, leaseMs = 60_00
             active(sid);
             entry.leaseUntil = Math.min(entry.expiresAt, now() + leaseMs);
         },
+        reportPosition(sid, ownerHash, position) {
+            const entry=entries.get(sid);
+            if (!entry || entry.ownerHash!==ownerHash)throw failure(404,'NATIVE_MP4_SESSION_UNAVAILABLE');
+            active(sid);
+            if(!['native-browser-mp4','native-vod-recovery'].includes(entry.claims.scope) || !Number.isFinite(position) || position<0 || position>=86400)return false;
+            entry.initialRenderedPosition ??= position;
+            entry.renderedPosition=position;
+            // A heartbeat never opens media or acquires a provider connection.
+            entry.resource?.reportPosition?.(position);
+            return true;
+        },
         async resource(entry) {
             active(entry.sid);
             if (!entry.opening) entry.opening = Promise.resolve().then(() => {
@@ -105,10 +116,13 @@ function createNativeMp4Sessions({ allows, open, now = Date.now, leaseMs = 60_00
             return resource.cachedCoverage?.(targetSeconds) || null;
         },
         close,
-        async revoke(ownerHash, sid, global = false) {
+        async revoke(ownerHash, sid, global = false, resumePosition = null) {
             const selected = [...entries.values()].filter(entry => entry.ownerHash === ownerHash
                 && (global || entry.sid === sid));
             const count = selected.filter(entry => !entry.closed).length;
+            if(!global && Number.isFinite(resumePosition))for(const entry of selected) {
+                if(live(entry))this.reportPosition(entry.sid,ownerHash,resumePosition);
+            }
             await Promise.all(selected.map(entry => close(entry, global ? 'owner-revoked' : 'viewer-stop')));
             return count;
         },

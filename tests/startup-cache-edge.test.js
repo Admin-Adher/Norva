@@ -18,9 +18,11 @@ function harness(options = {}) {
     Deno: { env: { get: key => ({ PRIVATE_STARTUP_CACHE_ENABLED: options.disabled ? 'false' : 'true',
       PRIVATE_STARTUP_CACHE_OWNER_HASHES: options.ownerHashes ?? owner,
       PRIVATE_STARTUP_CACHE_ALL_AUTHENTICATED_OWNERS: options.globalScope ?? 'false',
+      PRIVATE_STARTUP_CACHE_GLOBAL_QUEUE_ENABLED: options.queueEnabled ?? 'false',
       NORVA_NATIVE_MP4_GATEWAY_ENABLED: options.nativeDisabled ? 'false' : 'true',
       NORVA_BACKFILL_TOKEN: 'operator-token' })[key] } },
     PLAYBACK_SESSION_UUID_PATTERN: /^[a-f0-9-]{36}$/, recordOrEmpty: value => value || {}, stringOr: (value, fallback) => typeof value === 'string' ? value : fallback,
+    exactJsonKeys:(value,keys)=>Object.keys(value).sort().join(',')===[...keys].sort().join(','),
     sha256Hex: async value => value === userId ? owner : 'hash:' + value,
     resolveSourceIdentity: async () => ({ key: 'identity' }), assertProviderCircuitClosed: async () => {},
     resolvePlaybackTarget: async (source, type, item, user, _db, hints, offline) => {
@@ -71,6 +73,30 @@ function harness(options = {}) {
     body: JSON.stringify({ userId, sourceId, itemType: 'movie', itemId: '1' }) });
   return { context, events, target, db, request };
 }
+
+test('global queue requires service authentication and both global enrollment flags before database access',async()=>{
+ const request=body=>new Request('https://edge.invalid/startup-cache/queue',{method:'POST',
+  headers:{Authorization:'Bearer operator-token'},body:JSON.stringify(body)});
+ for(const options of [{queueEnabled:'true'},{globalScope:'true'},{queueEnabled:'true',globalScope:'true',disabled:true}]){
+  const h=harness(options);const out=await h.context.runStartupCacheQueue(request({action:'claim'}),h.db);
+  assert.equal(out.enabled,false);assert.deepEqual(h.events,[]);
+ }
+ const h=harness({queueEnabled:'true',globalScope:'true'});let calls=0;
+ const db={rpc:async(name,args)=>{calls++;assert.equal(name,'claim_startup_prefix_queue');assert.equal(args,undefined);return {data:null};}};
+ assert.equal((await h.context.runStartupCacheQueue(request({action:'claim'}),db)).job,null);assert.equal(calls,1);
+ await assert.rejects(h.context.runStartupCacheQueue(new Request('https://edge.invalid',{method:'POST',body:'{}'}),db),e=>e.status===401);
+ await assert.rejects(h.context.runStartupCacheQueue(request({action:'claim',userId}),db),e=>e.status===400);assert.equal(calls,1);
+});
+
+test('global queue acknowledgment is lease-scoped and rejects forged coordinates and invalid bounds',async()=>{
+ const h=harness({queueEnabled:'true',globalScope:'true'}),body={action:'ack',leaseId:userId,prepared:true,providerDrained:true,retrySeconds:300};let calls=0;
+ const request=b=>new Request('https://edge.invalid/startup-cache/queue',{method:'POST',headers:{Authorization:'Bearer operator-token'},body:JSON.stringify(b)});
+ const db={rpc:async(name,args)=>{calls++;assert.equal(name,'ack_startup_prefix_queue');assert.equal(args.p_lease_id,userId);return {data:true};}};
+ assert.equal((await h.context.runStartupCacheQueue(request(body),db)).acknowledged,true);
+ for(const bad of [{...body,userId},{...body,leaseId:'bad'},{...body,retrySeconds:999999},{...body,providerDrained:'true'}])
+  await assert.rejects(h.context.runStartupCacheQueue(request(bad),db),e=>e.status===400);
+ assert.equal(calls,1);
+});
 test('global startup enrollment still requires the explicit flag, valid authenticated owner and all admission guards', async () => {
   for (const options of [{ ownerHashes: '' }, { ownerHashes: 'invalid' }, { ownerHashes: 'b'.repeat(64) },
     { ownerHashes: '', globalScope: 'TRUE' }, { globalScope: 'true', disabled: true }]) {

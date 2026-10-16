@@ -39,6 +39,9 @@ public final class TsResumeInstrumentedTest {
    ExoPlayer player=(ExoPlayer)field.get(activity);assertNotNull(player);
    verify(ins,player,origin.url(),17000,true);
    verify(ins,player,origin.url(),5000,false);
+   final PlayerActivity opened=(PlayerActivity)activity;
+   ins.runOnMainSync(()->assertTrue("The paused decoded TV clock must remain usable for exact close",
+    Math.abs(opened.nativeResumePositionMs()-5000)<1000));
    ins.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
    long deadline=SystemClock.elapsedRealtime()+3000;
    while(!activity.isFinishing()&&SystemClock.elapsedRealtime()<deadline)SystemClock.sleep(50);
